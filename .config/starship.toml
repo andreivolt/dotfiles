@@ -1,0 +1,91 @@
+# Get editor completions based on the config schema
+"$schema" = 'https://starship.rs/config-schema.json'# move the rest of the prompt to the right
+
+format = """╭─ $all╰─ $character$jobs
+"""
+right_format = "$ruby$docker_context$aws "
+
+continuation_prompt = "> "
+
+# Inserts a blank line between shell prompts
+add_newline = true
+
+[character]
+success_symbol = "[➤](bold green)"
+error_symbol = "[✗](bold red)"
+format = "$symbol "
+
+[java]
+disabled = true
+
+[python]
+disabled = true
+
+[perl]
+disabled = true
+
+[git_branch]
+style = "#c1993b"
+format = "[\\[$branch(:$remote_branch)\\]]($style)"
+
+[aws]
+format = '[$symbol($profile)(\[$duration\])]($style)'
+style = 'yellow'
+symbol = "☁️"
+
+[gcloud]
+format = '[ $symbol$account(@$domain)(\($region\))\[$project\]]($style)'
+style = '245'
+disabled = true
+
+[ruby]
+format = "[$symbol($version) ]($style)"
+style = 'red'
+symbol = '💎'
+
+[nix_shell]
+format = '[$symbol$state(\($name\)) ]($style)'
+style = 'purple'
+
+[nodejs]
+format = "[ $symbol($version) ]($style) "
+symbol = " "
+disabled = true
+
+[username]
+disabled = true
+
+[hostname]
+style = 'purple'
+format = "[$ssh_symbol$hostname]($style):"
+
+[cmd_duration]
+disabled = true
+
+[directory]
+style = "blue"
+format = "[$path]($style)[$read_only]($read_only_style) "
+truncate_to_repo = false
+truncation_length = 0
+
+# [env_var.GIT_DIR]
+# default = ""
+# format = "[  $env_value ](yellow)"
+
+[env_var.NIX_SHELL_PACKAGES]
+default = ""
+format = "[( \\[$env_value\\])](purple)"
+
+[git_status]
+# format = '([$all_status$ahead_behind]($style))[｜](fg:242 bg:13)'
+format = ''
+
+[docker_context]
+format = "[$symbol$context]($style) "
+symbol = "🐳"
+
+[kubernetes]
+disabled = false
+
+[package]
+disabled = true
