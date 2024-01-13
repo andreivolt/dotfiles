@@ -1,0 +1,24 @@
+alias ".."="cd .."
+alias da="du -sch"
+alias diff="colordiff"
+alias gc='git clone --depth 1'
+alias git="GPG_TTY=$(tty) git"
+alias gp='git push'
+alias gpf='git push -f'
+alias gr='cd $(git root)'
+alias grep="grep --color"
+alias gsp="git stash && git pull"
+alias gspp="gsp && git stash pop"
+alias info="info --vi-keys"
+alias j="jobs"
+alias l="ls -1"
+alias la="lsd --all"
+alias ll="ls -l"
+alias lla="ll --all"
+alias ls="lsd"
+alias lsd="lsd --classify"
+alias rm="rm --verbose"
+alias slugify="iconv -t ascii//TRANSLIT | sed -E 's/[~\^]+//g' | sed -E 's/[^a-zA-Z0-9]+/-/g' | sed -E 's/^-+\|-+$//g' | tr A-Z a-z"
+alias vi="nvim"
+alias vim="nvim"
+alias yt-dlp="yt-dlp --cookies-from-browser firefox"
