@@ -22,3 +22,4 @@ alias slugify="iconv -t ascii//TRANSLIT | sed -E 's/[~\^]+//g' | sed -E 's/[^a-z
 alias vi="nvim"
 alias vim="nvim"
 alias yt-dlp="yt-dlp --cookies-from-browser firefox"
+alias gron="fastgron"

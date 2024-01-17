@@ -50,20 +50,20 @@ export PATH=~/drive/bin:$PATH
 
 # is-macos && source ~/.zsh.d/macos.zsh
 # source ~/.zsh.d/grc.sh
-# source ~/.zsh.d/homebrew-completions.zsh # TODO
 # source ~/.zsh.d/notify_when_done.zsh
 # source ~/.zsh.d/npm.zsh
 # source ~/.zsh.d/nvm.zsh
+# source ~/.zsh.d/python.zsh
 # source ~/.zsh.d/ruby.zsh
 [ $TERM = xterm-kitty ] && source ~/.zsh.d/kitty.zsh
 is-macos && source ~/.zsh.d/homebrew-command-not-found.sh
 is-macos && source ~/drive/nixos-config/modules/zsh/vi.zsh
 source ~/.zsh.d/aliases.sh
 source ~/.zsh.d/autopair.zsh
+source ~/.zsh.d/brotab.zsh
 source ~/.zsh.d/completion.zsh
 source ~/.zsh.d/direnv.zsh
 source ~/.zsh.d/fzf.zsh
-source ~/.zsh.d/brotab.zsh
 source ~/.zsh.d/global-aliases.zsh
 source ~/.zsh.d/go.zsh
 source ~/.zsh.d/gpg.zsh
@@ -71,12 +71,18 @@ source ~/.zsh.d/keephack.zsh
 source ~/.zsh.d/less-colors.sh
 source ~/.zsh.d/libiconv.sh
 source ~/.zsh.d/ls-colors.sh
-# source ~/.zsh.d/python.zsh
 source ~/.zsh.d/rust.zsh
 source ~/.zsh.d/tmux.zsh
 
+
+# homebrew completions
+# if type brew &>/dev/null; then
+#   FPATH=/opt/homebrew/share/zsh-completions:$FPATH
+# fi
+
 # prompt
-which starship >/dev/null && eval "$(starship init zsh)" || source ~/.zsh.d/prompt.zsh
+which starship >/dev/null && eval "$(starship init zsh)"
+# source ~/.zsh.d/prompt.zsh
 
 which vi >/dev/null && export EDITOR='vi'
 which vim >/dev/null && export EDITOR='vim'

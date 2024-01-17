@@ -29,16 +29,18 @@ style = "#c1993b"
 format = "[\\[$branch(:$remote_branch)\\]]($style)"
 
 [aws]
+disabled = true
 format = '[$symbol($profile)(\[$duration\])]($style)'
 style = 'yellow'
 symbol = "☁️"
 
 [gcloud]
+disabled = true
 format = '[ $symbol$account(@$domain)(\($region\))\[$project\]]($style)'
 style = '245'
-disabled = true
 
 [ruby]
+disabled = true
 format = "[$symbol($version) ]($style)"
 style = 'red'
 symbol = '💎'
@@ -48,9 +50,9 @@ format = '[$symbol$state(\($name\)) ]($style)'
 style = 'purple'
 
 [nodejs]
+disabled = true
 format = "[ $symbol($version) ]($style) "
 symbol = " "
-disabled = true
 
 [username]
 disabled = true

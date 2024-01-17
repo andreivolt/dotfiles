@@ -7,6 +7,6 @@ path+="$(ruby -r rubygems -e 'puts Gem.user_dir')/bin"
 
 # # chruby
 # which chruby >/dev/null && {
-#   source $(brew --prefix chruby)/share/chruby/chruby.sh
+#   source /opt/homebrew/chruby/share/chruby/chruby.sh
 #   source /usr/local/opt/chruby/share/chruby/auto.sh
 # }
