@@ -81,16 +81,6 @@ map('v', '<leader>bp', ':bprev')
 -- reload config
 vim.api.nvim_create_user_command('ConfReload', 'so $MYVIMRC', { nargs = 0 })
 
--- " command mode movement
--- cnoremap <C-a> <Home>
--- cnoremap <C-e> <End>
--- cnoremap <C-p> <Up>
--- cnoremap <C-n> <Down>
--- cnoremap <C-b> <Left>
--- cnoremap <C-f> <Right>
--- cnoremap <M-b> <S-Left>
--- cnoremap <M-f> <S-Right>
-
 -- performance
 vim.g.loaded_python_provider = 0
 vim.g.loaded_python3_provider = 0
@@ -970,31 +960,6 @@ require 'packer'.startup({
         -- " :Files
         -- command! -nargs=* Files call FZF()
 
-        -- function! Foo(args) abort
-        --		 let l:tempname = tempname()
-        --		 let l:pattern = '.'
-        --		 if len(a:args) > 0
-        --		 let l:pattern = a:args
-        --		 endif
-        --		 " rg --vimgrep <pattern> | fzf -m > file
-        --		 execute 'silent !rg --vimgrep ''' . l:pattern . ''' | fzf -m > ' . fnameescape(l:tempname)
-        --		 try
-        --		 execute 'cfile ' . l:tempname
-        --		 redraw!
-        --		 finally
-        --		 call delete(l:tempname)
-        --		 endtry
-        -- endfunction
-
-        -- " :Rg [pattern]
-        -- command! -nargs=* Foo call Foo(<q-args>)
-
-        -- " \fs
-        -- nnoremap <leader>fs :Rg<cr>
-
-        -- allow gf to open non-existent files
-        -- map gf :edit <cfile><cr>
-
         -- nnoremap <leader>q <cmd>Sayonara!<cr>
 
         require('telescope').load_extension('fzf')
@@ -1054,7 +1019,6 @@ require 'packer'.startup({
     end,
 
     config = {
-      max_jobs = 10, -- fix updates hanging with too many plugins
       autoremove = true
     }
 })
@@ -1123,7 +1087,6 @@ vim.api.nvim_create_autocmd('ColorScheme', {
 
         vim.cmd('hi Normal ctermbg=NONE guibg=NONE')
 
-        vim.cmd('hi LineNr ctermbg=NONE guibg=NONE')
         vim.cmd('hi SignColumn ctermbg=NONE guibg=NONE')
         vim.cmd('hi FoldColumn ctermbg=NONE guibg=NONE')
 
@@ -1296,9 +1259,18 @@ vim.api.nvim_create_autocmd('BufReadPost', {
 vim.api.nvim_create_user_command('PrettyPrintJSON', '%!jq', {})
 vim.api.nvim_create_user_command('PrettyPrintXML', '!tidy -mi -xml -wrap 0 %', {})
 vim.api.nvim_create_user_command('PrettyPrintHTML', '!tidy -mi -xml -wrap 0 %', {})
+
 vim.api.nvim_create_user_command('CopyFullName', "let @+=expand('%')", {})
 vim.api.nvim_create_user_command('CopyPath', "let @+=expand('%:h')", {})
 vim.api.nvim_create_user_command('CopyFileName', "let @+=expand('%:t')", {})
+
+function CopyPathAndLineNumber()
+  local path = vim.fn.bufname()
+  local line = vim.fn.line(".")
+  local text = string.format("%s:%d", path, line)
+  vim.fn.setreg("+", text)
+end
+vim.api.nvim_create_user_command('CopyPathAndLineNumber', 'lua CopyPathAndLineNumber()', { nargs = 0 })
 
 local keymaps = {
   ["n"] = {
@@ -1323,11 +1295,3 @@ end
 
 -- window splits sizing stabilize text
 vim.o.splitkeep = "screen"
-
-function CopyPathAndLineNumber()
-  local path = vim.fn.bufname()
-  local line = vim.fn.line(".")
-  local text = string.format("%s:%d", path, line)
-  vim.fn.setreg("+", text)
-end
-vim.api.nvim_create_user_command('CopyPathAndLineNumber', 'lua CopyPathAndLineNumber()', { nargs = 0 })

@@ -1,0 +1,58 @@
+[user]
+	name = Andrei Volt
+	email = andrei@avolt.net
+
+[push]
+	default = current
+	autoSetupRemote = true
+
+[alias]
+	ci = commit
+	co = checkout
+	dc = diff --cached
+	di = diff --word-diff=color
+	st = status --short
+	amend = commit --amend --reuse-message=HEAD
+	lb = !git reflog show --pretty=format:'%gs ~ %gd' --date=relative | grep 'checkout:' | grep -oE '[^ ]+ ~ .*' | awk -F~ '!seen[$1]++' | awk -F' ~ HEAD@{' '{printf(\"  \\033[33m%s: \\033[37m %s\\033[0m\\n\", substr($2, 1, length($2)-1), $1)}'
+	conflicts = diff --diff-filter=U --name-only --relative
+
+[core]
+	excludesfile = /Users/avo/.gitignore-global
+	pager = delta
+	; fsmonitor = rs-git-fsmonitor # speed up git status
+	untrackedCache = true # speed up git status
+
+[interactive]
+	diffFilter = delta --color-only
+
+[delta]
+	navigate = true # use n and N to move between diff sections
+	side-by-side = true
+
+[merge]
+	conflictstyle = diff3
+	tool = nvim -d
+
+# [diff]
+# 	colorMoved = default
+# 	external = difft
+
+[init]
+	defaultBranch = main
+
+[rebase]
+	autoStash = true
+
+[branch]
+	autoSetupRebase = remote
+	autoSetupMerge = true
+
+[gc]
+	pruneExpire = never
+	reflogExpire = never
+	autodetach = false
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
