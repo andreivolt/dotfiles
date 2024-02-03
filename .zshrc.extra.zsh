@@ -42,7 +42,7 @@ umask u=rwx,g=x,o=x
 
 export PATH=~/drive/bin:$PATH
 
-autoload -Uz ~/.zsh-defer/zsh-defer
+autoload -Uz ~/.zsh-plugins/defer/zsh-defer
 
 
 # MODULES
@@ -96,14 +96,11 @@ which nvim >/dev/null && export EDITOR='nvim'
 # # better sudo prompt
 # alias sudo="sudo -p '%u->%U, enter password: ' "
 
-# setopt append_history share_history # import new commands from the history file also in other zsh session
 # setopt auto_cd # if a command is issued that can't be executed as a normal command, and the command is the path of a directory, perform the cd command to that directory
 # setopt cshjunkiehistory
 # setopt hash_list_all # whenever a command completion is attempted, make sure the entire command path # is hashed first
-# setopt menucomplete
 # setopt noglobdots # make * not match dotfiles
 # setopt nohup # Don't send SIGHUP to background processes when the shell exits.
-# setopt nonomatch # try to avoid the 'zsh: no matches found...'
 # setopt noshwordsplit # use zsh style word splitting
 # setopt unset # don't error out when unset parameters are used
 setopt auto_pushd # make cd push the old directory onto the directory stack
@@ -128,6 +125,7 @@ setopt hist_ignore_space # don't store commands with leading space
 setopt hist_reduce_blanks # remove multiple blanks
 setopt share_history
 setopt extended_history # history: save timestamp and duration
+# setopt append_history # import new commands from the history file also in other zsh session
 
 # TODO: not on nix
 # # completion: use bash completion
@@ -307,12 +305,9 @@ xlsx_column_names() {
 }
 
 zsh-defer source ~/.zsh-plugins/syntax-highlighting/zsh-syntax-highlighting.zsh
-
 if [[ -n "$TMUX" ]]; then
-  # Function to update tmux window title
   function set-tmux-title() {
     printf "\033kzsh\033\\"
   }
-  # Call the function when the prompt is displayed
   precmd_functions+=(set-tmux-title)
 fi
