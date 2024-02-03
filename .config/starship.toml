@@ -1,18 +1,14 @@
 # Get editor completions based on the config schema
-"$schema" = 'https://starship.rs/config-schema.json'# move the rest of the prompt to the right
+"$schema" = 'https://starship.rs/config-schema.json'
 
-format = """╭─ $all╰─ $character$jobs
-"""
-right_format = "$ruby$docker_context$aws "
-
+format = "╭─ $all╰─ $character$jobs"
 continuation_prompt = "> "
-
 # Inserts a blank line between shell prompts
 add_newline = true
 
 [character]
 success_symbol = "[➤](bold green)"
-error_symbol = "[✗](bold red)"
+error_symbol = "[✖](bold red)"
 format = "$symbol "
 
 [java]
@@ -26,13 +22,10 @@ disabled = true
 
 [git_branch]
 style = "#c1993b"
-format = "[\\[$branch(:$remote_branch)\\]]($style)"
+# format = "[\\[$branch(:$remote_branch)\\]]($style) "
 
 [aws]
 disabled = true
-format = '[$symbol($profile)(\[$duration\])]($style)'
-style = 'yellow'
-symbol = "☁️"
 
 [gcloud]
 disabled = true
@@ -46,12 +39,12 @@ style = 'red'
 symbol = '💎'
 
 [nix_shell]
-format = '[$symbol$state(\($name\)) ]($style)'
+format = '[$symbol$state(\($name\))]($style) '
 style = 'purple'
 
 [nodejs]
 disabled = true
-format = "[ $symbol($version) ]($style) "
+format = "[$symbol($version)]($style) "
 symbol = " "
 
 [username]
@@ -76,7 +69,7 @@ truncation_length = 0
 
 [env_var.NIX_SHELL_PACKAGES]
 default = ""
-format = "[( \\[$env_value\\])](purple)"
+format = "[(\\[$env_value\\])](purple)"
 
 [git_status]
 # format = '([$all_status$ahead_behind]($style))[｜](fg:242 bg:13)'
