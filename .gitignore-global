@@ -4,3 +4,6 @@
 .DS_Store
 
 Session.vim
+
+.nrepl-history
+.rebel_readline_history

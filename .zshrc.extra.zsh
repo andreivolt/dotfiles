@@ -5,6 +5,7 @@
 # TODO strace completion
 # TODO tmux complete words from current pane https://gist.github.com/blueyed/6856354
 # TODO vcs info https://github.com/grml/grml-etc-core/blob/71bdc48d190a5369fff28a97c828db7b1edf10a9/etc/zsh/zshrc#L1964
+#
 
 # is-macos() { [ $(uname -s) = Darwin ] }
 is-macos() {
@@ -27,19 +28,12 @@ add-to-path() {
 
 export PATH=~/.local/bin:$PATH
 
-setopt glob_complete # trigger completion on globbing
-zstyle ':completion:*' menu select # show menu when completing
-zstyle ':completion:*' rehash true # automatically update PATH
 setopt auto_pushd # automatically add directories to the directory stack
 
 # # set terminal title
 # source ${./modules/zsh/terminal-title.zsh}
 
-# case-insensitive completion
-# zstyle ':completion:*' matcher-list ''' 'm:{a-zA-Z}={A-Za-z}' 'r:|[._-]=* r:|=*' 'l:|=* r:|=*'
-# autoload -Uz compinit && compinit
-
-autoload -U colors && colors
+autoload -Uz colors && colors
 
 # standard to request colors
 export COLORTERM=yes
@@ -48,32 +42,43 @@ umask u=rwx,g=x,o=x
 
 export PATH=~/drive/bin:$PATH
 
-# is-macos && source ~/.zsh.d/macos.zsh
-# source ~/.zsh.d/grc.sh
-# source ~/.zsh.d/notify_when_done.zsh
-# source ~/.zsh.d/npm.zsh
-# source ~/.zsh.d/nvm.zsh
-# source ~/.zsh.d/python.zsh
-# source ~/.zsh.d/ruby.zsh
-[ $TERM = xterm-kitty ] && source ~/.zsh.d/kitty.zsh
-is-macos && source ~/.zsh.d/homebrew-command-not-found.sh
-is-macos && source ~/drive/nixos-config/modules/zsh/vi.zsh
-source ~/.zsh.d/aliases.sh
-source ~/.zsh.d/autopair.zsh
-source ~/.zsh.d/brotab.zsh
-source ~/.zsh.d/completion.zsh
-source ~/.zsh.d/direnv.zsh
-source ~/.zsh.d/fzf.zsh
-source ~/.zsh.d/global-aliases.zsh
-source ~/.zsh.d/go.zsh
-source ~/.zsh.d/gpg.zsh
-source ~/.zsh.d/keephack.zsh
-source ~/.zsh.d/less-colors.sh
-source ~/.zsh.d/libiconv.sh
-source ~/.zsh.d/ls-colors.sh
-source ~/.zsh.d/rust.zsh
-source ~/.zsh.d/tmux.zsh
+autoload -Uz ~/.zsh-defer/zsh-defer
 
+
+# MODULES
+# is-macos && zsh-defer source ~/.zsh.d/macos.zsh
+# zsh-defer source ~/.zsh.d/grc.sh
+# zsh-defer source ~/.zsh.d/notify_when_done.zsh
+# zsh-defer source ~/.zsh.d/npm.zsh
+# zsh-defer source ~/.zsh.d/nvm.zsh
+# zsh-defer source ~/.zsh.d/python.zsh
+# zsh-defer source ~/.zsh.d/ruby.zsh
+# zsh-defer source ~/.zsh.d/github.zsh
+[ $TERM = xterm-kitty ] && zsh-defer source ~/.zsh.d/kitty.zsh
+is-macos && source ~/drive/nixos-config/modules/zsh/vi.zsh
+is-macos && zsh-defer source ~/.zsh.d/homebrew-command-not-found.sh
+is-macos && zsh-defer source ~/.zsh.d/mac_libiconv.sh
+zsh-defer source ~/.zsh-plugins/nix-shell/nix-shell.plugin.zsh
+zsh-defer source ~/.zsh-plugins/system-clipboard/zsh-system-clipboard.zsh
+zsh-defer source ~/.zsh.d/aliases.sh
+zsh-defer source ~/.zsh.d/autopair.zsh
+zsh-defer source ~/.zsh.d/brotab.zsh
+zsh-defer source ~/.zsh.d/completion.zsh
+zsh-defer source ~/.zsh.d/delta.zsh
+zsh-defer source ~/.zsh.d/direnv.zsh
+zsh-defer source ~/.zsh.d/fzf.zsh
+zsh-defer source ~/.zsh.d/global-aliases.zsh
+zsh-defer source ~/.zsh.d/go.zsh
+zsh-defer source ~/.zsh.d/gpg.zsh
+zsh-defer source ~/.zsh.d/keephack.zsh
+zsh-defer source ~/.zsh.d/less-colors.sh
+zsh-defer source ~/.zsh.d/ls-colors.sh
+zsh-defer source ~/.zsh.d/rust.zsh
+zsh-defer source ~/.zsh.d/tmux.zsh
+
+zsh-defer source ~/.zsh-plugins/history-substring-search/zsh-history-substring-search.zsh
+bindkey '^[[A' history-substring-search-up
+bindkey '^[[B' history-substring-search-down
 
 # homebrew completions
 # if type brew &>/dev/null; then
@@ -88,8 +93,8 @@ which vi >/dev/null && export EDITOR='vi'
 which vim >/dev/null && export EDITOR='vim'
 which nvim >/dev/null && export EDITOR='nvim'
 
-# better sudo prompt
-alias sudo="sudo -p '%u->%U, enter password: ' "
+# # better sudo prompt
+# alias sudo="sudo -p '%u->%U, enter password: ' "
 
 # setopt append_history share_history # import new commands from the history file also in other zsh session
 # setopt auto_cd # if a command is issued that can't be executed as a normal command, and the command is the path of a directory, perform the cd command to that directory
@@ -105,18 +110,24 @@ setopt auto_pushd # make cd push the old directory onto the directory stack
 setopt chase_links # cd resolve symlinks
 setopt correct # spelling correction
 setopt extended_glob # in order to use #, ~ and ^ for filename generation grep word *~(*.gz|*.bz|*.bz2|*.zip|*.Z) -> searches for word not in compressed files don't forget to quote '^', '~' and '#'!
-setopt extended_history # history: save timestamp and duration
-setopt hist_ignore_all_dups # history: ignore duplicates
-setopt hist_ignore_space # history: don't store commands with leading space
-setopt hist_reduce_blanks # history: remove multiple blanks
 setopt inc_append_history # TODO which
 setopt interactive_comments # allow comments
 setopt magicequalsubst # filename expansion in for e.g. foo=~/bar
 setopt notify # report the status of backgrounds jobs immediately
 setopt numeric_glob_sort # sort filename globs numerically
 
+
+# HISTORY
+HISTSIZE="999999"
+SAVEHIST="999999"
 HISTFILE="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/history" # prevent cloberring shell history when starting a shell with a smaller history size
 mkdir -p ${HISTFILE:h}
+setopt hist_fcntl_lock
+setopt hist_ignore_dups
+setopt hist_ignore_space # don't store commands with leading space
+setopt hist_reduce_blanks # remove multiple blanks
+setopt share_history
+setopt extended_history # history: save timestamp and duration
 
 # TODO: not on nix
 # # completion: use bash completion
@@ -144,12 +155,6 @@ fancy-ctrl-z () {
 }
 zle -N fancy-ctrl-z
 bindkey '^Z' fancy-ctrl-z
-
-# dismiss current input to run another command, then restore
-bindkey '^G' push-line-or-edit
-bindkey -M vicmd '^G' push-line-or-edit
-bindkey -M viins '^G' push-line-or-edit
-bindkey -M vicmd "q" push-line-or-edit
 
 bindkey '^[[1;3C' forward-word
 bindkey '^[[1;3D' backward-word
@@ -195,9 +200,6 @@ export MANWIDTH=100
 # (: ~/.zfunc/(^_*)(.)) 2>|/dev/null && \
 # autoload -U ${fpath[1]}/(^_*)(.:t)
 # autoload -U zcalc zmv zargs
-
-# pdf zathura
-compdef _pdf zathura
 
 # history grep
 hgrep() {
@@ -275,34 +277,6 @@ trim() {
   awk '{$1=$1};1'
 }
 
-has_pending_reviews() $(gh pr list --search 'review-requested:andreivolt' --json url --jq length) -gt 0
-
-review_requested() {
-  gh pr list --search 'review-requested:andreivolt' --json url --jq '.[].url' |
-    xargs open
-}
-
-imgurpaste() {
-  pngpaste - | anypaste -p imgur --copy
-}
-
-automerge() {
-  for i in reviewed-by review-requested; do
-    gh pr list --search $i:@me --json number,isDraft --jq '.[] | select(.isDraft == false).number'
-  done |
-    xargs -I% -n1 gh pr merge % --merge --auto
-}
-
-get-twitter-bearer-token() {
-  TWITTER_BEARER_TOKEN=$(
-    curl --user $(lpass show 'Twitter API' --user):$(lpass show 'Twitter API' --password) \
-      --data grant_type=client_credentials \
-      https://api.twitter.com/oauth2/token | jq -r .access_token
-  )
-
-  echo $TWITTER_BEARER_TOKEN
-}
-
 # # Use lf to switch directories and bind it to ctrl-o TODO
 # lfcd () {
 #     tmp="$(mktemp -uq)"
@@ -316,11 +290,6 @@ get-twitter-bearer-token() {
 # bindkey -s '^o' '^ulfcd\n'
 
 # source $(which env_parallel.zsh) # allow using functions in parallel
-
-# emulate Bash's function exporting for parallel
-exportf (){
-    export $(echo $1)="`whence -f $1 | sed -e "s/$1 //" `"
-}
 
 last_created_file() {
   dir="${1:-.}"
@@ -337,3 +306,13 @@ xlsx_column_names() {
   in2csv "$xlsx_file" | head -n 1 | tr ',' '\n'
 }
 
+zsh-defer source ~/.zsh-plugins/syntax-highlighting/zsh-syntax-highlighting.zsh
+
+if [[ -n "$TMUX" ]]; then
+  # Function to update tmux window title
+  function set-tmux-title() {
+    printf "\033kzsh\033\\"
+  }
+  # Call the function when the prompt is displayed
+  precmd_functions+=(set-tmux-title)
+fi
