@@ -106,7 +106,9 @@ vim.cmd("nnoremap gp `[v`]")
 --map('n', 'j', "v:count == 0 ? 'gj' : 'j'")
 
 -- GUI
-vim.opt.guifont = 'JetBrainsMono Nerd Font Mono:h13'
+vim.opt.guifont = 'Iosevka Nerd Font Mono:h20:w-2:#h-none'
+vim.g.neovide_scroll_animation_length = 0.1
+
 -- vim.opt.guifont = 'Hack Nerd Font:h13'
 
 -- clipboard
@@ -196,6 +198,8 @@ require 'packer'.startup({
 
         -- REPL
         use 'jpalardy/vim-slime'
+
+        -- use({ 'vim-scripts/applescript.vim', ft = { 'applescript' } })
 
         -- Clojure
         use {
@@ -582,9 +586,6 @@ require 'packer'.startup({
 
         -- Git change markers
         -- Plug 'airblade/vim-gitgutter'
-
-        -- fuzzy search
-        use 'cloudhead/neovim-fuzzy'
 
         -- fuzzy search
         use {
@@ -1295,3 +1296,24 @@ end
 
 -- window splits sizing stabilize text
 vim.o.splitkeep = "screen"
+
+vim.api.nvim_create_autocmd({"BufEnter", "BufWritePost"}, {
+    pattern = "*",
+    callback = function()
+        local filename = vim.fn.expand("%:t")
+        if filename ~= "" then
+            vim.fn.system("tmux rename-window ' [" .. filename .. "]'")
+        else
+            vim.fn.system("tmux rename-window ' [No File]'")
+        end
+    end
+})
+
+vim.api.nvim_set_keymap("n", "<leader>u", "<cmd>lua OpenURL()<CR>", { noremap = true, silent = true })
+function OpenURL()
+  local line = vim.api.nvim_get_current_line()
+  local url = string.match(line, 'https?://[a-zA-Z0-9/:.-_+?=&%%#@!;,]*')
+  if url then
+    vim.fn.system('open ' .. vim.fn.shellescape(url, true))
+  end
+end
