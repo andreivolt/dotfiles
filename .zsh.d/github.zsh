@@ -10,3 +10,14 @@ gh-save() {
 gh-review-requested() {
   gh pr list --search 'review-requested:andreivolt' --json headRefName --jq '.[].headRefName'
 }
+
+gh-has-pending-reviews() {
+  $(gh pr list --search 'review-requested:andreivolt' --json url --jq length) -gt 0
+}
+
+gh-automerge() {
+  for i in reviewed-by review-requested; do
+    gh pr list --search $i:@me --json number,isDraft --jq '.[] | select(.isDraft == false).number'
+  done |
+    xargs -I% -n1 gh pr merge % --merge --auto
+}
