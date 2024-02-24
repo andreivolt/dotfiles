@@ -246,6 +246,8 @@ require 'packer'.startup({
         -- better git commit
         use 'rhysd/committia.vim'
 
+        use 'Tyilo/applescript.vim'
+
         -- -- TypeScript TODO
         -- use {
         --     'jose-elias-alvarez/typescript.nvim',
@@ -1180,6 +1182,19 @@ vim.diagnostic.config {
 vim.filetype.add {
     filename = {
         ['.envrc'] = 'bash',
+        ["*"] = function(path, bufnr)
+            local firstLine = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ""
+
+            if firstLine:match("^#!.*bb$") then
+                return "clojure"
+            elseif firstLine:match("^#!.*bun$") then
+                return "javascript"
+            elseif firstLine:match("^#!.*racket$") then
+                return "racket"
+            elseif firstLine:match("^#!.*pip%-run") or firstLine:match("^#!.*pipx run") then
+                return "python"
+            end
+        end,
     },
 }
 
@@ -1297,7 +1312,7 @@ end
 -- window splits sizing stabilize text
 vim.o.splitkeep = "screen"
 
-vim.api.nvim_create_autocmd({"BufEnter", "BufWritePost"}, {
+vim.api.nvim_create_autocmd({"BufEnter", "BufWritePost", "FocusGained"}, {
     pattern = "*",
     callback = function()
         local filename = vim.fn.expand("%:t")
@@ -1312,8 +1327,47 @@ vim.api.nvim_create_autocmd({"BufEnter", "BufWritePost"}, {
 vim.api.nvim_set_keymap("n", "<leader>u", "<cmd>lua OpenURL()<CR>", { noremap = true, silent = true })
 function OpenURL()
   local line = vim.api.nvim_get_current_line()
-  local url = string.match(line, 'https?://[a-zA-Z0-9/:.-_+?=&%%#@!;,]*')
+  local url = string.match(line, 'https?://[%w-_./?%%=~&:+%%*]+')
   if url then
-    vim.fn.system('open ' .. vim.fn.shellescape(url, true))
+    vim.fn.system('open "' .. url .. '"')
   end
 end
+
+vim.api.nvim_create_autocmd("BufRead", {
+  pattern = "*",
+  callback = function()
+    local shebang_mappings = {
+      ["^#!.*bb$"] = "clojure",
+      ["^#!.*bun$"] = "javascript",
+      ["^#!.*osascript"] = "applescript",
+      ["^#!.*pip%-run"] = "python",
+      ["^#!.*pipx run"] = "python",
+      ["^#!.*racket$"] = "racket",
+      ["^#!.*rust%-script"] = "rust",
+    }
+
+    local firstLine = vim.fn.getline(1)
+    local found = false
+    for pattern, filetype in pairs(shebang_mappings) do
+      if firstLine:match(pattern) then
+        vim.cmd("setfiletype " .. filetype)
+        found = true
+        break
+      end
+    end
+
+    if not found and firstLine:match("^#!.*scriptisto") then
+      local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+      for _, line in ipairs(lines) do
+        local script_src_match = line:match("^// script_src: (.*)$")
+        if script_src_match then
+          local matched_filetype = vim.filetype.match({filename = script_src_match})
+          if matched_filetype then
+            vim.cmd("setfiletype " .. matched_filetype)
+          end
+          break
+        end
+      end
+    end
+  end,
+})

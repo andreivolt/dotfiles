@@ -27,3 +27,9 @@ Style/MultilineBlockChain:
 
 Style/NumericLiterals:
   enabled: false
+
+Style/StringLiterals:
+  Enabled: false
+
+Lint/ElseLayout:
+  Enabled: false

@@ -1,0 +1,19 @@
+{
+	"color_scheme": "Packages/Tomorrow Color Schemes/Tomorrow-Night-Bright.tmTheme",
+	"font_face": "Tahoma",
+	"font_size": 20,
+	"ignored_packages":
+	[
+		"NeoVintageous",
+		"Vintage",
+	],
+	"line_numbers": false,
+	"auto_hide_tabs": true,
+	"hide_new_tab_button": true,
+	"neovintageous_build_version": 13200,
+	"overlay_scroll_bars": "enabled",
+	"theme": "Adaptive.sublime-theme",
+	"vintageous_use_ctrl_keys": true,
+	"vintageous_use_super_keys": false,
+	"index_files": true,
+}

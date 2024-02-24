@@ -1,0 +1,19 @@
+{
+	"bootstrapped": true,
+	"update_check": false,
+	"in_process_packages":
+	[
+		"NeoVintageous",
+	],
+	"installed_packages":
+	[
+		"Color Scheme - Vintage Terminal",
+		"NeoVintageous",
+		"Nix",
+		"Package Control",
+		"PackageResourceViewer",
+		"Theme - Vim Blackboard",
+		"Tomorrow Color Schemes",
+		"Tomorrow Night Italics Color Scheme",
+	],
+}
