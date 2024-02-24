@@ -23,7 +23,10 @@ begin
 rescue LoadError => e
 end
 
-require "looksee"
+begin
+  require "looksee"
+rescue LoadError => e
+end
 
 # pretty-print
 begin

@@ -16,3 +16,7 @@ hs.hotkey.bind({}, "²", function()
 
     app:mainWindow().setShadows(false)
   end)
+
+hs.hotkey.bind({"ctrl", "alt"}, "R", function()
+    hs.execute("/Users/andrei/drive/bin/randomtab", true)
+end)
