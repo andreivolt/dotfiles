@@ -5,24 +5,28 @@
 # TODO strace completion
 # TODO tmux complete words from current pane https://gist.github.com/blueyed/6856354
 # TODO vcs info https://github.com/grml/grml-etc-core/blob/71bdc48d190a5369fff28a97c828db7b1edf10a9/etc/zsh/zshrc#L1964
-#
 
 # is-macos() { [ $(uname -s) = Darwin ] }
 is-macos() {
   [[ $OSTYPE == darwin* ]]
 }
 
+path() {
+  local path=(${(s/:/)PATH})
+  printf "%s\n" "$path[@]"
+}
+
 add-to-path() {
   path+=("$@")
 }
 
-# prepend-to-path() {
-#   for dir in "$@"; do
-#     if [[ ! ":$PATH:" == *":$dir:"* ]]; then
-#       path=("$dir" $path)
-#     fi
-#   done
-# }
+prepend-to-path() {
+  for dir in "$@"; do
+    if [[ ! ":$PATH:" == *":$dir:"* ]]; then
+      path=("$dir" $path)
+    fi
+  done
+}
 
 # prepend-to-path ~/.local/bin
 
@@ -44,7 +48,6 @@ export PATH=~/drive/bin:$PATH
 
 autoload -Uz ~/.zsh-plugins/defer/zsh-defer
 
-
 # MODULES
 # is-macos && zsh-defer source ~/.zsh.d/macos.zsh
 # zsh-defer source ~/.zsh.d/grc.sh
@@ -55,11 +58,11 @@ autoload -Uz ~/.zsh-plugins/defer/zsh-defer
 # zsh-defer source ~/.zsh.d/ruby.zsh
 # zsh-defer source ~/.zsh.d/github.zsh
 [ $TERM = xterm-kitty ] && zsh-defer source ~/.zsh.d/kitty.zsh
-is-macos && source ~/drive/nixos-config/modules/zsh/vi.zsh
+source ~/.zsh.d/vi.zsh
 is-macos && zsh-defer source ~/.zsh.d/homebrew-command-not-found.sh
 is-macos && zsh-defer source ~/.zsh.d/mac_libiconv.sh
 zsh-defer source ~/.zsh-plugins/nix-shell/nix-shell.plugin.zsh
-zsh-defer source ~/.zsh-plugins/system-clipboard/zsh-system-clipboard.zsh
+# zsh-defer source ~/.zsh-plugins/system-clipboard/zsh-system-clipboard.zsh
 zsh-defer source ~/.zsh.d/aliases.sh
 zsh-defer source ~/.zsh.d/autopair.zsh
 zsh-defer source ~/.zsh.d/brotab.zsh
@@ -67,7 +70,7 @@ zsh-defer source ~/.zsh.d/completion.zsh
 zsh-defer source ~/.zsh.d/delta.zsh
 zsh-defer source ~/.zsh.d/direnv.zsh
 zsh-defer source ~/.zsh.d/fzf.zsh
-zsh-defer source ~/.zsh.d/global-aliases.zsh
+source ~/.zsh.d/global-aliases.zsh
 zsh-defer source ~/.zsh.d/go.zsh
 zsh-defer source ~/.zsh.d/gpg.zsh
 zsh-defer source ~/.zsh.d/keephack.zsh
@@ -75,6 +78,9 @@ zsh-defer source ~/.zsh.d/less-colors.sh
 zsh-defer source ~/.zsh.d/ls-colors.sh
 zsh-defer source ~/.zsh.d/rust.zsh
 zsh-defer source ~/.zsh.d/tmux.zsh
+
+export ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=244"
+zsh-defer source ~/.zsh-plugins/autosuggestions/zsh-autosuggestions.zsh
 
 zsh-defer source ~/.zsh-plugins/history-substring-search/zsh-history-substring-search.zsh
 bindkey '^[[A' history-substring-search-up
@@ -112,7 +118,6 @@ setopt interactive_comments # allow comments
 setopt magicequalsubst # filename expansion in for e.g. foo=~/bar
 setopt notify # report the status of backgrounds jobs immediately
 setopt numeric_glob_sort # sort filename globs numerically
-
 
 # HISTORY
 HISTSIZE="999999"
@@ -178,11 +183,7 @@ typeset -U path cdpath fpath manpath
 
 autoload -U zsh-mime-setup
 
-# auto-quote URLs
-autoload -U url-quote-magic
-zle -N self-insert url-quote-magic
-
-# do history expansion on space
+: do history expansion on space
 bindkey ' ' magic-space
 
 # # load the lookup subsystem if it's available on the system
@@ -192,6 +193,7 @@ bindkey ' ' magic-space
 
 # man
 export MANWIDTH=100
+export MANPAGER='nvim +Man!'
 
 ## autoload own functions. _*-functions will be loaded by the compinit builtin
 # fpath=(~/.zfunc $fpath)
@@ -207,9 +209,7 @@ hgrep() {
 
 # cd to temp dir
 cdt() {
-  local t
-  t=$(mktemp -d)
-  builtin cd "$t"
+  builtin cd $(mktemp -d)
 }
 
 alias -- +x='chmod +x'
@@ -266,26 +266,17 @@ alias -- +x='chmod +x'
 # # without this, typing a . aborts incremental history search
 # bindkey -M isearch . self-insert
 
-################################################################################
-# syntax highlighting: needs to be sourced after anything else that add hooks to modify the command-line buffer
-################################################################################
-# source ~/.zsh.d/syntax-highlighting.zsh
-
-trim() {
-  awk '{$1=$1};1'
+# use lf to switch directories and bind it to ctrl-o
+lfcd () {
+    tmp="$(mktemp -uq)"
+    trap 'rm -f $tmp >/dev/null 2>&1' HUP INT QUIT TERM PWR EXIT
+    lf -last-dir-path="$tmp" "$@"
+    if [ -f "$tmp" ]; then
+        dir="$(cat "$tmp")"
+        [ -d "$dir" ] && [ "$dir" != "$(pwd)" ] && cd "$dir"
+    fi
 }
-
-# # Use lf to switch directories and bind it to ctrl-o TODO
-# lfcd () {
-#     tmp="$(mktemp -uq)"
-#     trap 'rm -f $tmp >/dev/null 2>&1' HUP INT QUIT TERM PWR EXIT
-#     lf -last-dir-path="$tmp" "$@"
-#     if [ -f "$tmp" ]; then
-#         dir="$(cat "$tmp")"
-#         [ -d "$dir" ] && [ "$dir" != "$(pwd)" ] && cd "$dir"
-#     fi
-# }
-# bindkey -s '^o' '^ulfcd\n'
+bindkey -s '^o' '^ulfcd\n'
 
 # source $(which env_parallel.zsh) # allow using functions in parallel
 
@@ -294,20 +285,18 @@ last_created_file() {
   find "$dir" -type f -printf '%T+ %p\n' | sort -r | head -n 1 | cut -d' ' -f 2-
 }
 
-xlsx_column_names() {
-  xlsx_file="$1"
-  if [[ -z "$xlsx_file" ]]; then
-    echo "Usage: xlsx_column_names <xlsx_file>"
-    return 1
-  fi
-
-  in2csv "$xlsx_file" | head -n 1 | tr ',' '\n'
-}
-
-zsh-defer source ~/.zsh-plugins/syntax-highlighting/zsh-syntax-highlighting.zsh
 if [[ -n "$TMUX" ]]; then
   function set-tmux-title() {
     printf "\033kzsh\033\\"
   }
   precmd_functions+=(set-tmux-title)
 fi
+
+# syntax highlighting: needs to be sourced after anything else that add hooks to modify the command-line buffer
+zsh-defer source ~/.zsh-plugins/syntax-highlighting/zsh-syntax-highlighting.zsh
+
+export CLICOLOR=1 # colors for macOS ls
+
+# use macOS instead of Nix versions
+alias apropos=/usr/bin/apropos
+alias whatis=/usr/bin/whatis

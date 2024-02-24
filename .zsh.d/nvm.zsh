@@ -1,7 +1,6 @@
 export NVM_DIR="$HOME/.nvm"
-
-[ -s "/usr/local/opt/nvm/nvm.sh" ] && . "/usr/local/opt/nvm/nvm.sh"  # This loads nvm
-[ -s "/usr/local/opt/nvm/etc/zsh_completion.d/nvm" ] && . "/usr/local/opt/nvm/etc/zsh_completion.d/nvm"
+[ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && . "/opt/homebrew/opt/nvm/nvm.sh"
+# [ -s "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm" ] && \. "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"
 
 # autoload from .node-version
 autoload -U add-zsh-hook

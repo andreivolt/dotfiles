@@ -11,13 +11,7 @@ success_symbol = "[➤](bold green)"
 error_symbol = "[✖](bold red)"
 format = "$symbol "
 
-[java]
-disabled = true
-
-[python]
-disabled = true
-
-[perl]
+[battery]
 disabled = true
 
 [git_branch]
@@ -27,25 +21,17 @@ style = "#c1993b"
 [aws]
 disabled = true
 
+[python]
+disabled = true
+
 [gcloud]
 disabled = true
 format = '[ $symbol$account(@$domain)(\($region\))\[$project\]]($style)'
 style = '245'
 
-[ruby]
-disabled = true
-format = "[$symbol($version) ]($style)"
-style = 'red'
-symbol = '💎'
-
 [nix_shell]
 format = '[$symbol$state(\($name\))]($style) '
 style = 'purple'
-
-[nodejs]
-disabled = true
-format = "[$symbol($version)]($style) "
-symbol = " "
 
 [username]
 disabled = true
@@ -74,10 +60,6 @@ format = "[(\\[$env_value\\])](purple)"
 [git_status]
 # format = '([$all_status$ahead_behind]($style))[｜](fg:242 bg:13)'
 format = ''
-
-[docker_context]
-format = "[$symbol$context]($style) "
-symbol = "🐳"
 
 [kubernetes]
 disabled = false
