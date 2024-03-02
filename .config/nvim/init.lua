@@ -279,6 +279,8 @@ require 'packer'.startup({
             end
         }
 
+        use 'Lokaltog/vim-monotone'
+
         -- scope in statusline
         use {
             "SmiteshP/nvim-gps",
@@ -395,6 +397,7 @@ require 'packer'.startup({
                 require('gitsigns').setup()
             end
         }
+        -- Plug 'airblade/vim-gitgutter'
 
         use 'simrat39/symbols-outline.nvim'
 
@@ -585,9 +588,6 @@ require 'packer'.startup({
             branch = 'release/0.x',
             run = 'yarn install --frozen-lockfile --production'
         }
-
-        -- Git change markers
-        -- Plug 'airblade/vim-gitgutter'
 
         -- fuzzy search
         use {
@@ -785,9 +785,35 @@ require 'packer'.startup({
         require 'lspconfig'.solargraph.setup {}
 
         -- -- Lua LSP
-        -- require 'lspconfig'.sumneko_lua.setup {
-        --     settings = { Lua = { diagnostics = { globals = { 'vim' } } } }
-        -- }
+        require 'lspconfig'.lua_ls.setup {
+            on_init = function(client)
+                local path = client.workspace_folders[1].name
+                if not vim.loop.fs_stat(path..'/.luarc.json') and not vim.loop.fs_stat(path..'/.luarc.jsonc') then
+                    client.config.settings = vim.tbl_deep_extend('force', client.config.settings, {
+                        Lua = {
+                          diagnostics = {
+                            globals = { 'vim' },
+                          },
+                          runtime = {
+                            version = 'LuaJIT',
+                            -- TODO
+                            -- path = vim.split(package.path, ';')
+                          },
+                          telemetry = { enable = false },
+                          workspace = {
+                              -- stop "Do you need to configure your work environment as `luassert`?" spam
+                              checkThirdParty = false,
+                              -- the following does not show nvim api completion
+                              library = vim.env.VIMRUNTIME,
+                              -- -- make the server aware of Neovim runtime files, pull in all of 'runtimepath'. NOTE: this is a lot slower
+                              -- library = vim.api.nvim_get_runtime_file("", true),
+                          }
+                        }
+                    })
+                end
+                return true
+            end
+        }
 
         -- -- TODO fzf fuzzy find
         -- nnoremap <silent> <leader>p :FzfGFiles<CR>
@@ -967,26 +993,12 @@ require 'packer'.startup({
 
         require('telescope').load_extension('fzf')
 
-        require('telescope').setup { pickers = { find_files = { theme = "ivy" } } }
-
-        -- highlight on yank
-        vim.api.nvim_create_autocmd('TextYankPost', {
-          pattern = '*',
-          callback = function()
-            vim.highlight.on_yank({ on_visual = true })
-            -- vim.highlight.on_yank({timeout = 200, higroup = 'Visual'})
-          end
-        })
-
-        -- open file with cursor on last position
-        vim.api.nvim_create_autocmd('BufReadPost', {
-          callback = function ()
-            local mark = vim.api.nvim_buf_get_mark(0, [["]])
-            if 0 < mark[1] and mark[1] <= vim.api.nvim_buf_line_count(0) then
-              vim.api.nvim_win_set_cursor(0, mark)
-            end
-          end
-        })
+        require('telescope').setup {
+            pickers = {
+                buffers = { theme = "ivy" },
+                find_files = { theme = "ivy" }
+            }
+        }
 
         -- -- use interactive shell
         -- set shellcmdflag='-ic'
@@ -1182,7 +1194,7 @@ vim.diagnostic.config {
 vim.filetype.add {
     filename = {
         ['.envrc'] = 'bash',
-        ["*"] = function(path, bufnr)
+        ["*"] = function(_, bufnr)
             local firstLine = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ""
 
             if firstLine:match("^#!.*bb$") then
@@ -1325,11 +1337,28 @@ vim.api.nvim_create_autocmd({"BufEnter", "BufWritePost", "FocusGained"}, {
 })
 
 vim.api.nvim_set_keymap("n", "<leader>u", "<cmd>lua OpenURL()<CR>", { noremap = true, silent = true })
+-- open a URL in the default browser, if multiple URLs are present on the current line, open the URL under the cursor
 function OpenURL()
   local line = vim.api.nvim_get_current_line()
-  local url = string.match(line, 'https?://[%w-_./?%%=~&:+%%*]+')
-  if url then
-    vim.fn.system('open "' .. url .. '"')
+  local cursor_col = vim.fn.col('.')
+  local urls = {}
+  for url in string.gmatch(line, 'https?://[%w-_./?%%=~&:+%%*]+') do
+    table.insert(urls, url)
+  end
+
+  if #urls == 0 then
+    return
+  elseif #urls == 1 then
+    vim.fn.system('open "' .. urls[1] .. '"')
+  else
+    local s, e = nil, nil
+    for _, url in ipairs(urls) do
+      s, e = string.find(line, url, 1, true)
+      if cursor_col >= s and cursor_col <= e then
+        vim.fn.system('open "' .. url .. '"')
+        break
+      end
+    end
   end
 end
 
@@ -1370,4 +1399,23 @@ vim.api.nvim_create_autocmd("BufRead", {
       end
     end
   end,
+})
+
+-- highlight on yank
+vim.api.nvim_create_autocmd('TextYankPost', {
+  pattern = '*',
+  callback = function()
+    vim.highlight.on_yank({ on_visual = true })
+    -- vim.highlight.on_yank({timeout = 200, higroup = 'Visual'})
+  end
+})
+
+-- open file with cursor on last position
+vim.api.nvim_create_autocmd('BufReadPost', {
+  callback = function ()
+    local mark = vim.api.nvim_buf_get_mark(0, [["]])
+    if 0 < mark[1] and mark[1] <= vim.api.nvim_buf_line_count(0) then
+      vim.api.nvim_win_set_cursor(0, mark)
+    end
+  end
 })
