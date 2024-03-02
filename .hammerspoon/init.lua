@@ -1,3 +1,8 @@
+local ipc = require("hs.ipc")
+if not ipc.cliStatus("/usr/local") then
+  ipc.cliInstall()
+end
+
 hs.hotkey.bind({}, "²", function()
     local app = hs.application.get("kitty")
 

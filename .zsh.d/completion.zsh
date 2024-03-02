@@ -1,9 +1,13 @@
 autoload -Uz compinit
-if [ $(date +'%j') != $(/usr/bin/stat -f '%Sm' -t '%j' ${ZDOTDIR:-$HOME}/.zcompdump) ]; then
+if [[ -n ${ZDOTDIR:-$HOME}/.zcompdump(#qN.mh+24) ]]; then
   compinit
 else
   compinit -C
 fi
+
+# TODO: not on nix
+# # completion: use bash completion
+# autoload -U bashcompinit && bashcompinit
 
 _comp_options+=(globdots) # include hidden files
 # completion: auto correct misspellings
@@ -21,7 +25,11 @@ zstyle ':completion:*:manuals' separate-sections true
 zstyle ':completion:*:manuals.*' insert-sections true
 zstyle ':completion:*:man:*' menu yes select # completion: man
 zstyle ':completion:*' menu yes=long select # completion: menu
-is-macos && bindkey -M menuselect '^o' accept-and-menu-complete # completion: menu: select multiple
+
+ # completion: menu: select multiple
+bindkey -M menuselect '^o' accept-and-menu-complete
+bindkey -M menuselect "+" accept-and-menu-complete
+
 zstyle ':completion:*' file-sort date # completion: sort files by date
 setopt no_list_ambiguous # completion: complete unambiguous matches
 setopt glob_complete # completion: when the current word has a glob pattern, do not insert all the words resulting from the expansion
