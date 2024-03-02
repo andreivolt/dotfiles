@@ -6,7 +6,6 @@
 # TODO tmux complete words from current pane https://gist.github.com/blueyed/6856354
 # TODO vcs info https://github.com/grml/grml-etc-core/blob/71bdc48d190a5369fff28a97c828db7b1edf10a9/etc/zsh/zshrc#L1964
 
-# is-macos() { [ $(uname -s) = Darwin ] }
 is-macos() {
   [[ $OSTYPE == darwin* ]]
 }
@@ -16,7 +15,7 @@ path() {
   printf "%s\n" "$path[@]"
 }
 
-add-to-path() {
+append-to-path() {
   path+=("$@")
 }
 
@@ -31,6 +30,9 @@ prepend-to-path() {
 # prepend-to-path ~/.local/bin
 
 export PATH=~/.local/bin:$PATH
+
+# # no duplicates
+# typeset -U path=()
 
 setopt auto_pushd # automatically add directories to the directory stack
 
@@ -48,6 +50,9 @@ export PATH=~/drive/bin:$PATH
 
 autoload -Uz ~/.zsh-plugins/defer/zsh-defer
 
+# prompt
+(( ${+commands[starship]} )) && eval "$(starship init zsh)"
+
 # MODULES
 # is-macos && zsh-defer source ~/.zsh.d/macos.zsh
 # zsh-defer source ~/.zsh.d/grc.sh
@@ -59,6 +64,7 @@ autoload -Uz ~/.zsh-plugins/defer/zsh-defer
 # zsh-defer source ~/.zsh.d/github.zsh
 [ $TERM = xterm-kitty ] && zsh-defer source ~/.zsh.d/kitty.zsh
 source ~/.zsh.d/vi.zsh
+source ~/.zsh.d/global-aliases.zsh
 is-macos && zsh-defer source ~/.zsh.d/homebrew-command-not-found.sh
 is-macos && zsh-defer source ~/.zsh.d/mac_libiconv.sh
 zsh-defer source ~/.zsh-plugins/nix-shell/nix-shell.plugin.zsh
@@ -70,12 +76,13 @@ zsh-defer source ~/.zsh.d/completion.zsh
 zsh-defer source ~/.zsh.d/delta.zsh
 zsh-defer source ~/.zsh.d/direnv.zsh
 zsh-defer source ~/.zsh.d/fzf.zsh
-source ~/.zsh.d/global-aliases.zsh
 zsh-defer source ~/.zsh.d/go.zsh
 zsh-defer source ~/.zsh.d/gpg.zsh
+zsh-defer source ~/.zsh.d/grep.zsh
 zsh-defer source ~/.zsh.d/keephack.zsh
 zsh-defer source ~/.zsh.d/less-colors.sh
 zsh-defer source ~/.zsh.d/ls-colors.sh
+zsh-defer source ~/.zsh.d/ripgrep.zsh
 zsh-defer source ~/.zsh.d/rust.zsh
 zsh-defer source ~/.zsh.d/tmux.zsh
 
@@ -91,13 +98,11 @@ bindkey '^[[B' history-substring-search-down
 #   FPATH=/opt/homebrew/share/zsh-completions:$FPATH
 # fi
 
-# prompt
-which starship >/dev/null && eval "$(starship init zsh)"
 # source ~/.zsh.d/prompt.zsh
 
-which vi >/dev/null && export EDITOR='vi'
-which vim >/dev/null && export EDITOR='vim'
-which nvim >/dev/null && export EDITOR='nvim'
+(( ${+commands[vi]} )) && export EDITOR='vi'
+(( ${+commands[vim]} )) && export EDITOR='vim'
+(( ${+commands[nvim]} )) && export EDITOR='nvim'
 
 # # better sudo prompt
 # alias sudo="sudo -p '%u->%U, enter password: ' "
@@ -111,7 +116,6 @@ which nvim >/dev/null && export EDITOR='nvim'
 # setopt unset # don't error out when unset parameters are used
 setopt auto_pushd # make cd push the old directory onto the directory stack
 setopt chase_links # cd resolve symlinks
-setopt correct # spelling correction
 setopt extended_glob # in order to use #, ~ and ^ for filename generation grep word *~(*.gz|*.bz|*.bz2|*.zip|*.Z) -> searches for word not in compressed files don't forget to quote '^', '~' and '#'!
 setopt inc_append_history # TODO which
 setopt interactive_comments # allow comments
@@ -131,10 +135,6 @@ setopt hist_reduce_blanks # remove multiple blanks
 setopt share_history
 setopt extended_history # history: save timestamp and duration
 # setopt append_history # import new commands from the history file also in other zsh session
-
-# TODO: not on nix
-# # completion: use bash completion
-# autoload -U bashcompinit && bashcompinit
 
 # trigger completion when tab is pressed on empty command line
 complete-or-list() {
@@ -285,6 +285,19 @@ last_created_file() {
   find "$dir" -type f -printf '%T+ %p\n' | sort -r | head -n 1 | cut -d' ' -f 2-
 }
 
+# TODO
+# highlight-pid-pstree() {
+#   pstree -p --show-parents --arguments $$ --unicode |
+#     rg --passthru --colors "match:fg:yellow" --color always --pcre2 "(?<=,)[0-9]*"
+# }
+
+# highlight() {
+#   rg \
+#   --passthru \
+#   --colors "match:fg:$1" --color always \
+#   --pcre2 "$2"
+# }
+
 if [[ -n "$TMUX" ]]; then
   function set-tmux-title() {
     printf "\033kzsh\033\\"
@@ -295,8 +308,25 @@ fi
 # syntax highlighting: needs to be sourced after anything else that add hooks to modify the command-line buffer
 zsh-defer source ~/.zsh-plugins/syntax-highlighting/zsh-syntax-highlighting.zsh
 
-export CLICOLOR=1 # colors for macOS ls
+# colors for macOS ls
+export CLICOLOR=1
 
 # use macOS instead of Nix versions
-alias apropos=/usr/bin/apropos
-alias whatis=/usr/bin/whatis
+is-macos && {
+  alias apropos=/usr/bin/apropos
+  alias whatis=/usr/bin/whatis
+}
+
+# bind ctrl-left/right to move back and forward word
+bindkey "^[[1;5C" forward-word
+bindkey "^[[1;5D" backward-word
+
+# autocorrect
+# setopt correct # spelling correction
+setopt correct_all
+autoload -U colors && colors
+export SPROMPT="Correct $fg_bold[red]%R$reset_color to $fg_bold[green]%r?$reset_color ($fg_bold[green]Yes$reset_color, $fg_bold[yellow]No$reset_color, $fg_bold[red]Abort$reset_color, $fg_bold[blue]Edit$reset_color) "
+
+# ignore likely errors beginning of command
+alias \$=''
+alias \%=''
