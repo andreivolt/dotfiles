@@ -27,6 +27,8 @@ prepend-to-path() {
   done
 }
 
+eval "$(/opt/homebrew/bin/brew shellenv)"
+
 # prepend-to-path ~/.local/bin
 
 export PATH=~/.local/bin:$PATH
@@ -53,6 +55,22 @@ autoload -Uz ~/.zsh-plugins/defer/zsh-defer
 # prompt
 (( ${+commands[starship]} )) && eval "$(starship init zsh)"
 
+# Hombrew completions
+fpath=(/opt/homebrew/share/zsh/site-functions $fpath)
+
+# HISTORY
+HISTSIZE="999999"
+SAVEHIST="999999"
+HISTFILE="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/history" # prevent cloberring shell history when starting a shell with a smaller history size
+mkdir -p ${HISTFILE:h}
+setopt hist_fcntl_lock
+setopt hist_ignore_dups
+setopt hist_ignore_space # don't store commands with leading space
+setopt hist_reduce_blanks # remove multiple blanks
+setopt share_history
+setopt extended_history # history: save timestamp and duration
+# setopt append_history # import new commands from the history file also in other zsh session
+
 # MODULES
 # is-macos && zsh-defer source ~/.zsh.d/macos.zsh
 # zsh-defer source ~/.zsh.d/grc.sh
@@ -65,7 +83,7 @@ autoload -Uz ~/.zsh-plugins/defer/zsh-defer
 [ $TERM = xterm-kitty ] && zsh-defer source ~/.zsh.d/kitty.zsh
 source ~/.zsh.d/vi.zsh
 source ~/.zsh.d/global-aliases.zsh
-is-macos && zsh-defer source ~/.zsh.d/homebrew-command-not-found.sh
+# is-macos && zsh-defer source ~/.zsh.d/homebrew-command-not-found.sh
 is-macos && zsh-defer source ~/.zsh.d/mac_libiconv.sh
 zsh-defer source ~/.zsh-plugins/nix-shell/nix-shell.plugin.zsh
 # zsh-defer source ~/.zsh-plugins/system-clipboard/zsh-system-clipboard.zsh
@@ -122,19 +140,6 @@ setopt interactive_comments # allow comments
 setopt magicequalsubst # filename expansion in for e.g. foo=~/bar
 setopt notify # report the status of backgrounds jobs immediately
 setopt numeric_glob_sort # sort filename globs numerically
-
-# HISTORY
-HISTSIZE="999999"
-SAVEHIST="999999"
-HISTFILE="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/history" # prevent cloberring shell history when starting a shell with a smaller history size
-mkdir -p ${HISTFILE:h}
-setopt hist_fcntl_lock
-setopt hist_ignore_dups
-setopt hist_ignore_space # don't store commands with leading space
-setopt hist_reduce_blanks # remove multiple blanks
-setopt share_history
-setopt extended_history # history: save timestamp and duration
-# setopt append_history # import new commands from the history file also in other zsh session
 
 # trigger completion when tab is pressed on empty command line
 complete-or-list() {
@@ -268,13 +273,13 @@ alias -- +x='chmod +x'
 
 # use lf to switch directories and bind it to ctrl-o
 lfcd () {
-    tmp="$(mktemp -uq)"
-    trap 'rm -f $tmp >/dev/null 2>&1' HUP INT QUIT TERM PWR EXIT
-    lf -last-dir-path="$tmp" "$@"
-    if [ -f "$tmp" ]; then
-        dir="$(cat "$tmp")"
-        [ -d "$dir" ] && [ "$dir" != "$(pwd)" ] && cd "$dir"
-    fi
+  tmp="$(mktemp -uq)"
+  trap 'rm -f $tmp >/dev/null 2>&1' HUP INT QUIT TERM PWR EXIT
+  lf -last-dir-path="$tmp" "$@"
+  if [ -f "$tmp" ]; then
+    dir="$(cat "$tmp")"
+    [ -d "$dir" ] && [ "$dir" != "$(pwd)" ] && cd "$dir"
+  fi
 }
 bindkey -s '^o' '^ulfcd\n'
 
@@ -305,9 +310,6 @@ if [[ -n "$TMUX" ]]; then
   precmd_functions+=(set-tmux-title)
 fi
 
-# syntax highlighting: needs to be sourced after anything else that add hooks to modify the command-line buffer
-zsh-defer source ~/.zsh-plugins/syntax-highlighting/zsh-syntax-highlighting.zsh
-
 # colors for macOS ls
 export CLICOLOR=1
 
@@ -330,3 +332,6 @@ export SPROMPT="Correct $fg_bold[red]%R$reset_color to $fg_bold[green]%r?$reset_
 # ignore likely errors beginning of command
 alias \$=''
 alias \%=''
+
+# syntax highlighting: needs to be sourced after anything else that add hooks to modify the command-line buffer
+zsh-defer source ~/.zsh-plugins/syntax-highlighting/zsh-syntax-highlighting.zsh
