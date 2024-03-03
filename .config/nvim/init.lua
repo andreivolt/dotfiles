@@ -15,20 +15,15 @@ vim.opt.smartindent = true -- TODO
 local indent = 2
 vim.opt.shiftwidth = indent
 vim.opt.tabstop = indent
+
 vim.opt.expandtab = true
 vim.opt.shiftround = true -- round indent for < and >
-
 vim.opt.infercase = true
-
 vim.opt.hidden = true
-
 vim.opt.showbreak = "↳ "
-
 vim.opt.title = true
-
 vim.opt.ruler = false
 
--- install packer
 local install_path = vim.fn.stdpath("data") .. "/site/pack/packer/start/packer.nvim"
 if vim.fn.empty(vim.fn.glob(install_path)) > 0 then
     vim.fn.system({
@@ -38,7 +33,6 @@ if vim.fn.empty(vim.fn.glob(install_path)) > 0 then
     vim.cmd('packadd packer.nvim')
 end
 
--- shorter key mappings
 local function map(mode, shortcut, command, opts)
     vim.api.nvim_set_keymap(mode, shortcut, command, opts or { noremap = true, silent = true })
 end
@@ -96,10 +90,12 @@ vim.api.nvim_create_autocmd({ "VimResized" }, {
 })
 
 -- filename in window titlebars
-vim.cmd('set winbar=%f | set laststatus=3 | hi WinBar guibg=#444444')
+vim.opt.winbar = "%f"
+vim.opt.laststatus = 3
+vim.api.nvim_set_hl(0, "WinBar", {bg = "#444444"})
 
 -- reselect pasted text
-vim.cmd("nnoremap gp `[v`]")
+vim.api.nvim_set_keymap("n", "gp", "`[v`]", {noremap = true})
 
 -- use visual lines with word wrap
 --map('n', 'k', "v:count == 0 ? 'gk' : 'k'")
@@ -199,8 +195,6 @@ require 'packer'.startup({
         -- REPL
         use 'jpalardy/vim-slime'
 
-        -- use({ 'vim-scripts/applescript.vim', ft = { 'applescript' } })
-
         -- Clojure
         use {
             'Olical/conjure',
@@ -246,7 +240,7 @@ require 'packer'.startup({
         -- better git commit
         use 'rhysd/committia.vim'
 
-        use 'Tyilo/applescript.vim'
+        use { 'Tyilo/applescript.vim', ft = 'applescript' }
 
         -- -- TypeScript TODO
         -- use {
@@ -272,8 +266,8 @@ require 'packer'.startup({
                         buftypes = { 'terminal', 'nofile' }
                     },
                     indent = {
-                      char = "▎"
-                      -- char = '┊'
+                      -- char = "▎"
+                      char = '┊'
                     }
                 }
             end
@@ -330,7 +324,7 @@ require 'packer'.startup({
         use 'tpope/vim-eunuch'
 
         -- Nix
-        use 'LnL7/vim-nix'
+        use { 'LnL7/vim-nix', ft = { "nix" } }
 
         use {
             "folke/which-key.nvim",
@@ -537,13 +531,13 @@ require 'packer'.startup({
         use 'nvim-treesitter/nvim-treesitter-textobjects'
 
         -- -- TODO
-        -- use {
-        --     "folke/todo-comments.nvim",
-        --     requires = "nvim-lua/plenary.nvim",
-        --     config = function()
-        --         require("todo-comments").setup()
-        --     end
-        -- }
+        use {
+            "folke/todo-comments.nvim",
+            requires = "nvim-lua/plenary.nvim",
+            config = function()
+                require("todo-comments").setup()
+            end
+        }
 
         -- indent markers
         -- Plug 'Yggdroot/indentLine'
@@ -730,8 +724,7 @@ require 'packer'.startup({
 
         local nvim_lsp = require('lspconfig')
 
-        -- Use an on_attach function to only map the following keys
-        -- after the language server attaches to the current buffer
+        -- use an on_attach function to only map the following keys after the language server attaches to the current buffer
         local on_attach = function(client, bufnr)
             local function buf_set_keymap(...)
                 vim.api.nvim_buf_set_keymap(bufnr, ...)
@@ -803,9 +796,11 @@ require 'packer'.startup({
                           workspace = {
                               -- stop "Do you need to configure your work environment as `luassert`?" spam
                               checkThirdParty = false,
+
                               -- the following does not show nvim api completion
                               library = vim.env.VIMRUNTIME,
-                              -- -- make the server aware of Neovim runtime files, pull in all of 'runtimepath'. NOTE: this is a lot slower
+
+                              -- make the server aware of Neovim runtime files, pull in all of 'runtimepath'. NOTE: this is a lot slower
                               -- library = vim.api.nvim_get_runtime_file("", true),
                           }
                         }
@@ -1038,10 +1033,9 @@ require 'packer'.startup({
     }
 })
 
--- if $TERM_PROGRAM
-vim.cmd('hi Normal ctermbg=NONE guibg=NONE')
-vim.cmd('hi LineNr ctermbg=NONE guibg=NONE')
-vim.cmd('hi SignColumn ctermbg=NONE guibg=NONE')
+vim.api.nvim_set_hl(0, "Normal", {ctermbg = "NONE", bg = "NONE"})
+vim.api.nvim_set_hl(0, "LineNr", {ctermbg = "NONE", bg = "NONE"})
+vim.api.nvim_set_hl(0, "SignColumn", {ctermbg = "NONE", bg = "NONE"})
 
 -- use ripgrep for grep
 if vim.fn.executable("rg") > 0 then
@@ -1062,10 +1056,11 @@ end
 --  package.loaded['package-name-here'] = nil then require again and it'll load the new version
 --
 
-function globalstatus()
+local function globalstatus()
     vim.opt.laststatus = 3
-    vim.cmd('highlight WinSeparator ctermbg=NONE guibg=NONE')
-    vim.cmd('highlight WinSeparator ctermfg=gray guifg=#444444')
+    -- Set highlight for WinSeparator with background and then foreground
+    vim.api.nvim_set_hl(0, "WinSeparator", {ctermbg = "NONE", bg = "NONE"})
+    vim.api.nvim_set_hl(0, "WinSeparator", {ctermfg = "gray", fg = "#444444"})
 end
 
 globalstatus()
@@ -1077,14 +1072,14 @@ vim.api.nvim_create_autocmd('ColorScheme', {
         globalstatus()
 
         -- local set_hl = {
-        --     BufferLineFill = { bg = '#222222' }, -- bufferline
+        --     BufferLineFill = { bg = '#222222' },
         --     Comment = { italic = true, fg = '#69697c' },
         --     CursorLine = { bg = '#ff0000' },
         --     EndOfBuffer = { ctermbg = 'NONE', bg = 'NONE' },
         --     FoldColumn = { ctermbg = 'NONE', bg = 'NONE' },
         --     Folded = { bg = '#181818', fg = 'NONE' },
         --     LineNr = { ctermbg = 'NONE', bg = 'NONE' },
-        --     NonText = { ctermfg = 'red'},
+        --     NonText = { ctermfg = 'red' },
         --     Normal = { ctermbg = 'NONE', bg = 'NONE' },
         --     Question = { ctermfg = 'gray', fg = '#444444' },
         --     SignColumn = { ctermbg = 'NONE', bg = 'NONE' },
@@ -1095,21 +1090,13 @@ vim.api.nvim_create_autocmd('ColorScheme', {
         -- end
 
         vim.cmd('hi Question ctermfg=gray guifg=#444444')
-
-        vim.cmd('hi Folded guibg=#181818 guifg=NONE')
-
+        vim.cmd('hi Folded guibg=#181818')
         vim.cmd('hi NonText ctermfg=red')
-
         vim.cmd('hi Normal ctermbg=NONE guibg=NONE')
-
         vim.cmd('hi SignColumn ctermbg=NONE guibg=NONE')
         vim.cmd('hi FoldColumn ctermbg=NONE guibg=NONE')
-
         vim.cmd('hi EndOfBuffer ctermbg=NONE guibg=NONE')
-
-        -- bufferline
         vim.cmd('hi BufferLineFill guibg=#222222')
-
         vim.cmd('hi Comment cterm=italic gui=italic')
     end
 })
@@ -1170,20 +1157,21 @@ vim.cmd([[
     set foldtext=MyFoldText()
 ]])
 
-vim.cmd([[
-    function! GetAndSource(url)
-      execute '!curl ' . a:url . ' -o tmp.vim'
-      source tmp.vim
-      execute '!rm tmp.vim'
-    endfunction
-
-    command! -nargs=1 GS call GetAndSource(<f-args>)
-]])
+local function GetAndSource(url)
+  os.execute('curl ' .. url .. ' -o tmp.vim')
+  vim.cmd('source tmp.vim')
+  os.execute('rm tmp.vim')
+end
+vim.api.nvim_create_user_command('GS', function(opts)
+  GetAndSource(opts.args)
+end, { nargs = 1 })
 
 -- literal search
-vim.cmd([[
-    command! -nargs=1 Search :let @/='\V' . escape(<q-args>, '\\') | normal! n
-]])
+vim.api.nvim_create_user_command('Search', function(opts)
+  local escaped_arg = vim.fn.escape(opts.args, '\\')
+  vim.fn.setreg('/', '\\V' .. escaped_arg)
+  vim.api.nvim_exec('normal! n', false)
+end, { nargs = 1 })
 
 vim.diagnostic.config {
   virtual_text = false, -- disable diagnostics virtual text
@@ -1336,7 +1324,6 @@ vim.api.nvim_create_autocmd({"BufEnter", "BufWritePost", "FocusGained"}, {
     end
 })
 
-vim.api.nvim_set_keymap("n", "<leader>u", "<cmd>lua OpenURL()<CR>", { noremap = true, silent = true })
 -- open a URL in the default browser, if multiple URLs are present on the current line, open the URL under the cursor
 function OpenURL()
   local line = vim.api.nvim_get_current_line()
@@ -1361,6 +1348,7 @@ function OpenURL()
     end
   end
 end
+vim.api.nvim_set_keymap("n", "<leader>u", "<cmd>lua OpenURL()<CR>", { noremap = true, silent = true })
 
 vim.api.nvim_create_autocmd("BufRead", {
   pattern = "*",
