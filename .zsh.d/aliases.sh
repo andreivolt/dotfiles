@@ -3,11 +3,11 @@ alias da="du -sch"
 alias diff="colordiff --nobanner"
 alias eza="eza --icons auto"
 alias gc='git clone --depth 1'
+alias gist="gh gist"
 alias git="GPG_TTY=$(tty) git"
 alias gp='git push'
 alias gpf='git push -f'
 alias gr='cd $(git root)'
-alias grep="grep --color"
 alias gron="fastgron"
 alias gsp="git stash && git pull"
 alias gspp="gsp && git stash pop"
@@ -23,4 +23,3 @@ alias slugify="iconv -t ascii//TRANSLIT | sed -E 's/[~\^]+//g' | sed -E 's/[^a-z
 alias vi="nvim"
 alias vim="nvim"
 alias yt-dlp="yt-dlp --cookies-from-browser firefox"
-alias gist="gh gist"

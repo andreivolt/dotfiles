@@ -11,3 +11,11 @@ function __tmux-sessions() {
 }
 
 compdef __tmux-sessions tm
+
+if [[ -n "$TMUX" ]]; then
+  function set-tmux-title() {
+    printf "\033kzsh\033\\"
+  }
+  precmd_functions+=(set-tmux-title)
+fi
+
