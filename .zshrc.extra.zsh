@@ -6,72 +6,69 @@
 # TODO tmux complete words from current pane https://gist.github.com/blueyed/6856354
 # TODO vcs info https://github.com/grml/grml-etc-core/blob/71bdc48d190a5369fff28a97c828db7b1edf10a9/etc/zsh/zshrc#L1964
 
-is-macos() {
-  [[ $OSTYPE == darwin* ]]
-}
+is-macos() [[ $OSTYPE == darwin* ]]
 
-path() {
-  local path=(${(s/:/)PATH})
-  printf "%s\n" "$path[@]"
-}
+# automatically remove duplicates from these arrays
+typeset -U \
+  cdpath \
+  fpath \
+  manpath \
+  path
 
-append-to-path() {
-  path+=("$@")
-}
+path() printf "%s\n" $path
 
-prepend-to-path() {
-  for dir in "$@"; do
-    if [[ ! ":$PATH:" == *":$dir:"* ]]; then
-      path=("$dir" $path)
-    fi
-  done
-}
-
-eval "$(/opt/homebrew/bin/brew shellenv)"
-
-# prepend-to-path ~/.local/bin
-
-export PATH=~/.local/bin:$PATH
-
-# # no duplicates
-# typeset -U path=()
-
-setopt auto_pushd # automatically add directories to the directory stack
-
-# # set terminal title
-# source ${./modules/zsh/terminal-title.zsh}
-
-autoload -Uz colors && colors
+path=(
+  ~/bin
+  ~/.local/bin
+  ~/go/bin
+  ~/.cargo/bin
+  $path
+)
 
 # standard to request colors
 export COLORTERM=yes
 
 umask u=rwx,g=x,o=x
 
-export PATH=~/drive/bin:$PATH
-
 autoload -Uz ~/.zsh-plugins/defer/zsh-defer
 
 # prompt
-(( ${+commands[starship]} )) && eval "$(starship init zsh)"
+# zsh-defer source ~/.zsh.d/prompt.zsh
+# if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+#   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+# fi
+source ~/.zsh-plugins/powerlevel10k/powerlevel10k.zsh-theme
+[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
-# Hombrew completions
-fpath=(/opt/homebrew/share/zsh/site-functions $fpath)
+# Homebrew completions
+(( ${+commands[brew]} )) && fpath=(/opt/homebrew/share/zsh/site-functions $fpath)
 
-# HISTORY
+# history
 HISTSIZE="999999"
 SAVEHIST="999999"
-HISTFILE="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/history" # prevent cloberring shell history when starting a shell with a smaller history size
+HISTFILE="${XDG_CACHE_HOME:-$HOME/.local}/zsh/history" # prevent cloberring shell history when starting a shell with a smaller history size
 mkdir -p ${HISTFILE:h}
 setopt hist_fcntl_lock
 setopt hist_ignore_dups
-setopt hist_ignore_space # don't store commands with leading space
+setopt hist_ignore_space # ignore commands with leading space
 setopt hist_reduce_blanks # remove multiple blanks
 setopt share_history
-setopt extended_history # history: save timestamp and duration
-# setopt append_history # import new commands from the history file also in other zsh session
+setopt extended_history # save timestamp and duration
+setopt append_history
 
-# MODULES
+# setopt cshjunkiehistory
+setopt auto_cd # if a command is issued that can't be executed as a normal command, and the command is the path of a directory, perform the cd command to that directory
+setopt auto_pushd # automatically add directories to the directory stack
+setopt chase_links # cd resolve symlinks
+setopt extended_glob # in order to use #, ~ and ^ for filename generation grep word *~(*.gz|*.bz|*.bz2|*.zip|*.Z) -> searches for word not in compressed files don't forget to quote '^', '~' and '#'!
+setopt hash_list_all # whenever a command completion is attempted, make sure the entire command path # is hashed first
+setopt interactive_comments # allow comments
+setopt magicequalsubst # filename expansion in for e.g. foo=~/bar
+setopt noshwordsplit
+setopt notify # report the status of backgrounds jobs immediately
+setopt numeric_glob_sort # sort filename globs numerically
+
+# modules
 # is-macos && zsh-defer source ~/.zsh.d/macos.zsh
 # zsh-defer source ~/.zsh.d/grc.sh
 # zsh-defer source ~/.zsh.d/notify_when_done.zsh
@@ -87,36 +84,28 @@ source ~/.zsh.d/global-aliases.zsh
 is-macos && zsh-defer source ~/.zsh.d/mac_libiconv.sh
 zsh-defer source ~/.zsh-plugins/nix-shell/nix-shell.plugin.zsh
 # zsh-defer source ~/.zsh-plugins/system-clipboard/zsh-system-clipboard.zsh
-zsh-defer source ~/.zsh.d/aliases.sh
+source ~/.zsh.d/aliases.sh
 zsh-defer source ~/.zsh.d/autopair.zsh
 zsh-defer source ~/.zsh.d/brotab.zsh
 zsh-defer source ~/.zsh.d/completion.zsh
 zsh-defer source ~/.zsh.d/delta.zsh
 zsh-defer source ~/.zsh.d/direnv.zsh
 zsh-defer source ~/.zsh.d/fzf.zsh
-zsh-defer source ~/.zsh.d/go.zsh
 zsh-defer source ~/.zsh.d/gpg.zsh
 zsh-defer source ~/.zsh.d/grep.zsh
 zsh-defer source ~/.zsh.d/keephack.zsh
 zsh-defer source ~/.zsh.d/less-colors.sh
 zsh-defer source ~/.zsh.d/ls-colors.sh
 zsh-defer source ~/.zsh.d/ripgrep.zsh
-zsh-defer source ~/.zsh.d/rust.zsh
 zsh-defer source ~/.zsh.d/tmux.zsh
 
 export ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=244"
 zsh-defer source ~/.zsh-plugins/autosuggestions/zsh-autosuggestions.zsh
+unset ZSH_AUTOSUGGEST_USE_ASYNC # powerlevel10k
 
 zsh-defer source ~/.zsh-plugins/history-substring-search/zsh-history-substring-search.zsh
 bindkey '^[[A' history-substring-search-up
 bindkey '^[[B' history-substring-search-down
-
-# homebrew completions
-# if type brew &>/dev/null; then
-#   FPATH=/opt/homebrew/share/zsh-completions:$FPATH
-# fi
-
-# source ~/.zsh.d/prompt.zsh
 
 (( ${+commands[vi]} )) && export EDITOR='vi'
 (( ${+commands[vim]} )) && export EDITOR='vim'
@@ -124,32 +113,6 @@ bindkey '^[[B' history-substring-search-down
 
 # # better sudo prompt
 # alias sudo="sudo -p '%u->%U, enter password: ' "
-
-# setopt auto_cd # if a command is issued that can't be executed as a normal command, and the command is the path of a directory, perform the cd command to that directory
-# setopt cshjunkiehistory
-# setopt hash_list_all # whenever a command completion is attempted, make sure the entire command path # is hashed first
-# setopt noglobdots # make * not match dotfiles
-# setopt nohup # Don't send SIGHUP to background processes when the shell exits.
-# setopt noshwordsplit # use zsh style word splitting
-# setopt unset # don't error out when unset parameters are used
-setopt auto_pushd # make cd push the old directory onto the directory stack
-setopt chase_links # cd resolve symlinks
-setopt extended_glob # in order to use #, ~ and ^ for filename generation grep word *~(*.gz|*.bz|*.bz2|*.zip|*.Z) -> searches for word not in compressed files don't forget to quote '^', '~' and '#'!
-setopt inc_append_history # TODO which
-setopt interactive_comments # allow comments
-setopt magicequalsubst # filename expansion in for e.g. foo=~/bar
-setopt notify # report the status of backgrounds jobs immediately
-setopt numeric_glob_sort # sort filename globs numerically
-
-# trigger completion when tab is pressed on empty command line
-complete-or-list() {
-  [[ $#BUFFER != 0 ]] && { zle complete-word ; return 0 }
-  echo
-  ls
-  zle reset-prompt
-}
-zle -N complete-or-list
-bindkey '^I' complete-or-list
 
 # ctrl-z to toggle fg/bg
 fancy-ctrl-z () {
@@ -167,12 +130,6 @@ bindkey '^Z' fancy-ctrl-z
 bindkey '^[[1;3C' forward-word
 bindkey '^[[1;3D' backward-word
 
-bindkey -s '^[l' " | less\n"
-bindkey -s '^[b' " &\n"
-
-# # shift-tab TODO error
-# bindkey ''${terminfo[kcbt]:-^\[\[Z} reverse-menu-complete
-
 # suffix aliases, open files with just filename
 alias -s txt=cat
 alias -s md=mdcat
@@ -180,15 +137,12 @@ alias -s json='jq .'
 alias -s {flac,mp3,wav,ogg}='mpv --no-audio-display'
 is-macos && alias -s {gif,jpg,jpeg,mp4,pdf}=quicklook
 
- # report on cpu-/system-/user-time of long-running commands
+# report on cpu-/system-/user-time of long-running commands
 REPORTTIME=30
 
-# automatically remove duplicates from these arrays
-typeset -U path cdpath fpath manpath
+autoload -Uz zsh-mime-setup
 
-autoload -U zsh-mime-setup
-
-: do history expansion on space
+# do history expansion on space
 bindkey ' ' magic-space
 
 # # load the lookup subsystem if it's available on the system
@@ -203,8 +157,8 @@ export MANPAGER='nvim +Man!'
 ## autoload own functions. _*-functions will be loaded by the compinit builtin
 # fpath=(~/.zfunc $fpath)
 # (: ~/.zfunc/(^_*)(.)) 2>|/dev/null && \
-# autoload -U ${fpath[1]}/(^_*)(.:t)
-# autoload -U zcalc zmv zargs
+# autoload -Uz ${fpath[1]}/(^_*)(.:t)
+# autoload -Uz zcalc zmv zargs
 
 # history grep
 hgrep() {
@@ -285,11 +239,6 @@ bindkey -s '^o' '^ulfcd\n'
 
 # source $(which env_parallel.zsh) # allow using functions in parallel
 
-last_created_file() {
-  dir="${1:-.}"
-  find "$dir" -type f -printf '%T+ %p\n' | sort -r | head -n 1 | cut -d' ' -f 2-
-}
-
 # TODO
 # highlight-pid-pstree() {
 #   pstree -p --show-parents --arguments $$ --unicode |
@@ -302,13 +251,6 @@ last_created_file() {
 #   --colors "match:fg:$1" --color always \
 #   --pcre2 "$2"
 # }
-
-if [[ -n "$TMUX" ]]; then
-  function set-tmux-title() {
-    printf "\033kzsh\033\\"
-  }
-  precmd_functions+=(set-tmux-title)
-fi
 
 # colors for macOS ls
 export CLICOLOR=1

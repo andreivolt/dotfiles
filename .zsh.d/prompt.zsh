@@ -1,13 +1,6 @@
 # setopt prompt_subst # perform parameter expansion/command substitution in prompt
 
-# # git on right prompt
-# source ~/.zsh.d/git-prompt.zsh
-# RPROMPT='%(?..%(130?::%S[%?]%s))%1(j.%B(%j%)%b.)$(__git_prompt_info)'
-# add-zsh-hook chpwd __git_info
-
 # source ~/.zsh.d/prompt-vi-mode.zsh && RPROMPT='${vim_mode}'
-
-# source ~/drive/nixos-config/modules/zsh/prompt.zsh
 
 # TODO toggle right prompt
 # if [[ ${(M)RPROMPT#??} == "%/" ]]; then
@@ -42,7 +35,8 @@ prompt_precmd() {
 
   [[ -n $IN_NIX_SHELL ]] && nix_shell_indicator='%K{3}%F{0} nix-shell %f%k '
 
-  PROMPT="%(?.%F{green}.%F{red})%~ $ %f%K{black}%F{white}$prompt_jobs%f%k$nix_shell_indicator"
+  PROMPT="%(?.%F{green}.%F{red})%~ $ %f%K{black}%F{white}$prompt_jobs%f%k$nix_shell_indicator
+  $ "
 }
 prompt_opts=(cr percent sp subst)
 autoload -U add-zsh-hook
