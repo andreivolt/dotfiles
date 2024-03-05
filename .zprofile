@@ -1,3 +1,20 @@
+umask u=rwx,g=,o=
+
+# automatically remove duplicates from these arrays
+typeset -U \
+  cdpath \
+  fpath \
+  manpath \
+  path
+
+path=(
+  ~/bin
+  ~/.local/bin
+  ~/go/bin
+  ~/.cargo/bin
+  $path
+)
+
 # Homebrew
 # # cache 'brew shellenv'
 # typeset _brew_shellenv=$__zsh_cache_dir/brew_shellenv.zsh
