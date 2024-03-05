@@ -8,27 +8,10 @@
 
 is-macos() [[ $OSTYPE == darwin* ]]
 
-# automatically remove duplicates from these arrays
-typeset -U \
-  cdpath \
-  fpath \
-  manpath \
-  path
-
 path() printf "%s\n" $path
-
-path=(
-  ~/bin
-  ~/.local/bin
-  ~/go/bin
-  ~/.cargo/bin
-  $path
-)
 
 # standard to request colors
 export COLORTERM=yes
-
-umask u=rwx,g=x,o=x
 
 autoload -Uz ~/.zsh-plugins/defer/zsh-defer
 
@@ -69,22 +52,22 @@ setopt notify # report the status of backgrounds jobs immediately
 setopt numeric_glob_sort # sort filename globs numerically
 
 # modules
+# is-macos && zsh-defer source ~/.zsh.d/homebrew-command-not-found.sh
 # is-macos && zsh-defer source ~/.zsh.d/macos.zsh
+# zsh-defer source ~/.zsh-plugins/system-clipboard/zsh-system-clipboard.zsh
+# zsh-defer source ~/.zsh.d/github.zsh
 # zsh-defer source ~/.zsh.d/grc.sh
 # zsh-defer source ~/.zsh.d/notify_when_done.zsh
 # zsh-defer source ~/.zsh.d/npm.zsh
 # zsh-defer source ~/.zsh.d/nvm.zsh
 # zsh-defer source ~/.zsh.d/python.zsh
 # zsh-defer source ~/.zsh.d/ruby.zsh
-# zsh-defer source ~/.zsh.d/github.zsh
 [ $TERM = xterm-kitty ] && zsh-defer source ~/.zsh.d/kitty.zsh
-source ~/.zsh.d/vi.zsh
-source ~/.zsh.d/global-aliases.zsh
-# is-macos && zsh-defer source ~/.zsh.d/homebrew-command-not-found.sh
 is-macos && zsh-defer source ~/.zsh.d/mac_libiconv.sh
-zsh-defer source ~/.zsh-plugins/nix-shell/nix-shell.plugin.zsh
-# zsh-defer source ~/.zsh-plugins/system-clipboard/zsh-system-clipboard.zsh
 source ~/.zsh.d/aliases.sh
+source ~/.zsh.d/global-aliases.zsh
+source ~/.zsh.d/vi.zsh
+zsh-defer source ~/.zsh-plugins/nix-shell/nix-shell.plugin.zsh
 zsh-defer source ~/.zsh.d/autopair.zsh
 zsh-defer source ~/.zsh.d/brotab.zsh
 zsh-defer source ~/.zsh.d/completion.zsh
