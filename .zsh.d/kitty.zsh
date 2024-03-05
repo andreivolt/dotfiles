@@ -6,5 +6,5 @@ if test -n "$KITTY_INSTALLATION_DIR"; then
   unfunction kitty-integration
 fi
 
-# SSH fix
+# fix SSH
 alias ssh='kitty +kitten ssh'
