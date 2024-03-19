@@ -4,7 +4,6 @@ alias diff="colordiff --nobanner"
 alias eza="eza --icons auto"
 alias gc='git clone --depth 1'
 alias gist="gh gist"
-alias git="GPG_TTY=$(tty) git"
 alias gp='git push'
 alias gpf='git push -f'
 alias gr='cd $(git root)'
@@ -19,7 +18,6 @@ alias ll="ls -l --classify=auto --git"
 alias lla="ll -al"
 alias ls="eza"
 alias rm="rm --verbose"
-alias slugify="iconv -t ascii//TRANSLIT | sed -E 's/[~\^]+//g' | sed -E 's/[^a-zA-Z0-9]+/-/g' | sed -E 's/^-+\|-+$//g' | tr A-Z a-z"
 alias vi="nvim"
 alias vim="nvim"
 alias yt-dlp="yt-dlp --cookies-from-browser firefox"
