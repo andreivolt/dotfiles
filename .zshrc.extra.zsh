@@ -1,5 +1,3 @@
-# TODO dir is writable https://github.com/Feh/configs/blob/ae95e37be019d682113b30101e03af0f1e7f5174/.zsh/zshrc#L218
-# TODO kill completion
 # TODO pushd
 # TODO setopt pipefail
 # TODO strace completion
@@ -13,13 +11,13 @@ path() printf "%s\n" $path
 # standard to request colors
 export COLORTERM=yes
 
-autoload -Uz ~/.zsh-plugins/defer/zsh-defer
+autoload -U colors && colors
 
 # prompt
-# zsh-defer source ~/.zsh.d/prompt.zsh
-# if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
-#   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
-# fi
+# source ~/.zsh.d/prompt.zsh
+if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+fi
 source ~/.zsh-plugins/powerlevel10k/powerlevel10k.zsh-theme
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
@@ -34,12 +32,13 @@ mkdir -p ${HISTFILE:h}
 setopt hist_fcntl_lock
 setopt hist_ignore_dups
 setopt hist_ignore_space # ignore commands with leading space
-setopt hist_reduce_blanks # remove multiple blanks
+setopt hist_reduce_blanks # collapse consecutive blanks
 setopt share_history
 setopt extended_history # save timestamp and duration
 setopt append_history
 
 # setopt cshjunkiehistory
+setopt null_glob # return an empty string instead of error when no matches
 setopt auto_cd # if a command is issued that can't be executed as a normal command, and the command is the path of a directory, perform the cd command to that directory
 setopt auto_pushd # automatically add directories to the directory stack
 setopt chase_links # cd resolve symlinks
@@ -51,48 +50,32 @@ setopt noshwordsplit
 setopt notify # report the status of backgrounds jobs immediately
 setopt numeric_glob_sort # sort filename globs numerically
 
+source ~/.zsh.d/vi.zsh
+
 # modules
-# is-macos && zsh-defer source ~/.zsh.d/homebrew-command-not-found.sh
-# is-macos && zsh-defer source ~/.zsh.d/macos.zsh
-# zsh-defer source ~/.zsh-plugins/system-clipboard/zsh-system-clipboard.zsh
-# zsh-defer source ~/.zsh.d/github.zsh
-# zsh-defer source ~/.zsh.d/grc.sh
-# zsh-defer source ~/.zsh.d/notify_when_done.zsh
-# zsh-defer source ~/.zsh.d/npm.zsh
-# zsh-defer source ~/.zsh.d/nvm.zsh
-# zsh-defer source ~/.zsh.d/python.zsh
-# zsh-defer source ~/.zsh.d/ruby.zsh
-[ $TERM = xterm-kitty ] && zsh-defer source ~/.zsh.d/kitty.zsh
-is-macos && zsh-defer source ~/.zsh.d/mac_libiconv.sh
+# is-macos && source ~/.zsh.d/homebrew-command-not-found.sh
+# is-macos && source ~/.zsh.d/macos.zsh
+# source ~/.zsh-plugins/system-clipboard/zsh-system-clipboard.zsh
+# source ~/.zsh.d/github.zsh
+# source ~/.zsh.d/grc.sh
+# source ~/.zsh.d/notify_when_done.zsh
+# source ~/.zsh.d/npm.zsh
+# source ~/.zsh.d/nvm.zsh
+# source ~/.zsh.d/python.zsh
+# source ~/.zsh.d/ruby.zsh
+[ $TERM = xterm-kitty ] && source ~/.zsh.d/kitty.zsh
+is-macos && source ~/.zsh.d/mac_libiconv.sh
 source ~/.zsh.d/aliases.sh
 source ~/.zsh.d/global-aliases.zsh
-source ~/.zsh.d/vi.zsh
-zsh-defer source ~/.zsh-plugins/nix-shell/nix-shell.plugin.zsh
-zsh-defer source ~/.zsh.d/autopair.zsh
-zsh-defer source ~/.zsh.d/brotab.zsh
-zsh-defer source ~/.zsh.d/completion.zsh
-zsh-defer source ~/.zsh.d/delta.zsh
-zsh-defer source ~/.zsh.d/direnv.zsh
-zsh-defer source ~/.zsh.d/fzf.zsh
-zsh-defer source ~/.zsh.d/gpg.zsh
-zsh-defer source ~/.zsh.d/grep.zsh
-zsh-defer source ~/.zsh.d/keephack.zsh
-zsh-defer source ~/.zsh.d/less-colors.sh
-zsh-defer source ~/.zsh.d/ls-colors.sh
-zsh-defer source ~/.zsh.d/ripgrep.zsh
-zsh-defer source ~/.zsh.d/tmux.zsh
+eval "$(direnv hook zsh)"
 
 export ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=244"
-zsh-defer source ~/.zsh-plugins/autosuggestions/zsh-autosuggestions.zsh
+source ~/.zsh-plugins/autosuggestions/zsh-autosuggestions.zsh
 unset ZSH_AUTOSUGGEST_USE_ASYNC # powerlevel10k
 
-zsh-defer source ~/.zsh-plugins/history-substring-search/zsh-history-substring-search.zsh
+source ~/.zsh-plugins/history-substring-search/zsh-history-substring-search.zsh
 bindkey '^[[A' history-substring-search-up
 bindkey '^[[B' history-substring-search-down
-
-(( ${+commands[vi]} )) && export EDITOR='vi'
-(( ${+commands[vim]} )) && export EDITOR='vim'
-(( ${+commands[nvim]} )) && export EDITOR='nvim'
 
 # # better sudo prompt
 # alias sudo="sudo -p '%u->%U, enter password: ' "
@@ -118,7 +101,10 @@ alias -s txt=cat
 alias -s md=mdcat
 alias -s json='jq .'
 alias -s {flac,mp3,wav,ogg}='mpv --no-audio-display'
-is-macos && alias -s {gif,jpg,jpeg,mp4,pdf}=quicklook
+is-macos && {
+  quicklook() { qlmanage -p "$*" &>/dev/null }
+  alias -s {gif,jpg,jpeg,mp4,pdf}=quicklook
+}
 
 # report on cpu-/system-/user-time of long-running commands
 REPORTTIME=30
@@ -248,15 +234,35 @@ is-macos && {
 bindkey "^[[1;5C" forward-word
 bindkey "^[[1;5D" backward-word
 
-# autocorrect
-# setopt correct # spelling correction
-setopt correct_all
+# # autocorrect
+# # setopt correct # spelling correction
+# setopt correct_all
 autoload -U colors && colors
-export SPROMPT="Correct $fg_bold[red]%R$reset_color to $fg_bold[green]%r?$reset_color ($fg_bold[green]Yes$reset_color, $fg_bold[yellow]No$reset_color, $fg_bold[red]Abort$reset_color, $fg_bold[blue]Edit$reset_color) "
+# export SPROMPT="Correct $fg_bold[red]%R$reset_color to $fg_bold[green]%r?$reset_color ($fg_bold[green]Yes$reset_color, $fg_bold[yellow]No$reset_color, $fg_bold[red]Abort$reset_color, $fg_bold[blue]Edit$reset_color) "
 
 # ignore likely errors beginning of command
 alias \$=''
 alias \%=''
 
+source ~/.zsh-plugins/nix-shell/nix-shell.plugin.zsh
+source ~/.zsh.d/autopair.zsh
+source ~/.zsh.d/brotab.zsh
+source ~/.zsh.d/completion.zsh
+source ~/.zsh.d/delta.zsh
+source ~/.zsh.d/direnv.zsh
+source ~/.zsh.d/fzf.zsh
+source ~/.zsh.d/gpg.zsh
+source ~/.zsh.d/grep.zsh
+source ~/.zsh.d/keephack.zsh
+source ~/.zsh.d/less-colors.sh
+source ~/.zsh.d/ls-colors.sh
+source ~/.zsh.d/ripgrep.zsh
+source ~/.zsh.d/tmux.zsh
+source ~/.zsh.d/orbstack.zsh
+
+fpath+=~/.local/share/zsh/site-functions
+mkdir -p ${fpath[-1]}
+autoload -Uz $fpath[-1]/*(.:t)
+
 # syntax highlighting: needs to be sourced after anything else that add hooks to modify the command-line buffer
-zsh-defer source ~/.zsh-plugins/syntax-highlighting/zsh-syntax-highlighting.zsh
+source ~/.zsh-plugins/syntax-highlighting/zsh-syntax-highlighting.zsh
