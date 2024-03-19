@@ -1,20 +1,5 @@
 umask u=rwx,g=,o=
 
-# automatically remove duplicates from these arrays
-typeset -U \
-  cdpath \
-  fpath \
-  manpath \
-  path
-
-path=(
-  ~/bin
-  ~/.local/bin
-  ~/go/bin
-  ~/.cargo/bin
-  $path
-)
-
 # Homebrew
 # # cache 'brew shellenv'
 # typeset _brew_shellenv=$__zsh_cache_dir/brew_shellenv.zsh
@@ -32,5 +17,26 @@ export PATH="/opt/homebrew/bin:/opt/homebrew/sbin${PATH+:$PATH}";
 export MANPATH="/opt/homebrew/share/man${MANPATH+:$MANPATH}:";
 export INFOPATH="/opt/homebrew/share/info:${INFOPATH:-}";
 
-# Added by OrbStack: command-line tools and integration
+export XDG_CONFIG_HOME=~/.config
+
+source ~/.env.private
+
 source ~/.orbstack/shell/init.zsh 2>/dev/null || :
+
+# automatically remove duplicates
+typeset -Ug cdpath
+typeset -Ug fpath
+typeset -Ug manpath
+
+typeset -Ug path
+path=(
+  $path
+  ~/go/bin
+  ~/.cargo/bin
+  ~/.local/bin
+  ~/bin
+)
+
+(( ${+commands[vi]} )) && export EDITOR='vi'
+(( ${+commands[vim]} )) && export EDITOR='vim'
+(( ${+commands[nvim]} )) && export EDITOR='nvim'

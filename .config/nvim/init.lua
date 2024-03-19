@@ -128,8 +128,9 @@ map("n", "<c-k>", "<c-w>k") -- tmux style navigation
 map("n", "<c-l>", "<c-w>l") -- tmux style navigation
 
 -- command-line completion mode
-vim.opt.wildmode = 'list:longest'
--- vim.opt.wildmode = 'longest:full,full' TODO
+vim.opt.wildmenu = true
+vim.opt.wildmode = 'longest:full,full'
+vim.opt.wildignorecase = true
 
 vim.opt.showmode = false
 
@@ -192,16 +193,25 @@ require 'packer'.startup({
         -- Packer can manage itself
         use 'wbthomason/packer.nvim'
 
-        -- REPL
-        use 'jpalardy/vim-slime'
 
         -- Clojure
         use {
             'Olical/conjure',
-            tag = 'v4.3.1',
             config = function()
                 -- let g:conjure#log#hud#enabled = 0
             end
+        }
+
+        -- REPL
+        -- use 'jpalardy/vim-slime'
+        use { 'jgdavey/tslime.vim', branch = 'main' }
+
+        use("radenling/vim-dispatch-neovim", {requires = {"tpope/vim-dispatch"}})
+        use("clojure-vim/vim-jack-in", {after = {"vim-dispatch", "vim-dispatch-neovim"}})
+
+        use {
+            'eraserhd/parinfer-rust',
+            run = 'cargo build --release',
         }
 
         -- -- show whenever a code action is available
@@ -266,14 +276,11 @@ require 'packer'.startup({
                         buftypes = { 'terminal', 'nofile' }
                     },
                     indent = {
-                      -- char = "▎"
-                      char = '┊'
+                      char = "▎"
                     }
                 }
             end
         }
-
-        use 'Lokaltog/vim-monotone'
 
         -- scope in statusline
         use {
@@ -440,16 +447,10 @@ require 'packer'.startup({
         -- dark
         use 'rafalbromirski/vim-aurora'
         use { 'challenger-deep-theme/vim', as = 'challenger-deep' }
-        -- use 'tek256/simple-dark'
-        -- use 'ackyshake/spacegray.vim'
-        -- use 'bluz71/vim-nightfly-guicolors'
-        -- use 'DavidBachmann/vim-punk-colorscheme'
-        -- use { 'kyoz/purify', rtp = 'vim' }
-        -- use 'shaunsingh/moonlight.nvim'
-        -- -- monochrome
-        -- use 'pgdouyon/vim-yin-yang'
-        -- use 'felipevolpone/mono-theme'
-        -- use 'pbrisbin/vim-colors-off'
+        use 'bluz71/vim-nightfly-guicolors'
+        use 'shaunsingh/moonlight.nvim'
+        use 'RRethy/base16-nvim'
+        use 'Lokaltog/vim-monotone'
 
         use 'othree/javascript-libraries-syntax.vim'
         use 'pangloss/vim-javascript'
@@ -777,6 +778,24 @@ require 'packer'.startup({
         -- Ruby LSP
         require 'lspconfig'.solargraph.setup {}
 
+        -- LSP floating windows
+        local border = {
+            {"🭽", "FloatBorder"},
+            {"▔", "FloatBorder"},
+            {"🭾", "FloatBorder"},
+            {"▕", "FloatBorder"},
+            {"🭿", "FloatBorder"},
+            {"▁", "FloatBorder"},
+            {"🭼", "FloatBorder"},
+            {"▏", "FloatBorder"},
+        }
+        local orig_util_open_floating_preview = vim.lsp.util.open_floating_preview
+        function vim.lsp.util.open_floating_preview(contents, syntax, opts, ...)
+            opts = opts or {}
+            opts.border = opts.border or border
+            return orig_util_open_floating_preview(contents, syntax, opts, ...)
+        end
+
         -- -- Lua LSP
         require 'lspconfig'.lua_ls.setup {
             on_init = function(client)
@@ -990,6 +1009,7 @@ require 'packer'.startup({
 
         require('telescope').setup {
             pickers = {
+                colorscheme = { enable_preview = true },
                 buffers = { theme = "ivy" },
                 find_files = { theme = "ivy" }
             }
@@ -1056,16 +1076,15 @@ end
 --  package.loaded['package-name-here'] = nil then require again and it'll load the new version
 --
 
+-- global statusline
 local function globalstatus()
     vim.opt.laststatus = 3
     -- Set highlight for WinSeparator with background and then foreground
     vim.api.nvim_set_hl(0, "WinSeparator", {ctermbg = "NONE", bg = "NONE"})
     vim.api.nvim_set_hl(0, "WinSeparator", {ctermfg = "gray", fg = "#444444"})
 end
-
 globalstatus()
 
--- global statusline
 vim.api.nvim_create_autocmd('ColorScheme', {
     pattern = '*',
     callback = function()
@@ -1089,8 +1108,8 @@ vim.api.nvim_create_autocmd('ColorScheme', {
         --     vim.api.nvim_set_hl(0, k, v)
         -- end
 
-        vim.cmd('hi Question ctermfg=gray guifg=#444444')
-        vim.cmd('hi Folded guibg=#181818')
+        -- vim.cmd('hi Question ctermfg=gray guifg=#444444')
+        -- vim.cmd('hi Folded guibg=#181818')
         vim.cmd('hi NonText ctermfg=red')
         vim.cmd('hi Normal ctermbg=NONE guibg=NONE')
         vim.cmd('hi SignColumn ctermbg=NONE guibg=NONE')
@@ -1100,10 +1119,10 @@ vim.api.nvim_create_autocmd('ColorScheme', {
         vim.cmd('hi Comment cterm=italic gui=italic')
     end
 })
-vim.cmd('colorscheme aurora')
+vim.cmd('colorscheme nightfly')
 
-require 'avo-ruby'
-require 'avo-docker'
+-- require 'avo-ruby'
+-- require 'avo-docker'
 -- require 'avo-tmux'
 
 vim.opt.fillchars = {
@@ -1329,6 +1348,7 @@ function OpenURL()
   local line = vim.api.nvim_get_current_line()
   local cursor_col = vim.fn.col('.')
   local urls = {}
+
   for url in string.gmatch(line, 'https?://[%w-_./?%%=~&:+%%*]+') do
     table.insert(urls, url)
   end
@@ -1338,17 +1358,23 @@ function OpenURL()
   elseif #urls == 1 then
     vim.fn.system('open "' .. urls[1] .. '"')
   else
-    local s, e = nil, nil
+    local found_url = false
     for _, url in ipairs(urls) do
-      s, e = string.find(line, url, 1, true)
+      local s, e = string.find(line, url, 1, true)
       if cursor_col >= s and cursor_col <= e then
         vim.fn.system('open "' .. url .. '"')
+        found_url = true
         break
+      end
+    end
+    if not found_url then
+      for _, url in ipairs(urls) do
+        vim.fn.system('open "' .. url .. '"')
       end
     end
   end
 end
-vim.api.nvim_set_keymap("n", "<leader>u", "<cmd>lua OpenURL()<CR>", { noremap = true, silent = true })
+vim.api.nvim_set_keymap("n", "<leader>u", "<cmd>lua OpenURL()<CR>", { noremap = true, silent = true })vim.api.nvim_set_keymap("n", "<leader>u", "<cmd>lua OpenURL()<CR>", { noremap = true, silent = true })
 
 vim.api.nvim_create_autocmd("BufRead", {
   pattern = "*",
@@ -1356,6 +1382,8 @@ vim.api.nvim_create_autocmd("BufRead", {
     local shebang_mappings = {
       ["^#!.*bb$"] = "clojure",
       ["^#!.*bun$"] = "javascript",
+      ["^#!.*gorun$"] = "go",
+      ["^#!.*boot$"] = "clojure",
       ["^#!.*osascript"] = "applescript",
       ["^#!.*pip%-run"] = "python",
       ["^#!.*pipx run"] = "python",

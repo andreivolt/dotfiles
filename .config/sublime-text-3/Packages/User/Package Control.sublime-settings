@@ -8,10 +8,13 @@
 	"installed_packages":
 	[
 		"Color Scheme - Vintage Terminal",
+		"distractionless",
+		"Moonlight",
 		"NeoVintageous",
 		"Nix",
 		"Package Control",
 		"PackageResourceViewer",
+		"SublimeREPL",
 		"Theme - Vim Blackboard",
 		"Tomorrow Color Schemes",
 		"Tomorrow Night Italics Color Scheme",

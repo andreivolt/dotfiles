@@ -1,10 +1,9 @@
 {
-	"color_scheme": "Packages/Tomorrow Color Schemes/Tomorrow-Night-Bright.tmTheme",
+	"color_scheme": "Breakers.sublime-color-scheme",
 	"font_face": "Tahoma",
-	"font_size": 20,
+	"font_size": 32,
 	"ignored_packages":
 	[
-		"NeoVintageous",
 		"Vintage",
 	],
 	"line_numbers": false,
