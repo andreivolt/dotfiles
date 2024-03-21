@@ -97,6 +97,7 @@ vim.api.nvim_set_hl(0, "WinBar", {bg = "#444444"})
 -- reselect pasted text
 vim.api.nvim_set_keymap("n", "gp", "`[v`]", {noremap = true})
 
+
 -- use visual lines with word wrap
 --map('n', 'k', "v:count == 0 ? 'gk' : 'k'")
 --map('n', 'j', "v:count == 0 ? 'gj' : 'j'")
@@ -227,6 +228,8 @@ require 'packer'.startup({
         use 'pierreglaser/folding-nvim'
 
         use 'neovim/nvim-lspconfig'
+
+        use "fladson/vim-kitty"
 
         use 'jose-elias-alvarez/null-ls.nvim'
 
@@ -407,6 +410,7 @@ require 'packer'.startup({
             'f-person/git-blame.nvim',
             setup = function()
                 vim.g.gitblame_highlight_group = "Question"
+                vim.g.gitblame_enabled = 0
             end
         }
 
@@ -547,10 +551,33 @@ require 'packer'.startup({
         use {
             "folke/zen-mode.nvim",
             config = function()
+                vim.api.nvim_set_keymap("n", "<leader>z", "", { callback = require("zen-mode").toggle, noremap = true })
+
                 require("zen-mode").setup {
-                    backdrop = 1,
+                    window = { width = 80, heigth = .8 },
+                    options = {
+                        signcolumn = "no", -- disable signcolumn
+                        number = false, -- disable number column
+                        relativenumber = false, -- disable relative numbers
+                        cursorline = false, -- disable cursorline
+                        cursorcolumn = false, -- disable cursor column
+                        foldcolumn = "0", -- disable fold column
+                        list = false, -- disable whitespace characters
+                    },
                     plugins = {
-                      tmux = { enabled = true }
+                        tmux = { enabled = true },
+                        gitsigns = { enabled = false },
+                        kitty = {
+                          enabled = true,
+                          font = "+4", -- font size increment
+                        },
+                        options = {
+                            enabled = true,
+                            ruler = false, -- disables the ruler text in the cmd line area
+                            showcmd = false, -- disables the command in the last line of the screen
+                            -- you may turn on/off statusline in zen mode by setting 'laststatus' statusline will be shown only if 'laststatus' == 3
+                            laststatus = 0, -- turn off the statusline in zen mode
+                        }
                     }
                 }
             end
@@ -698,7 +725,7 @@ require 'packer'.startup({
                 ts_utils.setup_client(client)
 
                 -- rename
-                vim.api.nvim_set_keymap("n", "<leader>rn", "<cmd>lua vim.lsp.buf.rename()<CR>", { noremap = true })
+                vim.api.nvim_set_keymap("n", "<leader>rn", "", { noremap = true, callback = vim.lsp.buf.rename })
 
                 buf_map(bufnr, "n", "gs", ":TSLspOrganize<CR>")
                 buf_map(bufnr, "n", "gi", ":TSLspRenameFile<CR>")
@@ -804,7 +831,7 @@ require 'packer'.startup({
                     client.config.settings = vim.tbl_deep_extend('force', client.config.settings, {
                         Lua = {
                           diagnostics = {
-                            globals = { 'vim' },
+                            globals = { 'vim', 'hs' },
                           },
                           runtime = {
                             version = 'LuaJIT',
@@ -1434,4 +1461,16 @@ vim.api.nvim_create_autocmd('BufReadPost', {
       vim.api.nvim_win_set_cursor(0, mark)
     end
   end
+})
+
+-- remap v/V in visual mode for tree-sitter incremental selection
+vim.api.nvim_set_keymap('x', 'v', '', {
+  silent = true,
+  noremap = true,
+  callback = require'nvim-treesitter.incremental_selection'.node_incremental
+})
+vim.api.nvim_set_keymap('x', 'V', '', {
+  silent = true,
+  noremap = true,
+  callback = require'nvim-treesitter.incremental_selection'.node_decremental
 })

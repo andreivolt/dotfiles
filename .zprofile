@@ -30,11 +30,11 @@ typeset -Ug manpath
 
 typeset -Ug path
 path=(
-  $path
+  ~/bin
   ~/go/bin
   ~/.cargo/bin
   ~/.local/bin
-  ~/bin
+  $path
 )
 
 (( ${+commands[vi]} )) && export EDITOR='vi'
