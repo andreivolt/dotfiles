@@ -1,4 +1,3 @@
-alias ".."="cd .."
 alias da="du -sch"
 alias diff="colordiff --nobanner"
 alias eza="eza --icons auto"
