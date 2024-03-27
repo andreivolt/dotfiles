@@ -1,2 +1,2 @@
 --map-syntax '.nrepl-history:Clojure'
---theme ansi
+--theme base16
