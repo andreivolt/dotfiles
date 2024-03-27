@@ -54,7 +54,6 @@ source ~/.zsh.d/vi.zsh
 
 # modules
 # is-macos && source ~/.zsh.d/homebrew-command-not-found.sh
-# is-macos && source ~/.zsh.d/macos.zsh
 # source ~/.zsh-plugins/system-clipboard/zsh-system-clipboard.zsh
 # source ~/.zsh.d/github.zsh
 # source ~/.zsh.d/grc.sh
@@ -266,3 +265,9 @@ autoload -Uz $fpath[-1]/*(.:t)
 
 # syntax highlighting: needs to be sourced after anything else that add hooks to modify the command-line buffer
 source ~/.zsh-plugins/syntax-highlighting/zsh-syntax-highlighting.zsh
+
+alias modal='pipx run modal'
+alias rawdog='pipx run rawdog-ai'
+alias tidal-dl-ng='pipx run tidal-dl-ng'
+
+# eval "$(register-python-argcomplete textract)"

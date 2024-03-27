@@ -300,6 +300,12 @@ require 'packer'.startup({
         -- display commit message in statusbar in fugitiveblame buffer
         use 'tommcdo/vim-fugitive-blame-ext'
 
+	use {
+		"nvim-treesitter/nvim-treesitter-context",
+	        after = "nvim-treesitter",
+		requires = "nvim-treesitter"
+        }
+
         use {
             'nvim-treesitter/nvim-treesitter',
             run = ':TSUpdate',
@@ -314,9 +320,11 @@ require 'packer'.startup({
                         enable = true,
                         keymaps = {
                             init_selection = "gnn",
-                            node_incremental = "grn",
                             scope_incremental = "grc",
-                            node_decremental = "grm",
+                            -- node_incremental = "grn",
+                            -- node_decremental = "grm",
+                            node_incremental = "v",
+                            node_decremental = "V",
                         },
                     },
                     indent = {
@@ -554,7 +562,7 @@ require 'packer'.startup({
                 vim.api.nvim_set_keymap("n", "<leader>z", "", { callback = require("zen-mode").toggle, noremap = true })
 
                 require("zen-mode").setup {
-                    window = { width = 80, heigth = .8 },
+                    window = { width = 80, height = .8 },
                     options = {
                         signcolumn = "no", -- disable signcolumn
                         number = false, -- disable number column
@@ -831,7 +839,7 @@ require 'packer'.startup({
                     client.config.settings = vim.tbl_deep_extend('force', client.config.settings, {
                         Lua = {
                           diagnostics = {
-                            globals = { 'vim', 'hs' },
+                            globals = { 'vim', 'hs', 'spoon' },
                           },
                           runtime = {
                             version = 'LuaJIT',
@@ -1401,7 +1409,7 @@ function OpenURL()
     end
   end
 end
-vim.api.nvim_set_keymap("n", "<leader>u", "<cmd>lua OpenURL()<CR>", { noremap = true, silent = true })vim.api.nvim_set_keymap("n", "<leader>u", "<cmd>lua OpenURL()<CR>", { noremap = true, silent = true })
+vim.api.nvim_set_keymap("n", "<leader>u", "<cmd>lua OpenURL()<CR>", { noremap = true, silent = true })
 
 vim.api.nvim_create_autocmd("BufRead", {
   pattern = "*",
@@ -1464,13 +1472,26 @@ vim.api.nvim_create_autocmd('BufReadPost', {
 })
 
 -- remap v/V in visual mode for tree-sitter incremental selection
-vim.api.nvim_set_keymap('x', 'v', '', {
-  silent = true,
-  noremap = true,
-  callback = require'nvim-treesitter.incremental_selection'.node_incremental
+-- vim.api.nvim_set_keymap('x', 'v', '', {
+--   silent = true,
+--   noremap = true,
+--   callback = require'nvim-treesitter.incremental_selection'.node_incremental
+-- })
+-- vim.api.nvim_set_keymap('x', 'V', '', {
+--   silent = true,
+--   noremap = true,
+--   callback = require'nvim-treesitter.incremental_selection'.node_decremental
+-- })
+
+vim.api.nvim_create_autocmd("BufEnter", {
+  pattern = "*.ex",
+  command = 'syn match Error "IO.puts\\|IO.inspect"',
 })
-vim.api.nvim_set_keymap('x', 'V', '', {
-  silent = true,
-  noremap = true,
-  callback = require'nvim-treesitter.incremental_selection'.node_decremental
+vim.api.nvim_create_autocmd("BufEnter", {
+  pattern = "*.rb",
+  command = 'syn match Error "binding.pry\\|debugger"',
+})
+vim.api.nvim_create_autocmd("BufEnter", {
+  pattern = { "*.js", "*.ts", "*.tsx" },
+  command = 'syn match Error "colsole.log"',
 })
