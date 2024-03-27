@@ -1,0 +1,39 @@
+#!/usr/bin/env ruby
+
+require 'bundler/inline'
+
+gemfile true do
+  source :rubygems
+  gem 'selenium-webdriver'
+end
+
+driver = Selenium::WebDriver.for :chrome
+driver.get('https://www.brain.fm')
+
+wait = Selenium::WebDriver::Wait.new(timeout: 10)
+try_link = wait.until { driver.find_element(:css, "[data-testid='sign-up']") }
+try_link.click
+
+name_field = wait.until { driver.find_element(:id, 'name') }
+name_field.send_keys('a')
+
+random_email = "user_#{rand(1000..9999)}@example.com"
+email_field = wait.until { driver.find_element(:id, 'email') }
+email_field.send_keys(random_email)
+
+password_field = wait.until {
+driver.find_element(:id, 'password') }
+password_field.send_keys('Password123!')
+
+create_account_button = wait.until { driver.find_element(:css, "[data-testid='handle-sign-up']") }
+create_account_button.click
+
+wait.until { driver.execute_script('return document.readyState') == 'complete' }
+
+screenshot_path = "screenshot.png"
+driver.save_screenshot(screenshot_path)
+puts "Screenshot saved to #{screenshot_path}"
+
+puts "Press Enter to quit the browser"
+STDIN.getc
+driver.quit

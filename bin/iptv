@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+exec mpv https://iptv-org.github.io/iptv/index.m3u

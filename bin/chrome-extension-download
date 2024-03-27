@@ -1,0 +1,19 @@
+#!/usr/bin/env ruby
+
+def fetch_chrome_version
+  version_info = `/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --version`
+  version_info.match(/[\d]+\.[\d]+\.[\d]+\.[\d]+/).first
+end
+
+def download_extension(extension_id, chrome_version)
+  url = "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=#{chrome_version}&acceptformat=crx2,crx3&x=id%3d#{extension_id}%26installsource%3dondemand%26uc"
+  File.write("#{extension_id}.crx", URI.open(url).read)
+end
+
+extension_id = ARGV.first
+
+abort "Error: No extension ID provided." if extension_id.nil? || extension_id.strip.empty?
+
+chrome_version = fetch_chrome_version
+
+download_extension extension_id, chrome_version

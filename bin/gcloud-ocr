@@ -1,0 +1,16 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'tempfile'
+
+def detect_text(path)
+  result = JSON.parse `gcloud ml vision detect-text #{path}`
+  result['responses'][0]['fullTextAnnotation']['text']
+end
+
+puts detect_text(
+  ARGV[0] || Tempfile.open('input') do |f|
+    !$stdin.tty? ? f.write($stdin.read) : `screencapture -i -s #{f.path}`
+    f.path
+  end
+)
