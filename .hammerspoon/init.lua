@@ -106,3 +106,15 @@ local windowFilter = hs.window.filter.new(true)
             resizeAndCenterWindow(window)
         end
     end)
+
+-- ctrl-alt +
+spoon.SpoonInstall:andUse("AppLauncher", {
+  hotkeys = {
+    c = "Calendar",
+    b = "Calendar",
+    d = "Discord",
+    f = "Firefox",
+    t = "Kitty",
+    z = "Zoom.us",
+  }
+})

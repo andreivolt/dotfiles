@@ -18,6 +18,8 @@ export MANPATH="/opt/homebrew/share/man${MANPATH+:$MANPATH}:";
 export INFOPATH="/opt/homebrew/share/info:${INFOPATH:-}";
 
 export XDG_CONFIG_HOME=~/.config
+export XDG_STATE_HOME=~/.local/state
+mkdir -p $XDG_STATE_HOME
 
 source ~/.env.private
 
