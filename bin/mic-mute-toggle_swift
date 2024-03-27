@@ -51,11 +51,10 @@ func toggleDefaultInputDeviceMute() {
 
     let title = "Microphone Mute"
     let message = newMuteValue == 0 ? "Microphone is unmuted" : "Microphone is muted"
-    let command = "terminal-notifier -title \"\(title)\" -message \"\(message)\""
 
     let task = Process()
-    task.launchPath = "/bin/bash"
-    task.arguments = ["-c", command]
+    task.launchPath = "/run/current-system/sw/bin/terminal-notifier"
+    task.arguments = ["-title", title, "-message", message]
     task.launch()
     task.waitUntilExit()
 }
