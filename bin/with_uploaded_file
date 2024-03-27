@@ -1,0 +1,41 @@
+#!/usr/bin/env ruby
+
+require 'bundler/inline'
+
+gemfile do
+  source :rubygems
+  gem 'nokogiri', '~> 1'
+  gem 'aws-sdk-s3', '~> 1'
+end
+
+require 'optparse'
+require 'shellwords'
+require 'tempfile'
+
+BUCKET = ENV['BACKBLAZE_BUCKET']
+PROFILE = 'backblaze'
+
+options = {}
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{$0} [options] command"
+
+  opts.on("-f", "--file FILE", "File to upload")
+end.parse!(into: options)
+
+file = options[:file] ? File.open(options[:file]) : Tempfile.new($stdin.read)
+filename = File.basename(file.path)
+
+Aws.config.update(profile: PROFILE)
+s3 = Aws::S3::Client.new
+
+s3.put_object(bucket: BUCKET, key: filename, body: file)
+
+url = Aws::S3::Presigner.new(client: s3).presigned_url(:get_object, bucket: BUCKET, key: filename)
+
+cmd = ARGV.map { |arg| arg.gsub('{}', Shellwords.escape(url)) }
+
+system(*cmd)
+
+at_exit { s3.delete_object(bucket: BUCKET, key: filename) }
+at_exit { file.close unless file.closed? }
+at_exit { file.unlink if file.is_a?(Tempfile) }

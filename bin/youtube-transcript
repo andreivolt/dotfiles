@@ -1,0 +1,12 @@
+#!/usr/bin/env cached-nix-shell
+#!nix-shell -i ruby -p python3Packages.youtube-transcript-api
+
+require 'uri'
+require 'cgi'
+
+begin
+ video_id = ARGV[0].match?(/\A[a-zA-Z0-9_-]{11}\z/) ? ARGV[0] : CGI.parse(URI.parse(ARGV[0]).query)['v'].first
+ puts `youtube_transcript_api --format text #{video_id}`.gsub(/\n/, ' ')
+rescue => e
+ abort "Error: #{ARGV.empty? ? "No YouTube URL or video ID provided." : e.message}"
+end

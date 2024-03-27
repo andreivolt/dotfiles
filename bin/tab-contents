@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+bt list | awk '
+  BEGIN { OFS="\t" }
+  {
+    id=$1
+    url=$NF
+    title=""
+    for (i=2; i<NF; i++) {
+      title = title $i " "
+    }
+    title = substr(title, 1, length(title)-1)
+    gsub(/"/, "\\\"", title)
+    print id, title, url
+  }
+' | fzf --multi --delimiter=$'\t' --with-nth=2,3 --preview '
+  echo "Page ID: {1}"
+  echo "Title: {2}"
+  echo "URL: {3}"
+  echo "---"
+  bt html {1} | readable --base {3} | html2md
+' | awk -F'\t' '
+  {
+    printf "#### %s ####\n\n", $2
+    system("bt html " $1 " | readable --base \"" $3 "\" | html2md")
+    printf "\n"
+  }
+'
