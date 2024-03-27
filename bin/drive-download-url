@@ -1,0 +1,27 @@
+#!/usr/bin/env ruby
+
+path = ARGV[0]
+
+abort "File or directory does not exist" unless File.exist?(path)
+
+realpath = File.realpath(path)
+home_dir = ENV['HOME']
+
+gdrive_paths = [
+  "#{home_dir}/Library/CloudStorage/GoogleDrive-andrei.volt@gmail.com/My Drive",
+  "#{home_dir}/drive"
+]
+
+gdrive_path = gdrive_paths.find { |p| realpath.start_with?(p) }
+
+abort "Path is not in Google Drive directory" if gdrive_path.nil?
+
+relative_path = realpath.sub(gdrive_path, '')
+remote_path = "gdrive:#{relative_path}"
+link_cmd = `rclone link #{remote_path}`
+
+file_id = link_cmd.match(/(?<=id=)\w+/)&.to_s
+
+abort "Failed to get file ID from rclone link command" if file_id.nil?
+
+puts "https://drive.google.com/uc?export=download&id=#{file_id}"

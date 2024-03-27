@@ -1,0 +1,129 @@
+#!/usr/bin/env ruby
+
+require "optparse"
+require "net/http"
+require "uri"
+require "json"
+
+options = {
+  custom_topic: nil,
+  custom_topic_mode: "extended",
+  detect_entities: false,
+  detect_language: false,
+  detect_topics: false,
+  diarize: false,
+  diarize_version: nil,
+  dictation: false,
+  extra: nil,
+  filler_words: false,
+  intents: false,
+  keywords: nil,
+  language: "en",
+  measurements: false,
+  model: "whisper-large",
+  multichannel: false,
+  numerals: false,
+  paragraphs: false,
+  profanity_filter: false,
+  punctuate: false,
+  redact: [],
+  replace: nil,
+  search: nil,
+  sentiment: false,
+  smart_format: false,
+  summarize: "v2",
+  tag: nil,
+  topics: false,
+  utt_split: 0.8,
+  utterances: false,
+  version: "latest"
+}
+
+OptionParser.new do |parser|
+  parser.banner = "Usage: #{$0} [options] <file|url>"
+
+  parser.on("-m", "--model MODEL", "Model to use for transcription (default: #{options[:model]})")
+  parser.on("--custom-topic TOPIC", "Custom topic to detect")
+  parser.on("--custom-topic-mode MODE", "Custom topic detection mode (default: #{options[:custom_topic_mode]})")
+  parser.on("--diarize", "Recognize speaker changes (default: #{options[:diarize]})")
+  parser.on("--diarize-version VERSION", "Version of diarization feature")
+  parser.on("--dictation", "Convert dictation commands to punctuation (default: #{options[:dictation]})")
+  parser.on("--detect-entities", "Detect entities in the audio (default: #{options[:detect_entities]})")
+  parser.on("--detect-language", "Detect the language of the audio (default: #{options[:detect_language]})")
+  parser.on("--detect-topics", "Detect topics in the audio (default: #{options[:detect_topics]})")
+  parser.on("--extra KEY=VALUE", "Extra parameter to include in the response")
+  parser.on("--filler-words", "Include filler words in the transcript (default: #{options[:filler_words]})")
+  parser.on("--intents", "Recognize speaker intents (default: #{options[:intents]})")
+  parser.on("--keyword WORD:BOOST", "Uncommon word to transcribe and its boost value")
+  parser.on("--language LANG", "Language of the audio (default: #{options[:language]})")
+  parser.on("--measurements", "Convert spoken measurements to abbreviations (default: #{options[:measurements]})")
+  parser.on("--multichannel", "Transcribe each audio channel independently (default: #{options[:multichannel]})")
+  parser.on("--numerals", "Convert written numbers to numerical format (default: #{options[:numerals]})")
+  parser.on("--paragraphs", "Split audio into paragraphs (default: #{options[:paragraphs]})")
+  parser.on("--profanity-filter", "Remove profanity from the transcript (default: #{options[:profanity_filter]})")
+  parser.on("--punctuate", "Add punctuation and capitalization (default: #{options[:punctuate]})")
+  parser.on("--redact CATEGORY", "Redact sensitive information (e.g., pci, pii, numbers)")
+  parser.on("--replace FROM:TO", "Terms or phrases to replace")
+  parser.on("--search TERM", "Terms or phrases to search for")
+  parser.on("--sentiment", "Recognize sentiment in the transcript (default: #{options[:sentiment]})")
+  parser.on("--smart-format", "Apply formatting to improve readability (default: #{options[:smart_format]})")
+  parser.on("--summarize MODE", "Summarize the content (default: #{options[:summarize]})")
+  parser.on("--tag TAG", "Tag to associate with the request")
+  parser.on("--topics", "Detect topics in the transcript (default: #{options[:topics]})")
+  parser.on("--utterances", "Segment speech into utterances (default: #{options[:utterances]})")
+  parser.on("--utt-split DURATION", Float, "Duration in seconds to split utterances (default: #{options[:utt_split]})")
+  parser.on("--version VERSION", "Version of the model (default: #{options[:version]})")
+end.parse!(into: options)
+
+input = ARGV.shift
+
+if input.nil?
+  abort "Error: Input file or URL is required"
+end
+
+query_params = options.select { |_, v| v != nil }
+query_params = query_params.reject { |k, v| [:search, :redact].include?(k) } if options[:model].start_with?("whisper-")
+query_string = query_params.map { |k, v| "#{k}=#{URI.encode_www_form_component(v.to_s)}" }.join("&")
+url = "https://api.deepgram.com/v1/listen?#{query_string}"
+
+uri = URI.parse(url)
+request = Net::HTTP::Post.new(uri)
+request["Authorization"] = "Token #{ENV["DEEPGRAM_API_KEY"]}"
+request["Accept"] = "application/json"
+
+if input.start_with?("http")
+  request["Content-Type"] = "application/json"
+  request.body = {url: input}.to_json
+else
+  file_ext = File.extname(input).delete(".").downcase
+  content_type =
+    case file_ext
+    when "wav"
+      "audio/wav"
+    when "mp3", "mpeg"
+      "audio/mpeg"
+    when "flac"
+      "audio/flac"
+    else
+      "audio/mpeg"
+    end
+
+  request["Content-Type"] = content_type
+  audio_data = File.binread(input)
+  request.body = audio_data
+end
+
+http = Net::HTTP.new(uri.host, uri.port)
+http.use_ssl = true if uri.scheme == "https"
+http.read_timeout = nil
+
+response = http.request(request)
+
+if response.code == "200"
+  data = JSON.parse(response.body)
+  transcript = data.dig("results", "channels", 0, "alternatives", 0, "transcript")
+  puts transcript
+else
+  puts "Request failed with status code #{response.code}"
+  puts response.body
+end

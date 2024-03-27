@@ -1,0 +1,76 @@
+#!/usr/bin/env pip-run yt_dlp ffmpeg-python
+
+import yt_dlp
+import ffmpeg
+import argparse
+import sys
+import json
+
+parser = argparse.ArgumentParser()
+parser.add_argument("-s", "--start", help="Start time of the video segment")
+parser.add_argument("-e", "--end", help="End time of the video segment")
+parser.add_argument(
+    "-o",
+    "--output",
+    default="-",
+    help='Output file name or "-" for stdout (default: "-")',
+)
+parser.add_argument("video_url", help="URL of the video to process")
+args = parser.parse_args()
+
+if not args.video_url:
+    sys.exit("Please provide a video URL.")
+
+with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True}) as ydl:
+    video_meta = ydl.extract_info(args.video_url, download=False)
+
+formats = video_meta["formats"]
+video_url = next((f for f in reversed(formats) if f.get("acodec") != "none"), None)[
+    "url"
+]
+video_id = video_meta["id"]
+title = video_meta["title"].replace(" ", "_")
+start_time = args.start
+end_time = args.end
+
+if args.output == "-":
+    output_file_name = "-"
+else:
+    output_file_name = (
+        args.output or f"{title}_[{start_time}-{end_time}][yt:{video_id}].mkv"
+    )
+
+noverbose = ["-hide_banner", "-loglevel", "error"]
+
+process1 = (
+    ffmpeg.input(video_url, ss=start_time, to=end_time)
+    .output("pipe:", format="matroska")
+    .global_args("-y", *noverbose)
+    .run_async(pipe_stdout=True)
+)
+
+output, _ = process1.communicate()
+
+process2 = (
+    ffmpeg.input("pipe:", format="matroska")
+    .output(
+        output_file_name,
+        vcodec="libx265",
+        crf=28,
+        preset="ultrafast",
+        movflags="+faststart",
+        format="matroska",
+    )
+    .global_args("-y", *noverbose)
+    .run(input=output, capture_stdout=True, capture_stderr=True)
+)
+
+stdout, stderr = process2
+
+if output_file_name == "-":
+    sys.stdout.buffer.write(stdout)
+else:
+    if process2.returncode != 0:
+        print(f"Error: {stderr.decode('utf-8')}")
+        sys.exit(1)
+    print(output_file_name)

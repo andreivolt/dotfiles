@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+exec rclone copyto --progress "$1" "gdrive:_IN/$1" &&
+  rm "$1"

@@ -1,0 +1,192 @@
+#!/usr/bin/env gorun
+
+// go.mod >>>
+// module chattab-export
+//
+// go 1.21.8
+//
+// require (
+// github.com/maragudk/gomponents v0.20.2 // indirect
+// github.com/mattn/go-sqlite3 v1.14.22 // indirect
+// github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
+// github.com/russross/blackfriday/v2 v2.1.0 // indirect
+// golang.org/x/sys v0.1.0 // indirect
+// )
+// <<< go.mod
+
+// go.sum >>>
+// github.com/maragudk/gomponents v0.20.2 h1:39FhnBNNCJzqNcD9Hmvp/5xj0otweFoyvVgFG6kXoy0=
+// github.com/maragudk/gomponents v0.20.2/go.mod h1:nHkNnZL6ODgMBeJhrZjkMHVvNdoYsfmpKB2/hjdQ0Hg=
+// github.com/mattn/go-sqlite3 v1.14.22 h1:2gZY6PC6kBnID23Tichd1K+Z0oS6nE/XwU+Vz/5o4kU=
+// github.com/mattn/go-sqlite3 v1.14.22/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
+// github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c h1:+mdjkGKdHQG3305AYmdv1U2eRNDiU2ErMBj1gwrq8eQ=
+// github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c/go.mod h1:7rwL4CYBLnjLxUqIJNnCWiEdr3bn6IUYi15bNlnbCCU=
+// github.com/russross/blackfriday/v2 v2.1.0 h1:JIOH55/0cWyOuilr9/qlrm0BSXldqnqwMsf35Ld67mk=
+// github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
+// golang.org/x/sys v0.1.0 h1:kunALQeHf1/185U1i0GOB/fy1IPRDDpuoOOqRReG57U=
+// golang.org/x/sys v0.1.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+// <<< go.sum
+
+package main
+
+import (
+    "database/sql"
+    "fmt"
+    "net"
+    "net/http"
+    "os"
+    "path/filepath"
+    "time"
+
+    g "github.com/maragudk/gomponents"
+    c "github.com/maragudk/gomponents/components"
+    . "github.com/maragudk/gomponents/html"
+    _ "github.com/mattn/go-sqlite3"
+    "github.com/pkg/browser"
+    "github.com/russross/blackfriday/v2"
+)
+
+func main() {
+    dbPath := filepath.Join(os.Getenv("HOME"), "Documents/com.lessimore.gpt/gptv3.sqlite")
+    db, err := sql.Open("sqlite3", dbPath)
+    if err != nil {
+        panic(err)
+    }
+    defer db.Close()
+
+    rows, err := db.Query("SELECT role, content, createdAt FROM chatMessage ORDER BY createdAt ASC;")
+    if err != nil {
+        panic(err)
+    }
+    defer rows.Close()
+
+    var messages []struct {
+        Role      string
+        Content   string
+        CreatedAt string
+    }
+
+    for rows.Next() {
+        var msg struct {
+            Role      string
+            Content   string
+            CreatedAt string
+        }
+        if err := rows.Scan(&msg.Role, &msg.Content, &msg.CreatedAt); err != nil {
+            panic(err)
+        }
+        messages = append(messages, msg)
+    }
+
+    var currentDate string
+    var chatNodes []g.Node
+
+    for _, msg := range messages {
+        msgDate := formatDate(msg.CreatedAt)
+        if msgDate != currentDate {
+            if currentDate != "" {
+                chatNodes = append(chatNodes, Div(Class("my-12 text-center"),
+                    Hr(Class("border-t-2 dark:border-gray-700")),
+                    P(Class("text-xl font-semibold text-gray-700 dark:text-gray-300 mt-4"), g.Text(currentDate)),
+                ))
+            }
+            currentDate = msgDate
+        }
+
+        var roleClass string
+        var alignClass string
+        if msg.Role == "user" {
+            roleClass = "bg-blue-500 text-white"
+            alignClass = "justify-end"
+        } else {
+            roleClass = "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200"
+            alignClass = "justify-start"
+        }
+
+        chatNodes = append(chatNodes, Div(Class(fmt.Sprintf("flex mb-6 %s", alignClass)),
+            Div(Class("w-2/3 max-w-prose"),
+                Div(Class(fmt.Sprintf("px-4 py-2 rounded-t-md %s", roleClass)), g.Text(msg.Role)),
+                Div(Class("px-4 py-3 bg-white dark:bg-gray-800 rounded-b-md shadow-md break-words"), g.Raw(string(blackfriday.Run([]byte(msg.Content))))),
+                Div(Class("mt-2 text-sm text-gray-500 dark:text-gray-400"), g.Text(formatTimestamp(msg.CreatedAt))),
+            ),
+        ))
+    }
+
+    page := c.HTML5(c.HTML5Props{
+        Title:    "ChatTab Export",
+        Language: "en",
+        Head: []g.Node{
+            Script(Src("https://cdn.tailwindcss.com")),
+            StyleEl(g.Raw(`
+                code {
+                    white-space: pre-wrap;
+                    word-wrap: break-word;
+                }
+                @media (prefers-color-scheme: dark) {
+                    body {
+                        background-color: #0f172a;
+                        color: #e2e8f0;
+                    }
+                    ::-webkit-scrollbar {
+                        width: 8px;
+                        height: 8px;
+                        background-color: transparent;
+                    }
+                    ::-webkit-scrollbar-thumb {
+                        background-color: #334155;
+                        border-radius: 4px;
+                    }
+                    ::-webkit-scrollbar-thumb:hover {
+                        background-color: #475569;
+                    }
+                }
+            `)),
+        },
+        Body: []g.Node{
+            Div(Class("bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 min-h-screen"),
+                Div(Class("container mx-auto pt-8 pb-16 max-w-screen-lg"),
+                    g.Group(chatNodes),
+                ),
+            ),
+        },
+    })
+
+    listener, err := net.Listen("tcp", ":0")
+    if err != nil {
+        panic(err)
+    }
+    defer listener.Close()
+
+    port := listener.Addr().(*net.TCPAddr).Port
+
+    http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "text/html")
+        page.Render(w)
+    })
+
+    fmt.Printf("Server is running on http://localhost:%d\n", port)
+    fmt.Printf("Press Ctrl+C to stop the server\n")
+
+    err = browser.OpenURL(fmt.Sprintf("http://localhost:%d", port))
+    if err != nil {
+        fmt.Printf("Failed to open the browser: %v\n", err)
+    }
+
+    http.Serve(listener, nil)
+}
+
+func formatTimestamp(timestamp string) string {
+    t, err := time.Parse(time.RFC3339, timestamp)
+    if err != nil {
+        return timestamp
+    }
+    return t.Format("January 2, 2006 at 3:04 PM")
+}
+
+func formatDate(timestamp string) string {
+    t, err := time.Parse(time.RFC3339, timestamp)
+    if err != nil {
+        return ""
+    }
+    return t.Format("January 2, 2006")
+}

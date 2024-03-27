@@ -1,0 +1,29 @@
+#!/usr/bin/env ruby
+
+require 'tmpdir'
+
+chrome_path =
+  RUBY_PLATFORM.include?("darwin") ?
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" :
+  "google-chrome-unstable"
+
+screen_resolution =
+  RUBY_PLATFORM.include?("darwin") ?
+  `displayplacer list`.match(/Resolution:\s+(\d+x\d+)/)[1].gsub('x', ',') :
+  `wlr-randr`.match(/\* (\d+x\d+)/)[1].gsub('x', ',')
+
+tmpdir = Dir.mktmpdir
+
+at_exit do
+  FileUtils.remove_entry_secure(tmpdir) if File.exist?(tmpdir)
+end
+
+exec chrome_path, *[
+  "--auto-open-devtools-for-tabs",
+  "--no-first-run",
+  "--remote-debugging-port=9999",
+  "--start-maximized",
+  "--user-data-dir=#{tmpdir}",
+  "--window-size=#{screen_resolution}",
+  *ARGV
+].compact

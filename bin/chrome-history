@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+case "$(uname)" in
+  Darwin)
+    PROFILE_PATH="$HOME/Library/Application Support/Google/Chrome/Default"
+    ;;
+  Linux)
+    PROFILE_PATH="$HOME/.config/google-chrome/Default"
+    ;;
+  *)
+    echo "Unsupported OS: $(uname)"
+    exit 1
+    ;;
+esac
+
+sqlite3 "file:$PROFILE_PATH/History?immutable=1" \
+  "SELECT
+     datetime(last_visit_time/1000000-11644473600, 'unixepoch'),
+     url
+   FROM
+     urls
+   ORDER BY
+     last_visit_time ASC"
