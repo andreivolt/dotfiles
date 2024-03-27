@@ -253,6 +253,8 @@ require 'packer'.startup({
         -- better git commit
         use 'rhysd/committia.vim'
 
+        use 'sQVe/sort.nvim'
+
         use { 'Tyilo/applescript.vim', ft = 'applescript' }
 
         -- -- TypeScript TODO
