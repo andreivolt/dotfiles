@@ -39,6 +39,8 @@ path=(
   $path
 )
 
-(( ${+commands[vi]} )) && export EDITOR='vi'
-(( ${+commands[vim]} )) && export EDITOR='vim'
-(( ${+commands[nvim]} )) && export EDITOR='nvim'
+(( ${+commands[vi]} )) && export EDITOR=vi
+(( ${+commands[vim]} )) && export EDITOR=vim
+(( ${+commands[nvim]} )) && export EDITOR=nvim
+
+(( ${+commands[moar]} )) && export PAGER=moar
