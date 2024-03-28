@@ -13,8 +13,6 @@ M.setup = function()
       width = 35,
     }
   })
-
-  vim.api.nvim_set_hl(0, "NvimTreeIndentMarker", { fg = "#333333" }) -- TODO autocmd
 end
 
 return M
