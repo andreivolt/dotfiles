@@ -127,15 +127,13 @@ require("lazy").setup({
   -- {"hrsh7th/nvim-cmp", lazy = true},
   -- {"junegunn/fzf", build = vim.fn["fzf#install"], dependencies = "junegunn/fzf.vim", lazy = true},
   -- {"kchmck/vim-coffee-script", lazy = true},
+  -- {"matze/vim-move"}, -- lines move
   -- {"nvim-treesitter/nvim-treesitter-context", dependencies = "nvim-treesitter/nvim-treesitter", lazy = true},
+  -- {"SmiteshP/nvim-navic", dependencies = "neovim/nvim-lspconfig", config = function() require('plugins.SmiteshP_nvim-navic').setup() end},
   -- {'airblade/vim-rooter"}, -- chdir to root
-  {"AndrewRadev/splitjoin.vim"},
-  {"LnL7/vim-nix", ft = {"nix"}},
-  {"Olical/conjure", ft = {"clojure", "fennel", "janet"}, dependencies = { 'tpope/vim-dispatch', 'clojure-vim/vim-jack-in', 'folke/which-key.nvim', }},
-  {"RRethy/nvim-treesitter-endwise", dependencies = "nvim-treesitter/nvim-treesitter", config = function() require("plugins.RRethy_nvim-treesitter-endwise").setup() end},
-  {"SmiteshP/nvim-navic", dependencies = "neovim/nvim-lspconfig", config = function() require('plugins.SmiteshP_nvim-navic').setup() end},
-  {"Tyilo/applescript.vim", ft = "applescript"},
+  -- {'numToStr/Comment.nvim', lazy = false}, -- TODO
   {"alvan/vim-closetag"},
+  {"AndrewRadev/splitjoin.vim"},
   {"andymass/vim-matchup", dependencies = "nvim-treesitter/nvim-treesitter", config = function() require("nvim-treesitter.configs").setup({matchup = {enable = true}}) end},
   {"christoomey/vim-tmux-navigator", enabled = vim.env.TMUX}, -- seamless vim/tmux pane navigation
   {"clojure-vim/vim-jack-in", dependencies = {"vim-dispatch", "vim-dispatch-neovim"}, ft = "clojure"},
@@ -153,36 +151,38 @@ require("lazy").setup({
   {"jremmen/vim-ripgrep"},
   {"kosayoda/nvim-lightbulb", config = function() require("plugins.kosayoda_nvim-lightbulb").setup() end, lazy = true},
   {"lewis6991/gitsigns.nvim", dependencies = {"nvim-lua/plenary.nvim"}, config = function() require("gitsigns").setup() end, lazy = true}, -- Git
+  {"LnL7/vim-nix", ft = {"nix"}},
   {"lukas-reineke/indent-blankline.nvim", config = function() require("plugins.lukas-reineke_indent-blankline").setup() end},
-  -- {"matze/vim-move"}, -- lines move
   {"mcchrish/zenbones.nvim", dependencies = "rktjmp/lush.nvim" },
   {"mhinz/vim-sayonara"}, -- smart quit buffer
   {"michaeljsmith/vim-indent-object"},
-  {"ms-jpq/coq.artifacts", branch = "artifacts"},
-  {"ms-jpq/coq.thirdparty", branch = "3p"},
-  {"ms-jpq/coq_nvim", branch = "coq"},
+  {"ms-jpq/coq.artifacts", branch = "artifacts"}, -- TODO
+  {"ms-jpq/coq.thirdparty", branch = "3p"}, -- TODO
+  {"ms-jpq/coq_nvim", branch = "coq"}, -- TODO
   {"ntpeters/vim-better-whitespace"},
   {"nvim-telescope/telescope-fzf-native.nvim", build = "make"},
   {"nvim-telescope/telescope.nvim", dependencies = {"nvim-lua/plenary.nvim"}, config = function() require("plugins.nvim-telescope_telescope").setup() end}, -- TODO
   {"nvim-treesitter/nvim-treesitter", build = ":TSUpdate", config = function() require("plugins.nvim-treesitter_nvim-treesitter").setup() end},
-  {"nvim-treesitter/nvim-treesitter-textobjects", dependencies = { "nvim-treesitter/nvim-treesitter" }},
+  {"nvim-treesitter/nvim-treesitter-textobjects", dependencies = { "nvim-treesitter/nvim-treesitter" }}, -- TODO
+  {"Olical/conjure", ft = {"clojure", "fennel", "janet"}, dependencies = { 'tpope/vim-dispatch', 'clojure-vim/vim-jack-in', 'folke/which-key.nvim', }},
   {"pangloss/vim-javascript", ft = "javascript"},
+  {"pbrisbin/vim-colors-off"},
   {"pierreglaser/folding-nvim"}, -- TODO
   {"prettier/vim-prettier", build = "yarn install --frozen-lockfile --production"},
   {"radenling/vim-dispatch-neovim", dependencies = {"tpope/vim-dispatch"}},
   {"rafalbromirski/vim-aurora"},
-  {"pbrisbin/vim-colors-off"},
   {"rhysd/committia.vim", lazy = true}, -- Git commit
   {"romgrk/barbar.nvim", dependencies = {"lewis6991/gitsigns.nvim", "nvim-tree/nvim-web-devicons"}, init = function() vim.g.barbar_auto_setup = false end, opts = require('plugins.romgrk_barbar')},
+  {"RRethy/nvim-treesitter-endwise", dependencies = "nvim-treesitter/nvim-treesitter", config = function() require("plugins.RRethy_nvim-treesitter-endwise").setup() end},
   {"ruanyl/vim-gh-line"}, -- browser open line
-  {"sQVe/sort.nvim", cmd = 'Sort'},
   {"sickill/vim-pasta"}, -- auto pasting indentation
   {"simrat39/symbols-outline.nvim"},
+  {"sQVe/sort.nvim", cmd = 'Sort'},
   {"szw/vim-maximizer", config = function() vim.g.maximizer_set_default_mapping = false end, cmd = {"MaximizerToggle"}, lazy = true},
   {"thiagoalessio/rainbow_levels.vim"},
   {"tommcdo/vim-fugitive-blame-ext"}, -- statusbar commit message
   {"tpope/vim-bundler", ft = "ruby"},
-  {"tpope/vim-commentary"}, -- comment
+  {"tpope/vim-commentary"},
   {"tpope/vim-dispatch", lazy = true},
   {"tpope/vim-eunuch", cmd = { "Cfind", "Chmod", "Clocate", "Delete", "Lfind", "Llocate", "Mkdir", "Move", "Remove", "Rename", "SudoEdit", "SudoWrite", "Wall", }, },
   {"tpope/vim-fugitive"}, -- Git
@@ -191,6 +191,7 @@ require("lazy").setup({
   {"tpope/vim-sleuth"}, -- indent autodetection
   {"tpope/vim-surround"},
   {"tpope/vim-unimpaired"},
+  {"Tyilo/applescript.vim", ft = "applescript"},
   {"vim-test/vim-test"},
   {"windwp/nvim-autopairs", config = function() require("nvim-autopairs").setup({}) end},
   {'kyazdani42/nvim-tree.lua', dependencies = {'kyazdani42/nvim-web-devicons'}, config = function() require("plugins.kyazdani42_nvim-tree").setup({}) end},
@@ -518,6 +519,13 @@ vim.api.nvim_create_autocmd("TextYankPost", {pattern = "*", callback = function(
 vim.api.nvim_create_autocmd("BufEnter", {pattern = "*.ex", command = 'syn match Error "IO.puts\\|IO.inspect"'})
 vim.api.nvim_create_autocmd("BufEnter", {pattern = "*.rb", command = 'syn match Error "binding.pry\\|debugger"'})
 vim.api.nvim_create_autocmd("BufEnter", {pattern = {"*.js", "*.ts", "*.tsx"}, command = 'syn match Error "colsole.log"'})
+
+vim.api.nvim_create_autocmd("BufWritePost", {
+  pattern = "init.lua",
+  callback = function()
+    vim.cmd("LspRestart")
+  end,
+})
 
 --	-- Setup nvim-cmp.
 --	local cmp = require'cmp'
