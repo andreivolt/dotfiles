@@ -11,7 +11,6 @@ end
 
 vim.opt.autoindent = true
 vim.opt.smartindent = true
-
 vim.opt.shiftwidth = 2
 vim.opt.tabstop = 2
 
@@ -118,25 +117,20 @@ vim.diagnostic.config({
 })
 
 require("lazy").setup({
-    -- {"ggandor/lightspeed.nvim"}, -- move hints
     -- {"akinsho/bufferline.nvim", tag = "*", dependencies = "nvim-tree/nvim-web-devicons", config = function() require("bufferline").setup() end, lazy = true},
+    -- {"ggandor/lightspeed.nvim"}, -- move hints
     -- {"gkz/vim-ls", lazy = true},
-    -- {"kchmck/vim-coffee-script", lazy = true},
-    -- {"nvim-treesitter/nvim-treesitter-context", dependencies = "nvim-treesitter/nvim-treesitter", lazy = true},
-    -- {"junegunn/fzf", build = vim.fn["fzf#install"], dependencies = "junegunn/fzf.vim", lazy = true},
     -- {"hrsh7th/cmp-buffer", lazy = true},
     -- {"hrsh7th/cmp-cmdline", lazy = true},
     -- {"hrsh7th/cmp-nvim-lsp", lazy = true},
     -- {"hrsh7th/cmp-path", lazy = true},
     -- {"hrsh7th/nvim-cmp", lazy = true},
-    {"AndrewRadev/splitjoin.vim"},
-    {"LnL7/vim-nix", ft = {"nix"}},
-    {"Olical/conjure", ft = {"clojure", "fennel", "janet"}, dependencies = { 'tpope/vim-dispatch', 'clojure-vim/vim-jack-in', 'folke/which-key.nvim', }},
-    {"RRethy/nvim-treesitter-endwise", dependencies = "nvim-treesitter/nvim-treesitter", config = function() require("nvim-treesitter.configs").setup({endwise = {enable = true}}) end},
-    {"SmiteshP/nvim-navic", dependencies = "neovim/nvim-lspconfig", config = function() require("nvim-navic").setup({lsp = {auto_attach = true}}) end},
-    {"Tyilo/applescript.vim", ft = "applescript"},
+    -- {"junegunn/fzf", build = vim.fn["fzf#install"], dependencies = "junegunn/fzf.vim", lazy = true},
+    -- {"kchmck/vim-coffee-script", lazy = true},
+    -- {"nvim-treesitter/nvim-treesitter-context", dependencies = "nvim-treesitter/nvim-treesitter", lazy = true},
     -- {'airblade/vim-rooter"}, -- chdir to root
     {"alvan/vim-closetag"},
+    {"AndrewRadev/splitjoin.vim"},
     {"andymass/vim-matchup", dependencies = "nvim-treesitter/nvim-treesitter", config = function() require("nvim-treesitter.configs").setup({matchup = {enable = true}}) end},
     {"christoomey/vim-tmux-navigator"}, -- seamless vim/tmux pane navigation
     {"clojure-vim/vim-jack-in", dependencies = {"vim-dispatch", "vim-dispatch-neovim"}, ft = "clojure"},
@@ -150,11 +144,11 @@ require("lazy").setup({
     {"jessarcher/vim-heritage"}, -- automatically create parent directories when writing file
     {"jose-elias-alvarez/null-ls.nvim"},
     {"jose-elias-alvarez/nvim-lsp-ts-utils"},
-    {'kyazdani42/nvim-tree.lua', dependencies = {'kyazdani42/nvim-web-devicons'}, config = function() require("plugins.kyazdani42_nvim-tree").setup({}) end},
     {"jose-elias-alvarez/typescript.nvim", config = function() require("typescript").setup({}) end},
     {"jremmen/vim-ripgrep"},
     {"kosayoda/nvim-lightbulb", config = function() require("plugins.kosayoda_nvim-lightbulb").setup() end, lazy = true},
     {"lewis6991/gitsigns.nvim", dependencies = {"nvim-lua/plenary.nvim"}, config = function() require("gitsigns").setup() end, lazy = true}, -- Git
+    {"LnL7/vim-nix", ft = {"nix"}},
     {"lukas-reineke/indent-blankline.nvim", config = function() require("plugins.lukas-reineke_indent-blankline").setup() end},
     {"matze/vim-move"}, -- lines move
     {"mhinz/vim-sayonara"}, -- smart quit buffer
@@ -167,17 +161,20 @@ require("lazy").setup({
     {"nvim-telescope/telescope.nvim", dependencies = {"nvim-lua/plenary.nvim"}, config = function() require("plugins.nvim-telescope_telescope").setup() end},
     {"nvim-treesitter/nvim-treesitter", build = ":TSUpdate", config = function() require("plugins.nvim-treesitter_nvim-treesitter").setup() end},
     {"nvim-treesitter/nvim-treesitter-textobjects", dependencies = { "nvim-treesitter/nvim-treesitter" }},
+    {"Olical/conjure", ft = {"clojure", "fennel", "janet"}, dependencies = { 'tpope/vim-dispatch', 'clojure-vim/vim-jack-in', 'folke/which-key.nvim', }},
     {"pangloss/vim-javascript", ft = "javascript"},
     {"pierreglaser/folding-nvim"}, -- TODO
     {"prettier/vim-prettier", build = "yarn install --frozen-lockfile --production"},
-    {"rafalbromirski/vim-aurora"},
     {"radenling/vim-dispatch-neovim", dependencies = {"tpope/vim-dispatch"}},
+    {"rafalbromirski/vim-aurora"},
     {"rhysd/committia.vim", lazy = true}, -- Git commit
     {"romgrk/barbar.nvim", dependencies = {"lewis6991/gitsigns.nvim", "nvim-tree/nvim-web-devicons"}},
+    {"RRethy/nvim-treesitter-endwise", dependencies = "nvim-treesitter/nvim-treesitter", config = function() require("nvim-treesitter.configs").setup({endwise = {enable = true}}) end},
     {"ruanyl/vim-gh-line"}, -- browser open line
-    {"sQVe/sort.nvim"},
     {"sickill/vim-pasta"}, -- auto pasting indentation
     {"simrat39/symbols-outline.nvim"},
+    {"SmiteshP/nvim-navic", dependencies = "neovim/nvim-lspconfig", config = function() require("nvim-navic").setup({lsp = {auto_attach = true}}) end},
+    {"sQVe/sort.nvim"},
     {"szw/vim-maximizer", config = function() vim.g.maximizer_set_default_mapping = false end, cmd = {"MaximizerToggle"}, lazy = true},
     {"thiagoalessio/rainbow_levels.vim"},
     {"tommcdo/vim-fugitive-blame-ext"}, -- statusbar commit message
@@ -191,8 +188,10 @@ require("lazy").setup({
     {"tpope/vim-sleuth"}, -- indent autodetection
     {"tpope/vim-surround"},
     {"tpope/vim-unimpaired"},
+    {"Tyilo/applescript.vim", ft = "applescript"},
     {"vim-test/vim-test"},
     {"windwp/nvim-autopairs", config = function() require("nvim-autopairs").setup({}) end},
+    {'kyazdani42/nvim-tree.lua', dependencies = {'kyazdani42/nvim-web-devicons'}, config = function() require("plugins.kyazdani42_nvim-tree").setup({}) end},
 }, {
     install = {
         colorscheme = { "aurora" },
@@ -367,6 +366,7 @@ require("user.folding")
 require("user.lua")
 require("user.move_lines")
 require("user.neovide")
+require("user.open_url")
 require("user.ruby")
 require("user.shebang")
 require("user.tmux")
@@ -382,7 +382,6 @@ vim.api.nvim_create_autocmd("FileType", {
         end)
     end
 })
-
 
 vim.filetype.add({
     filename = {
@@ -439,31 +438,6 @@ vim.api.nvim_create_autocmd({"BufEnter", "BufWritePost", "FocusGained"}, {
     end
 })
 
--- open a URL in the default browser, if multiple URLs are present on the current line, open the URL under the cursor
-function OpenURL()
-    local line = vim.api.nvim_get_current_line()
-    local cursor_col = vim.fn.col(".")
-    local urls = {}
-
-    for url in string.gmatch(line, "https?://[%w-_./?%%=~&:+%%*]+") do table.insert(urls, url) end
-
-    if #urls == 0 then
-        return
-    elseif #urls == 1 then
-        vim.fn.system('open "' .. urls[1] .. '"')
-    else
-        local found_url = false
-        for _, url in ipairs(urls) do
-            local s, e = string.find(line, url, 1, true)
-            if cursor_col >= s and cursor_col <= e then
-                vim.fn.system('open "' .. url .. '"')
-                found_url = true
-                break
-            end
-        end
-        if not found_url then for _, url in ipairs(urls) do vim.fn.system('open "' .. url .. '"') end end
-    end
-end
 
 -- highlight on yank
 vim.api.nvim_create_autocmd("TextYankPost", {pattern = "*", callback = function() vim.highlight.on_yank({on_visual = true}) end})
@@ -502,7 +476,7 @@ vim.keymap.set("n", "<leader>ff", require("telescope.builtin").find_files)
 vim.keymap.set("n", "<leader>fg", require("telescope.builtin").live_grep)
 vim.keymap.set("n", "<leader>fh", require("telescope.builtin").help_tags)
 
-vim.keymap.set("n", "<leader>n", ":NvimTreeFindFileToggle<CR>")
+vim.keymap.set("n", "<leader>n", ":NvimTreeFindFileToggle<CR>", { silent = true })
 vim.keymap.set("n", "gp", "`[v`]")
 
 -- visual indent
@@ -516,6 +490,8 @@ vim.keymap.set("n", "<leader>gm", "<Cmd>MaximizerToggle!<CR>")
 
 vim.keymap.set('x', 'v', require'nvim-treesitter.incremental_selection'.node_incremental)
 vim.keymap.set('x', 'V', require'nvim-treesitter.incremental_selection'.node_decremental)
+
+vim.keymap.set('n', '<leader>gn', ':set number!<CR>')
 
 -- keep the cursor in place while joining lines
 vim.keymap.set("n", "J", "mzJ`z")
