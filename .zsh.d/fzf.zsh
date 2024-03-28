@@ -5,16 +5,16 @@ export FZF_DEFAULT_OPTS="\
 --cycle \
 --multi \
 --ansi \
---color fg+:15 \
+--color fg+:blue \
 --color bg:0 --color gutter:0 \
---color hl+:magenta --color bg+:235 \
---color pointer:magenta \
---color hl:magenta \
+--color hl+:blue --color bg+:235 \
+--color pointer:57 \
+--color hl:57 \
 --color prompt:blue \
---color border:magenta \
+--color border:57 \
 --color info:240 \
 --color spinner:blue \
---color marker:magenta \
+--color marker:green \
 "
 
 export FZF_DEFAULT_COMMAND="\
