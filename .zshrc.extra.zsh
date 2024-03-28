@@ -271,3 +271,5 @@ alias rawdog='pipx run rawdog-ai'
 alias tidal-dl-ng='pipx run tidal-dl-ng'
 
 # eval "$(register-python-argcomplete textract)"
+
+[[ -n "$TMUX" && "$TERM" = "xterm-kitty" ]] || tmux attach || tmux
