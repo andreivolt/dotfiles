@@ -46,7 +46,8 @@ vim.opt.signcolumn = "yes"
 
 -- filename in window titlebars
 vim.opt.winbar = "%f"
-vim.opt.laststatus = 3
+
+vim.opt.laststatus = 0
 
 -- GUI
 vim.opt.guifont = "Iosevka Nerd Font Mono:h20:w-2:#h-none"
@@ -153,7 +154,7 @@ require("lazy").setup({
   {"kosayoda/nvim-lightbulb", config = function() require("plugins.kosayoda_nvim-lightbulb").setup() end, lazy = true},
   {"lewis6991/gitsigns.nvim", dependencies = {"nvim-lua/plenary.nvim"}, config = function() require("gitsigns").setup() end, lazy = true}, -- Git
   {"lukas-reineke/indent-blankline.nvim", config = function() require("plugins.lukas-reineke_indent-blankline").setup() end},
-  {"matze/vim-move"}, -- lines move
+  -- {"matze/vim-move"}, -- lines move
   {"mcchrish/zenbones.nvim", dependencies = "rktjmp/lush.nvim" },
   {"mhinz/vim-sayonara"}, -- smart quit buffer
   {"michaeljsmith/vim-indent-object"},
@@ -170,6 +171,7 @@ require("lazy").setup({
   {"prettier/vim-prettier", build = "yarn install --frozen-lockfile --production"},
   {"radenling/vim-dispatch-neovim", dependencies = {"tpope/vim-dispatch"}},
   {"rafalbromirski/vim-aurora"},
+  {"pbrisbin/vim-colors-off"},
   {"rhysd/committia.vim", lazy = true}, -- Git commit
   {"romgrk/barbar.nvim", dependencies = {"lewis6991/gitsigns.nvim", "nvim-tree/nvim-web-devicons"}},
   {"ruanyl/vim-gh-line"}, -- browser open line
@@ -181,8 +183,8 @@ require("lazy").setup({
   {"tommcdo/vim-fugitive-blame-ext"}, -- statusbar commit message
   {"tpope/vim-bundler", ft = "ruby"},
   {"tpope/vim-commentary"}, -- comment
-  {"tpope/vim-dispatch"},
-  {"tpope/vim-eunuch"},
+  {"tpope/vim-dispatch", lazy = true},
+  {"tpope/vim-eunuch", cmd = { "Cfind", "Chmod", "Clocate", "Delete", "Lfind", "Llocate", "Mkdir", "Move", "Remove", "Rename", "SudoEdit", "SudoWrite", "Wall", }, },
   {"tpope/vim-fugitive"}, -- Git
   {"tpope/vim-rails", ft = "ruby"},
   {"tpope/vim-repeat"}, -- dot repeat non-native commands
@@ -239,20 +241,20 @@ vim.api.nvim_create_autocmd(
   }
 )
 
-vim.keymap.set("n", "<ESC>", ":nohlsearch<Bar>echo<CR>")
+vim.keymap.set("n", "<ESC>", "<Cmd>nohlsearch<Bar>echo<CR>")
 vim.keymap.set("n", "<C-L>", function()
   vim.cmd(":nohlsearch")
   if vim.fn.has("diff") == 1 then vim.cmd(":diffupdate") end
   vim.cmd("<C-L>")
 end)
 
-vim.keymap.set("n", "<leader>sc", ":source $MYVIMRC")
+vim.keymap.set("n", "<leader>sc", "<Cmd>source $MYVIMRC<CR>")
 
-vim.keymap.set("n", "<leader><leader>", ":edit #<CR>")
+vim.keymap.set("n", "<leader><leader>", "<Cmd>edit #<CR>")
 
 -- buffer next/prev
-vim.keymap.set("v", "<leader>bn", ":bnext")
-vim.keymap.set("v", "<leader>bp", ":bprev")
+vim.keymap.set("n", "<leader>bn", "<Cmd>bnext<CR>")
+vim.keymap.set("n", "<leader>bp", "<Cmd>bprev<CR>")
 
 -- tmux style window navigation
 vim.keymap.set("n", "<C-h>", "<C-w><C-h>")
@@ -265,7 +267,7 @@ vim.keymap.set("n", "<leader>ff", require("telescope.builtin").find_files)
 vim.keymap.set("n", "<leader>fg", require("telescope.builtin").live_grep)
 vim.keymap.set("n", "<leader>fh", require("telescope.builtin").help_tags)
 
-vim.keymap.set("n", "<leader>n", ":NvimTreeFindFileToggle<CR>", { silent = true })
+vim.keymap.set("n", "<leader>n", "<Cmd>NvimTreeFindFileToggle<CR>")
 vim.keymap.set("n", "gp", "`[v`]")
 
 -- visual indent
@@ -280,7 +282,7 @@ vim.keymap.set("n", "<leader>gm", "<Cmd>MaximizerToggle!<CR>")
 vim.keymap.set('x', 'v', require'nvim-treesitter.incremental_selection'.node_incremental)
 vim.keymap.set('x', 'V', require'nvim-treesitter.incremental_selection'.node_decremental)
 
-vim.keymap.set('n', '<leader>gn', ':set number!<CR>')
+vim.keymap.set('n', '<leader>gn', '<Cmd>set number!<CR>')
 
 -- keep the cursor in place while joining lines
 vim.keymap.set("n", "J", "mzJ`z")
@@ -288,9 +290,9 @@ vim.keymap.set("n", "J", "mzJ`z")
 vim.keymap.set("n", "<leader>u", OpenURL)
 
 -- allow gf to open non-existent files
-vim.keymap.set("n", "gf", ":edit <cfile><CR>")
+vim.keymap.set("n", "gf", "<Cmd>edit <cfile><CR>")
 
-vim.keymap.set("n", "<leader>q", "<cmd>Sayonara!<CR>")
+vim.keymap.set("n", "<leader>q", "<Cmd>Sayonara!<CR>")
 
 vim.keymap.set("n", "<leader>z", require("zen-mode").toggle)
 
@@ -452,14 +454,16 @@ vim.api.nvim_create_autocmd("ColorScheme", {
     vim.api.nvim_set_hl(0, 'Folded', {bg = '#181818'})
     vim.api.nvim_set_hl(0, 'NonText', {fg = '#222222'})
     vim.api.nvim_set_hl(0, 'Normal', {ctermbg = 'NONE', bg = 'black'})
+    vim.api.nvim_set_hl(0, 'NvimTreeEndOfBuffer', {bg = '#111111'})
     vim.api.nvim_set_hl(0, 'NvimTreeIndentMarker', {fg = '#333333'})
+    vim.api.nvim_set_hl(0, 'NvimTreeNormal', {bg = '#111111'})
     vim.api.nvim_set_hl(0, 'NvimTreeStatusLine', {bg = 'black', fg = 'black'})
     vim.api.nvim_set_hl(0, 'NvimTreeStatusLineNC', {bg = 'black', fg = 'black'})
     vim.api.nvim_set_hl(0, 'Question', {ctermfg = 'gray', fg = '#444444'})
     vim.api.nvim_set_hl(0, 'SignColumn', {ctermbg = 'NONE', bg = 'black'})
     vim.api.nvim_set_hl(0, 'WinBar', {bg = 'black', fg = '#999999', bold = false, italic = true, underline = false, undercurl = false, strikethrough = false})
-
     vim.api.nvim_set_hl(0, 'ZenBg', {bg = 'black'})
+    vim.api.nvim_set_hl(0, 'WinSeparator', {bg = 'black', fg = '#222222'})
   end
 })
 vim.cmd('colorscheme aurora')
