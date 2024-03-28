@@ -24,7 +24,6 @@ vim.opt.ruler = false
 
 vim.opt.fillchars = {
     vert = "│", -- vertical window separators
-    fold = "⠀",
     eob = " ", -- suppress ~ at EndOfBuffer
     diff = "⣿", -- alternatives = ⣿ ░ ─ ╱
     msgsep = "‾",
@@ -173,6 +172,7 @@ require("lazy").setup({
     {"ruanyl/vim-gh-line"}, -- browser open line
     {"sickill/vim-pasta"}, -- auto pasting indentation
     {"simrat39/symbols-outline.nvim"},
+    {"mcchrish/zenbones.nvim", dependencies = "rktjmp/lush.nvim" },
     {"SmiteshP/nvim-navic", dependencies = "neovim/nvim-lspconfig", config = function() require('plugins.SmiteshP_nvim-navic').setup() end},
     {"sQVe/sort.nvim"},
     {"szw/vim-maximizer", config = function() vim.g.maximizer_set_default_mapping = false end, cmd = {"MaximizerToggle"}, lazy = true},
@@ -235,7 +235,7 @@ require("user.move_lines")
 require("user.neovide")
 require("user.open_url")
 require("user.ruby")
-require("user.shebang")
+-- require("user.shebang")
 require("user.tmux")
 
 -- resize splits to equal widths on window resize
@@ -427,7 +427,7 @@ vim.opt.foldenable = false
 -- vim.opt.foldlevel = 99
 -- set foldtext=getline(v:foldstart).'...'.trim(getline(v:foldend))o
 vim.opt.foldtext = [[substitute(getline(v:foldstart),'\\t',repeat('\ ',&tabstop),'g').'...'.trim(getline(v:foldend)) . ' (' . (v:foldend - v:foldstart + 1) . ' lines)']]
-vim.opt.fillchars = {fold = " "}
+vim.opt.fillchars.fold = " "
 
 -- -- use interactive shell
 -- set shellcmdflag='-ic'
@@ -464,6 +464,8 @@ vim.api.nvim_create_autocmd("ColorScheme", {
         vim.api.nvim_set_hl(0, 'Question', {ctermfg = 'gray', fg = '#444444'})
         vim.api.nvim_set_hl(0, 'SignColumn', {ctermbg = 'NONE', bg = 'black'})
         vim.api.nvim_set_hl(0, 'WinBar', {bg = 'black', fg = '#999999', bold = false, italic = true, underline = false, undercurl = false, strikethrough = false})
+
+        vim.api.nvim_set_hl(0, 'ZenBg', {bg = 'black'})
     end
 })
 vim.cmd('colorscheme aurora')
@@ -478,25 +480,6 @@ vim.api.nvim_create_autocmd("FileType", {
             os.execute("open https://github.com/" .. repo)
         end)
     end
-})
-
-vim.filetype.add({
-    filename = {
-        [".envrc"] = "bash",
-        ["*"] = function(_, bufnr)
-            local firstLine = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ""
-
-            if firstLine:match("^#!.*bb$") then
-                return "clojure"
-            elseif firstLine:match("^#!.*bun$") then
-                return "javascript"
-            elseif firstLine:match("^#!.*racket$") then
-                return "racket"
-            elseif firstLine:match("^#!.*pip%-run") or firstLine:match("^#!.*pipx run") then
-                return "python"
-            end
-        end
-    }
 })
 
 -- fold with treesitter
