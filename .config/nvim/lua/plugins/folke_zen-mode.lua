@@ -2,7 +2,10 @@ local M = {}
 
 M.setup = function()
   require("zen-mode").setup {
-    window = { width = 100, height = .9 },
+    window = {
+      width = 100,
+      height = .9,
+    },
     options = {
       signcolumn = "no", -- disable signcolumn
       number = false, -- disable number column

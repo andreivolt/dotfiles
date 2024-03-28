@@ -2,7 +2,9 @@ local M = {}
 
 M.setup = function()
   require 'nvim-treesitter.configs'.setup {
-    auto_install = true,
+    -- auto_install = true,
+    ensure_installed = "all", -- TODO
+    ignore_install = { "norg" },
     highlight = {
       enable = true,
     },
