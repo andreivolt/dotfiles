@@ -163,7 +163,7 @@ require("lazy").setup({
   {"ms-jpq/coq_nvim", branch = "coq"},
   {"ntpeters/vim-better-whitespace"},
   {"nvim-telescope/telescope-fzf-native.nvim", build = "make"},
-  {"nvim-telescope/telescope.nvim", dependencies = {"nvim-lua/plenary.nvim"}, config = function() require("plugins.nvim-telescope_telescope").setup() end},
+  {"nvim-telescope/telescope.nvim", dependencies = {"nvim-lua/plenary.nvim"}, config = function() require("plugins.nvim-telescope_telescope").setup() end}, -- TODO
   {"nvim-treesitter/nvim-treesitter", build = ":TSUpdate", config = function() require("plugins.nvim-treesitter_nvim-treesitter").setup() end},
   {"nvim-treesitter/nvim-treesitter-textobjects", dependencies = { "nvim-treesitter/nvim-treesitter" }},
   {"pangloss/vim-javascript", ft = "javascript"},
@@ -173,7 +173,7 @@ require("lazy").setup({
   {"rafalbromirski/vim-aurora"},
   {"pbrisbin/vim-colors-off"},
   {"rhysd/committia.vim", lazy = true}, -- Git commit
-  {"romgrk/barbar.nvim", dependencies = {"lewis6991/gitsigns.nvim", "nvim-tree/nvim-web-devicons"}},
+  {"romgrk/barbar.nvim", dependencies = {"lewis6991/gitsigns.nvim", "nvim-tree/nvim-web-devicons"}, init = function() vim.g.barbar_auto_setup = false end, opts = require('plugins.romgrk_barbar')},
   {"ruanyl/vim-gh-line"}, -- browser open line
   {"sQVe/sort.nvim", cmd = 'Sort'},
   {"sickill/vim-pasta"}, -- auto pasting indentation
@@ -281,9 +281,6 @@ vim.keymap.set("v", "<C-Left>", "<gv")
 
 vim.keymap.set("n", "<C-W>m", function() vim.cmd("MaximizerToggle!") end)
 vim.keymap.set("n", "<leader>gm", function() vim.cmd("MaximizerToggle!") end)
-
-vim.keymap.set('x', 'v', require'nvim-treesitter.incremental_selection'.node_incremental)
-vim.keymap.set('x', 'V', require'nvim-treesitter.incremental_selection'.node_decremental)
 
 vim.keymap.set('n', '<leader>gn', function() vim.cmd("set number!") end)
 
