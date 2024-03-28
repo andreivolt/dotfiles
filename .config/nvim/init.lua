@@ -241,20 +241,22 @@ vim.api.nvim_create_autocmd(
   }
 )
 
-vim.keymap.set("n", "<ESC>", "<Cmd>nohlsearch<Bar>echo<CR>")
+
+vim.keymap.set("n", "<leader>n", function() vim.cmd("NvimTreeFindFileToggle") end)
+
+vim.keymap.set("n", "<ESC>", function() vim.cmd("nohlsearch"); vim.cmd("echo") end)
+
 vim.keymap.set("n", "<C-L>", function()
-  vim.cmd(":nohlsearch")
-  if vim.fn.has("diff") == 1 then vim.cmd(":diffupdate") end
+  vim.cmd("nohlsearch")
+  if vim.fn.has("diff") == 1 then vim.cmd("diffupdate") end
   vim.cmd("<C-L>")
 end)
 
-vim.keymap.set("n", "<leader>sc", "<Cmd>source $MYVIMRC<CR>")
-
-vim.keymap.set("n", "<leader><leader>", "<Cmd>edit #<CR>")
+vim.keymap.set("n", "<leader><leader>", function() vim.cmd("edit #") end)
 
 -- buffer next/prev
-vim.keymap.set("n", "<leader>bn", "<Cmd>bnext<CR>")
-vim.keymap.set("n", "<leader>bp", "<Cmd>bprev<CR>")
+vim.keymap.set("n", "<leader>bn", function() vim.cmd("bnext") end)
+vim.keymap.set("n", "<leader>bp", function() vim.cmd("bprev") end)
 
 -- tmux style window navigation
 vim.keymap.set("n", "<C-h>", "<C-w><C-h>")
@@ -267,7 +269,8 @@ vim.keymap.set("n", "<leader>ff", require("telescope.builtin").find_files)
 vim.keymap.set("n", "<leader>fg", require("telescope.builtin").live_grep)
 vim.keymap.set("n", "<leader>fh", require("telescope.builtin").help_tags)
 
-vim.keymap.set("n", "<leader>n", "<Cmd>NvimTreeFindFileToggle<CR>")
+vim.keymap.set("n", "<leader>n", function() vim.cmd("NvimTreeFindFileToggle") end)
+
 vim.keymap.set("n", "gp", "`[v`]")
 
 -- visual indent
@@ -276,13 +279,13 @@ vim.keymap.set("v", "<S-Tab>", "<gv")
 vim.keymap.set("v", "<C-Right>", ">gv")
 vim.keymap.set("v", "<C-Left>", "<gv")
 
-vim.keymap.set("n", "<C-W>m", "<Cmd>MaximizerToggle!<CR>")
-vim.keymap.set("n", "<leader>gm", "<Cmd>MaximizerToggle!<CR>")
+vim.keymap.set("n", "<C-W>m", function() vim.cmd("MaximizerToggle!") end)
+vim.keymap.set("n", "<leader>gm", function() vim.cmd("MaximizerToggle!") end)
 
 vim.keymap.set('x', 'v', require'nvim-treesitter.incremental_selection'.node_incremental)
 vim.keymap.set('x', 'V', require'nvim-treesitter.incremental_selection'.node_decremental)
 
-vim.keymap.set('n', '<leader>gn', '<Cmd>set number!<CR>')
+vim.keymap.set('n', '<leader>gn', function() vim.cmd("set number!") end)
 
 -- keep the cursor in place while joining lines
 vim.keymap.set("n", "J", "mzJ`z")
@@ -290,14 +293,16 @@ vim.keymap.set("n", "J", "mzJ`z")
 vim.keymap.set("n", "<leader>u", OpenURL)
 
 -- allow gf to open non-existent files
-vim.keymap.set("n", "gf", "<Cmd>edit <cfile><CR>")
+vim.keymap.set("n", "gf", function() vim.cmd("edit <cfile>") end)
 
-vim.keymap.set("n", "<leader>q", "<Cmd>Sayonara!<CR>")
+vim.keymap.set("n", "<leader>q", function() vim.cmd("Sayonara!") end)
 
 vim.keymap.set("n", "<leader>z", require("zen-mode").toggle)
 
-vim.keymap.set("n", "<leader>gj", "<cmd>SplitjoinJoin<CR>", {desc = "Join in a single line"})
-vim.keymap.set("n", "<leader>gs", "<cmd>SplitjoinSplit<CR>", {desc = "Split in a single line"})
+vim.keymap.set("n", "<leader>gj", function() vim.cmd("SplitjoinJoin") end, {desc = "Join in a single line"})
+vim.keymap.set("n", "<leader>gs", function() vim.cmd("SplitjoinSplit") end, {desc = "Split in a single line"})
+
+
 
 -- yank restore cursor position
 -- vim.keymap.set("v", "y", "ygv<Esc>")
