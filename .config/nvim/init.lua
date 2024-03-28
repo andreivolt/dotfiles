@@ -124,17 +124,17 @@ require("lazy").setup({
     -- {"hrsh7th/cmp-nvim-lsp", lazy = true},
     -- {"hrsh7th/cmp-path", lazy = true},
     -- {"hrsh7th/nvim-cmp", lazy = true},
-    {"AndrewRadev/splitjoin.vim"},
+    {"AndrewRadev/splitjoin.vim", event = "VeryLazy"},
     {"LnL7/vim-nix", ft = {"nix"}},
-    {"Olical/conjure", ft = {"clojure", "fennel", "janet"}, dependencies = { 'tpope/vim-dispatch', 'clojure-vim/vim-jack-in', 'folke/which-key.nvim', }, },
+    {"Olical/conjure", ft = {"clojure", "fennel", "janet"}, dependencies = { 'tpope/vim-dispatch', 'clojure-vim/vim-jack-in', 'folke/which-key.nvim', }, event = "VeryLazy"},
     {"RRethy/nvim-treesitter-endwise", dependencies = "nvim-treesitter/nvim-treesitter", config = function() require("nvim-treesitter.configs").setup({endwise = {enable = true}}) end},
     {"SmiteshP/nvim-navic", dependencies = "neovim/nvim-lspconfig", config = function() require("nvim-navic").setup({lsp = {auto_attach = true}}) end},
     {"Tyilo/applescript.vim", ft = "applescript"},
     -- {'airblade/vim-rooter"}, -- chdir to root
-    {"alvan/vim-closetag"},
+    {"alvan/vim-closetag", event = "VeryLazy"},
     {"andymass/vim-matchup", dependencies = "nvim-treesitter/nvim-treesitter", config = function() require("nvim-treesitter.configs").setup({matchup = {enable = true}}) end},
-    {"christoomey/vim-tmux-navigator"}, -- seamless vim/tmux pane navigation
-    {"clojure-vim/vim-jack-in", dependencies = {"vim-dispatch", "vim-dispatch-neovim"}},
+    {"christoomey/vim-tmux-navigator", event = "VeryLazy"}, -- seamless vim/tmux pane navigation
+    {"clojure-vim/vim-jack-in", dependencies = {"vim-dispatch", "vim-dispatch-neovim"}, ft = "clojure", event = "VeryLazy"},
     {"eraserhd/parinfer-rust", build = "cargo build --release"},
     {"f-person/git-blame.nvim", config = function() require("plugins.git-blame") end}, -- git blame virtual text
     {"farmergreg/vim-lastplace", lazy = true}, -- jump to last edit position on reopen
@@ -142,17 +142,17 @@ require("lazy").setup({
     {"folke/todo-comments.nvim", dependencies = "nvim-lua/plenary.nvim", config = function() require("todo-comments").setup() end},
     {"folke/which-key.nvim", config = function() require("which-key").setup() end},
     {"folke/zen-mode.nvim", config = function() require("plugins.zen-mode").setup() end},
-    {"jessarcher/vim-heritage"}, -- automatically create parent directories when writing file
+    {"jessarcher/vim-heritage", event = "VeryLazy"}, -- automatically create parent directories when writing file
     {"jose-elias-alvarez/null-ls.nvim"},
     {"jose-elias-alvarez/nvim-lsp-ts-utils"},
-    {'kyazdani42/nvim-tree.lua', dependencies = {'kyazdani42/nvim-web-devicons'}, config = function() require("plugins.kyazdani42_nvim-tree").setup({}) end},
+    {'kyazdani42/nvim-tree.lua', dependencies = {'kyazdani42/nvim-web-devicons'}, config = function() require("plugins.kyazdani42_nvim-tree").setup({}) end, event = "VeryLazy"},
     {"jose-elias-alvarez/typescript.nvim", config = function() require("typescript").setup({}) end},
     {"jremmen/vim-ripgrep"},
     {"kosayoda/nvim-lightbulb", config = function() require("plugins.lightbulb").setup() end, lazy = true},
     {"lewis6991/gitsigns.nvim", dependencies = {"nvim-lua/plenary.nvim"}, config = function() require("gitsigns").setup() end, lazy = true}, -- Git
-    {"lukas-reineke/indent-blankline.nvim", config = function() require("plugins.indent-blankline").setup() end},
-    {"matze/vim-move"}, -- lines move
-    {"mhinz/vim-sayonara"}, -- smart quit buffer
+    {"lukas-reineke/indent-blankline.nvim", config = function() require("plugins.indent-blankline").setup() end, event = "VeryLazy"},
+    {"matze/vim-move", event = "VeryLazy"}, -- lines move
+    {"mhinz/vim-sayonara", event = "VeryLazy"}, -- smart quit buffer
     {"michaeljsmith/vim-indent-object"},
     {"ms-jpq/coq.artifacts", branch = "artifacts"},
     {"ms-jpq/coq.thirdparty", branch = "3p"},
@@ -162,27 +162,27 @@ require("lazy").setup({
     {"nvim-telescope/telescope.nvim", dependencies = {{"nvim-lua/plenary.nvim"}}, config = function() require("plugins.telescope") end},
     {"nvim-treesitter/nvim-treesitter", build = ":TSUpdate", config = function() require("plugins.treesitter") end},
     {"nvim-treesitter/nvim-treesitter-textobjects", dependencies = { "nvim-treesitter/nvim-treesitter" }},
-    {"pangloss/vim-javascript"},
+    {"pangloss/vim-javascript", ft = "javascript"},
     {"pierreglaser/folding-nvim"}, -- TODO
     {"prettier/vim-prettier", build = "yarn install --frozen-lockfile --production"},
     {"rafalbromirski/vim-aurora"},
     {"radenling/vim-dispatch-neovim", dependencies = {"tpope/vim-dispatch"}},
     {"rhysd/committia.vim", lazy = true}, -- Git commit
     {"romgrk/barbar.nvim", dependencies = {"lewis6991/gitsigns.nvim", "nvim-tree/nvim-web-devicons"}},
-    {"ruanyl/vim-gh-line"}, -- browser open line
-    {"sQVe/sort.nvim"},
+    {"ruanyl/vim-gh-line", event = "VeryLazy"}, -- browser open line
+    {"sQVe/sort.nvim", event = "VeryLazy"},
     {"sickill/vim-pasta"}, -- auto pasting indentation
     {"simrat39/symbols-outline.nvim"},
     {"szw/vim-maximizer", config = function() vim.g.maximizer_set_default_mapping = false end, cmd = {"MaximizerToggle"}, lazy = true},
     {"thiagoalessio/rainbow_levels.vim"},
     {"tommcdo/vim-fugitive-blame-ext"}, -- statusbar commit message
     {"tpope/vim-bundler", ft = "ruby"},
-    {"tpope/vim-commentary"}, -- comment
+    {"tpope/vim-commentary", event = "VeryLazy"}, -- comment
     {"tpope/vim-dispatch"},
-    {"tpope/vim-eunuch"},
+    {"tpope/vim-eunuch", event = "VeryLazy"},
     {"tpope/vim-fugitive"}, -- Git
     {"tpope/vim-rails", ft = "ruby"},
-    {"tpope/vim-repeat"}, -- dot repeat non-native commands
+    {"tpope/vim-repeat", event = "VeryLazy"}, -- dot repeat non-native commands
     {"tpope/vim-sleuth"}, -- indent autodetection
     {"tpope/vim-surround"},
     {"tpope/vim-unimpaired"},
@@ -193,31 +193,6 @@ require("lazy").setup({
         colorscheme = { "aurora" },
     },
 })
-
--- " completion
--- Plug 'neoclide/coc.nvim', {'branch': 'release'}
--- " coc.nvim
--- " pip install pynvim
-
-
--- use {
---     'nvim-lualine/lualine.nvim',
---     -- requires = { 'kyazdani42/nvim-web-devicons', opt = true },
---     config = function()
---         require('lualine').setup({ options = { icons_enabled = false } })
---         -- options = { theme = 'challenger_deep' }
---     end
--- }
-
--- -- scope in statusline
--- local gps = require("nvim-gps")
--- require("lualine").setup({
---     sections = {
---         lualine_c = {
---             { gps.get_location, cond = gps.is_available },
---         }
---     }
--- })
 
 local lspconfig = require("lspconfig")
 local null_ls = require("null-ls")
@@ -246,7 +221,7 @@ local on_attach = function(client, bufnr)
     vim.cmd("command! LspDiagNext lua vim.diagnostic.goto_next()")
     vim.cmd("command! LspDiagLine lua vim.diagnostic.open_float()")
     vim.cmd("command! LspSignatureHelp lua vim.lsp.buf.signature_help()")
-    buf_map(bufnr, "n", "gd", ":LspDef<CR>")
+
     buf_map(bufnr, "n", "gr", ":LspRename<CR>")
     buf_map(bufnr, "n", "gy", ":LspTypeDef<CR>")
     buf_map(bufnr, "n", "K", ":LspHover<CR>")
@@ -320,6 +295,7 @@ local on_attach = function(client, bufnr)
     buf_set_keymap("n", "<space>wl", "<cmd>lua print(vim.inspect(vim.lsp.buf.list_workspace_folders()))<CR>", opts)
     buf_set_keymap("n", "<space>D", "<cmd>lua vim.lsp.buf.type_definition()<CR>", opts)
     buf_set_keymap("n", "<space>rn", "<cmd>lua vim.lsp.buf.rename()<CR>", opts)
+    buf_set_keymap("n", "<leader>gr", "<cmd>lua vim.lsp.buf.rename()<CR>", opts)
     buf_set_keymap("n", "<space>ca", "<cmd>lua vim.lsp.buf.code_action()<CR>", opts)
     buf_set_keymap("n", "gr", "<cmd>lua vim.lsp.buf.references()<CR>", opts)
     buf_set_keymap("n", "<space>e", "<cmd>lua vim.lsp.diagnostic.show_line_diagnostics()<CR>", opts)
@@ -344,108 +320,8 @@ vim.opt.fillchars = {fold = " "}
 require("nvim-treesitter.configs").setup({
 })
 
---	-- Setup nvim-cmp.
---	local cmp = require'cmp'
-
---	cmp.setup({
---		snippet = {
---	-- REQUIRED - you must specify a snippet engine
---	expand = function(args)
---		-- vim.fn["vsnip#anonymous"](args.body) -- For `vsnip` users.
---		-- require('luasnip').lsp_expand(args.body) -- For `luasnip` users.
---		-- require('snippy').expand_snippet(args.body) -- For `snippy` users.
---		-- vim.fn["UltiSnips#Anon"](args.body) -- For `ultisnips` users.
---	end,
---		},
---		mapping = {
---	['<C-b>'] = cmp.mapping(cmp.mapping.scroll_docs(-4), { 'i', 'c' }),
---	['<C-f>'] = cmp.mapping(cmp.mapping.scroll_docs(4), { 'i', 'c' }),
---	['<C-Space>'] = cmp.mapping(cmp.mapping.complete(), { 'i', 'c' }),
---	['<C-y>'] = cmp.config.disable, -- Specify `cmp.config.disable` if you want to remove the default `<C-y>` mapping.
---	['<C-e>'] = cmp.mapping({
---		i = cmp.mapping.abort(),
---		c = cmp.mapping.close(),
---	}),
---	['<CR>'] = cmp.mapping.confirm({ select = true }), -- Accept currently selected item. Set `select` to `false` to only confirm explicitly selected items.
---		},
---		sources = cmp.config.sources({
---	{ name = 'nvim_lsp' },
---	{ name = 'buffer' },
---		})
---	})
-
---	-- Set configuration for specific filetype.
---	cmp.setup.filetype('gitcommit', {
---		sources = cmp.config.sources({
---	{ name = 'cmp_git' }, -- You can specify the `cmp_git` source if you were installed it.
---		}, {
---	{ name = 'buffer' },
---		})
---	})
-
---	-- Use buffer source for `/` (if you enabled `native_menu`, this won't work anymore).
---	cmp.setup.cmdline('/', {
---		sources = {
---	{ name = 'buffer' }
---		}
---	})
-
---	-- Use cmdline & path source for ':' (if you enabled `native_menu`, this won't work anymore).
---	cmp.setup.cmdline(':', {
---		sources = cmp.config.sources({
---	{ name = 'path' }
---		}, {
---	{ name = 'cmdline' }
---		})
---	})
-
---	-- Setup lspconfig.
---	local capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities())
---	-- Replace <YOUR_LSP_SERVER> with each lsp server you've enabled.
---	require('lspconfig')['solargraph'].setup {
---		capabilities = capabilities
---	}
---
-
--- cmp.setup {
---     -- As currently, i am not using any snippet manager, thus disabled it.
---     -- snippet = {
---     --   expand = function(args)
---     --     require("luasnip").lsp_expand(args.body)
---     --   end,
---     -- },
-
---     mapping = {
---         ["<C-d>"] = cmp.mapping.scroll_docs(-4),
---         ["<C-f>"] = cmp.mapping.scroll_docs(4),
---         ["<C-e>"] = cmp.mapping.close(),
---         ["<c-y>"] = cmp.mapping.confirm {
---             behavior = cmp.ConfirmBehavior.Insert,
---             select = true
---         }
---     },
---     formatting = {
---         format = lspkind.cmp_format {
---             with_text = true,
---             menu = {buffer = "[buf]", nvim_lsp = "[LSP]", path = "[path]"}
---         }
---     },
-
---     sources = {
---         {name = "nvim_lsp"}, {name = "path"},
---         {name = "buffer", keyword_length = 5}
---     },
---     experimental = {ghost_text = true}
--- }
-
--- nnoremap <leader>q <cmd>Sayonara!<cr>
-
 -- -- use interactive shell
 -- set shellcmdflag='-ic'
-
--- let g:fzf_command_prefix = 'Fzf'
-
--- -- nmap <leader>j :NERDTreeFind<CR>
 
 -- decreased for lsp code actions
 vim.opt.updatetime = 100
@@ -476,24 +352,6 @@ vim.api.nvim_create_autocmd("ColorScheme", {
     pattern = "*",
     callback = function()
         globalstatus()
-
-        -- local set_hl = {
-        --     BufferLineFill = { bg = '#222222' },
-        --     Comment = { italic = true, fg = '#69697c' },
-        --     CursorLine = { bg = '#ff0000' },
-        --     EndOfBuffer = { ctermbg = 'NONE', bg = 'NONE' },
-        --     FoldColumn = { ctermbg = 'NONE', bg = 'NONE' },
-        --     Folded = { bg = '#181818', fg = 'NONE' },
-        --     LineNr = { ctermbg = 'NONE', bg = 'NONE' },
-        --     NonText = { ctermfg = 'red' },
-        --     Normal = { ctermbg = 'NONE', bg = 'NONE' },
-        --     Question = { ctermfg = 'gray', fg = '#444444' },
-        --     SignColumn = { ctermbg = 'NONE', bg = 'NONE' },
-        --     WinBar = { bg = '#222222', fg = '#aaaaaa' },
-        -- }
-        -- for k, v in pairs(set_hl) do
-        --     vim.api.nvim_set_hl(0, k, v)
-        -- end
 
         -- vim.cmd('hi Question ctermfg=gray guifg=#444444')
         -- vim.cmd('hi Folded guibg=#181818')
@@ -530,7 +388,7 @@ vim.api.nvim_create_autocmd("FileType", {
 })
 
 vim.diagnostic.config({
-    virtual_text = false, -- disable diagnostics virtual text
+    virtual_text = false,
     signs = true,
     severity_sort = true
 })
@@ -553,46 +411,6 @@ vim.filetype.add({
         end
     }
 })
-
--- -- Unfold all folds when opening a file TODO
--- {
---   event = { 'BufReadPost', 'FileReadPost' },
---   pattern = { '*' },
---   command = 'normal zR',
--- },
-
--- -- share data between nvim instances (registers etc) TODO
--- augroup('Shada', {
---   {
---     event = { 'CursorHold', 'TextYankPost', 'FocusGained', 'FocusLost' },
---     pattern = { '*' },
---     command = "if exists(':rshada') | rshada | wshada | endif",
---   },
--- })
-
--- TODO firenvim
--- -- augroup('Firenvim', {
---   {
---     event = { 'BufEnter' },
---     pattern = { 'github.com_*.txt' },
---     command = 'set filetype=markdown',
---   },
--- })
-
--- TODO spelling
--- -- automatic spell check for some file types
--- augroup('SetSpell', {
---   {
---     event = { 'BufRead', 'BufNewFile' },
---     pattern = { '*.txt', '*.md', '*.tex' },
---     command = 'setlocal spell',
---   },
---   {
---     event = { 'FileType' },
---     pattern = { 'gitcommit' },
---     command = 'setlocal spell',
---   },
--- })
 
 -- fold with treesitter
 vim.opt.foldmethod = "expr"
@@ -718,9 +536,8 @@ vim.keymap.set("v", "<C-Left>", "<gv")
 vim.keymap.set("n", "<C-W>m", "<Cmd>MaximizerToggle!<CR>")
 vim.keymap.set("n", "<leader>gm", "<Cmd>MaximizerToggle!<CR>")
 
--- use visual lines with word wrap
--- vim.keymap.set('n', 'k', function() return vim.v.count == 0 and 'gk' or 'k' end, { expr = true })
--- vim.keymap.set('n', 'j', function() return vim.v.count == 0 and 'gj' or 'j' end, { expr = true })
+vim.keymap.set('x', 'v', require'nvim-treesitter.incremental_selection'.node_incremental)
+vim.keymap.set('x', 'V', require'nvim-treesitter.incremental_selection'.node_decremental)
 
 -- keep the cursor in place while joining lines
 vim.keymap.set("n", "J", "mzJ`z")
@@ -730,16 +547,130 @@ vim.keymap.set("n", "<leader>u", OpenURL)
 -- allow gf to open non-existent files
 vim.keymap.set("n", "gf", ":edit <cfile><CR>")
 
+vim.keymap.set("n", "<leader>q", "<cmd>Sayonara!<CR>")
+
 vim.keymap.set("n", "<leader>z", require("zen-mode").toggle)
 
 vim.keymap.set("n", "<leader>gj", "<cmd>SplitjoinJoin<CR>", {desc = "Join in a single line"})
 vim.keymap.set("n", "<leader>gs", "<cmd>SplitjoinSplit<CR>", {desc = "Split in a single line"})
 
--- Make visual yanks place the cursor back where started
--- vim.keymap.set("v", "y", "ygv<Esc>")
--- https://ddrscott.github.io/blog/2016/yank-without-jank/
--- vim.keymap.set('x', 'y', '"my\\""' .. vim.v.register .. "y`y", { expr = true })
+-- use visual lines with word wrap
+-- vim.keymap.set('n', 'k', function() return vim.v.count == 0 and 'gk' or 'k' end, { expr = true })
+-- vim.keymap.set('n', 'j', function() return vim.v.count == 0 and 'gj' or 'j' end, { expr = true })
 
--- remap v/V in visual mode for tree-sitter incremental selection
--- vim.keymap.set('x', 'v', require'nvim-treesitter.incremental_selection'.node_incremental, { silent = true })
--- vim.keymap.set('x', 'V', require'nvim-treesitter.incremental_selection'.node_decremental, { silent = true })
+-- vim.keymap.set("v", "y", "ygv<Esc>") -- yank restore cursor position
+vim.keymap.set("v", "y", function()
+    return "my\"" .. vim.v.register .. "y`y"
+end, { expr = true })
+
+
+
+--	-- Setup nvim-cmp.
+--	local cmp = require'cmp'
+
+--	cmp.setup({
+--		snippet = {
+--	-- REQUIRED - you must specify a snippet engine
+--	expand = function(args)
+--		-- vim.fn["vsnip#anonymous"](args.body) -- For `vsnip` users.
+--		-- require('luasnip').lsp_expand(args.body) -- For `luasnip` users.
+--		-- require('snippy').expand_snippet(args.body) -- For `snippy` users.
+--		-- vim.fn["UltiSnips#Anon"](args.body) -- For `ultisnips` users.
+--	end,
+--		},
+--		mapping = {
+--	['<C-b>'] = cmp.mapping(cmp.mapping.scroll_docs(-4), { 'i', 'c' }),
+--	['<C-f>'] = cmp.mapping(cmp.mapping.scroll_docs(4), { 'i', 'c' }),
+--	['<C-Space>'] = cmp.mapping(cmp.mapping.complete(), { 'i', 'c' }),
+--	['<C-y>'] = cmp.config.disable, -- Specify `cmp.config.disable` if you want to remove the default `<C-y>` mapping.
+--	['<C-e>'] = cmp.mapping({
+--		i = cmp.mapping.abort(),
+--		c = cmp.mapping.close(),
+--	}),
+--	['<CR>'] = cmp.mapping.confirm({ select = true }), -- Accept currently selected item. Set `select` to `false` to only confirm explicitly selected items.
+--		},
+--		sources = cmp.config.sources({
+--	{ name = 'nvim_lsp' },
+--	{ name = 'buffer' },
+--		})
+--	})
+
+--	-- Set configuration for specific filetype.
+--	cmp.setup.filetype('gitcommit', {
+--		sources = cmp.config.sources({
+--	{ name = 'cmp_git' }, -- You can specify the `cmp_git` source if you were installed it.
+--		}, {
+--	{ name = 'buffer' },
+--		})
+--	})
+
+--	-- Use buffer source for `/` (if you enabled `native_menu`, this won't work anymore).
+--	cmp.setup.cmdline('/', {
+--		sources = {
+--	{ name = 'buffer' }
+--		}
+--	})
+
+--	-- Use cmdline & path source for ':' (if you enabled `native_menu`, this won't work anymore).
+--	cmp.setup.cmdline(':', {
+--		sources = cmp.config.sources({
+--	{ name = 'path' }
+--		}, {
+--	{ name = 'cmdline' }
+--		})
+--	})
+
+--	-- Setup lspconfig.
+--	local capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities())
+--	-- Replace <YOUR_LSP_SERVER> with each lsp server you've enabled.
+--	require('lspconfig')['solargraph'].setup {
+--		capabilities = capabilities
+--	}
+--
+
+-- cmp.setup {
+--     -- As currently, i am not using any snippet manager, thus disabled it.
+--     -- snippet = {
+--     --   expand = function(args)
+--     --     require("luasnip").lsp_expand(args.body)
+--     --   end,
+--     -- },
+
+--     mapping = {
+--         ["<C-d>"] = cmp.mapping.scroll_docs(-4),
+--         ["<C-f>"] = cmp.mapping.scroll_docs(4),
+--         ["<C-e>"] = cmp.mapping.close(),
+--         ["<c-y>"] = cmp.mapping.confirm {
+--             behavior = cmp.ConfirmBehavior.Insert,
+--             select = true
+--         }
+--     },
+--     formatting = {
+--         format = lspkind.cmp_format {
+--             with_text = true,
+--             menu = {buffer = "[buf]", nvim_lsp = "[LSP]", path = "[path]"}
+--         }
+--     },
+
+--     sources = {
+--         {name = "nvim_lsp"}, {name = "path"},
+--         {name = "buffer", keyword_length = 5}
+--     },
+--     experimental = {ghost_text = true}
+-- }
+--
+-- -- Unfold all folds when opening a file TODO
+-- {
+--   event = { 'BufReadPost', 'FileReadPost' },
+--   pattern = { '*' },
+--   command = 'normal zR',
+-- },
+
+-- -- share data between nvim instances (registers etc) TODO
+-- augroup('Shada', {
+--   {
+--     event = { 'CursorHold', 'TextYankPost', 'FocusGained', 'FocusLost' },
+--     pattern = { '*' },
+--     command = "if exists(':rshada') | rshada | wshada | endif",
+--   },
+-- })
