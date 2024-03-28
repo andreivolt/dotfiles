@@ -137,7 +137,7 @@ require("lazy").setup({
     {"clojure-vim/vim-jack-in", dependencies = {"vim-dispatch", "vim-dispatch-neovim"}},
     {"eraserhd/parinfer-rust", build = "cargo build --release"},
     {"f-person/git-blame.nvim", config = function() require("plugins.git-blame") end}, -- git blame virtual text
-    {"farmergreg/vim-lastplace"}, -- jump to last edit position on reopen
+    {"farmergreg/vim-lastplace", lazy = true}, -- jump to last edit position on reopen
     {"fladson/vim-kitty"},
     {"folke/todo-comments.nvim", dependencies = "nvim-lua/plenary.nvim", config = function() require("todo-comments").setup() end},
     {"folke/which-key.nvim", config = function() require("which-key").setup() end},
@@ -145,6 +145,7 @@ require("lazy").setup({
     {"jessarcher/vim-heritage"}, -- automatically create parent directories when writing file
     {"jose-elias-alvarez/null-ls.nvim"},
     {"jose-elias-alvarez/nvim-lsp-ts-utils"},
+    {'kyazdani42/nvim-tree.lua', dependencies = {'kyazdani42/nvim-web-devicons'}, config = function() require("plugins.kyazdani42_nvim-tree").setup({}) end},
     {"jose-elias-alvarez/typescript.nvim", config = function() require("typescript").setup({}) end},
     {"jremmen/vim-ripgrep"},
     {"kosayoda/nvim-lightbulb", config = function() require("plugins.lightbulb").setup() end, lazy = true},
@@ -156,17 +157,16 @@ require("lazy").setup({
     {"ms-jpq/coq.artifacts", branch = "artifacts"},
     {"ms-jpq/coq.thirdparty", branch = "3p"},
     {"ms-jpq/coq_nvim", branch = "coq"},
-    {"neovim/nvim-lspconfig"},
     {"ntpeters/vim-better-whitespace"},
     {"nvim-telescope/telescope-fzf-native.nvim", build = "make"},
     {"nvim-telescope/telescope.nvim", dependencies = {{"nvim-lua/plenary.nvim"}}, config = function() require("plugins.telescope") end},
     {"nvim-treesitter/nvim-treesitter", build = ":TSUpdate", config = function() require("plugins.treesitter") end},
-    {"nvim-treesitter/nvim-treesitter-textobjects"},
+    {"nvim-treesitter/nvim-treesitter-textobjects", dependencies = { "nvim-treesitter/nvim-treesitter" }},
     {"pangloss/vim-javascript"},
     {"pierreglaser/folding-nvim"}, -- TODO
     {"prettier/vim-prettier", build = "yarn install --frozen-lockfile --production"},
-    {"radenling/vim-dispatch-neovim", dependencies = {"tpope/vim-dispatch"}},
     {"rafalbromirski/vim-aurora"},
+    {"radenling/vim-dispatch-neovim", dependencies = {"tpope/vim-dispatch"}},
     {"rhysd/committia.vim", lazy = true}, -- Git commit
     {"romgrk/barbar.nvim", dependencies = {"lewis6991/gitsigns.nvim", "nvim-tree/nvim-web-devicons"}},
     {"ruanyl/vim-gh-line"}, -- browser open line
@@ -199,9 +199,6 @@ require("lazy").setup({
 -- " coc.nvim
 -- " pip install pynvim
 
--- open current line in web source browser
--- blob: <leader>gh
--- blame: <leader>gb
 
 -- use {
 --     'nvim-lualine/lualine.nvim',
@@ -345,25 +342,6 @@ vim.opt.foldtext = [[substitute(getline(v:foldstart),'\\t',repeat('\ ',&tabstop)
 vim.opt.fillchars = {fold = " "}
 
 require("nvim-treesitter.configs").setup({
-    textobjects = {
-        -- select inside/outside functions/classes
-        select = {
-            enable = true,
-
-            -- Automatically jump forward to textobj, similar to targets.vim
-            lookahead = true,
-
-            keymaps = {
-                -- You can use the capture groups defined in textobjects.scm
-                ["af"] = "@function.outer",
-                ["if"] = "@function.inner",
-                ["ac"] = "@class.outer",
-                ["ic"] = "@class.inner"
-            }
-        },
-        -- swap the order of parameters
-        swap = {enable = true, swap_next = {["g>>"] = "@parameter.inner", ["g>f"] = "@function.outer"}, swap_previous = {["g<<"] = "@parameter.inner", ["g<f"] = "@function.outer"}}
-    }
 })
 
 --	-- Setup nvim-cmp.
@@ -473,19 +451,8 @@ require("nvim-treesitter.configs").setup({
 vim.opt.updatetime = 100
 
 -- -- highlight URLs
--- vim.cmd('syn match matchURL /http[s]\?:\/\/[[:alnum:]%\/_#.-]*/')
--- vim.cmd('hi matchURL ctermfg=14 guifg=blue')
-
--- vim.cmd([[
---	 augroup packer_user_config
---	 autocmd!
---	 autocmd BufWritePost $MYVIMRC source $MYVIMRC | PackerCompile
---	 augroup end
--- ]])
-
--- vim.api.nvim_set_hl(0, "Normal", {ctermbg = "NONE", bg = "NONE"})
--- vim.api.nvim_set_hl(0, "LineNr", {ctermbg = "NONE", bg = "NONE"})
--- vim.api.nvim_set_hl(0, "SignColumn", {ctermbg = "NONE", bg = "NONE"})
+vim.api.nvim_exec([[syn match matchURL /http[s]\?:\/\/[[:alnum:]%\/_#.-]*/ containedin=ALL]], false)
+vim.api.nvim_set_hl(0, 'matchURL', {underline = true, fg = 'skyblue'})
 
 -- use ripgrep for grep
 if vim.fn.executable("rg") > 0 then
@@ -495,11 +462,6 @@ end
 
 -- ctags
 -- TODO setglobal tags-=./tags tags-=./tags; tags^=./tags; # https://github.com/tpope/vim-sensible/blob/master/plugin/sensible.vim#L65
-
--- -- force reload modules, bypass module caching
--- require("plenary.reload").reload_module("<module>", true)
---  package.loaded['package-name-here'] = nil then require again and it'll load the new version
---
 
 -- global statusline
 local function globalstatus()
@@ -567,9 +529,6 @@ vim.api.nvim_create_autocmd("FileType", {
     end
 })
 
--- compile packer after changing file
-vim.api.nvim_create_autocmd("BufWritePost", {pattern = vim.fn.stdpath("config") .. "/**/*.lua", command = "source <afile>"})
-
 vim.diagnostic.config({
     virtual_text = false, -- disable diagnostics virtual text
     signs = true,
@@ -593,22 +552,6 @@ vim.filetype.add({
             end
         end
     }
-})
-
--- when editing a file, always jump to the last known cursor position.
--- don't do it for git commit messages
-vim.api.nvim_create_autocmd("BufReadPost", {
-    pattern = "*",
-    callback = function()
-        local ft = vim.bo.filetype
-        local line = vim.fn.line
-
-        local not_in_event_handler = line("'\"") > 0 and line("'\"") <= line("$")
-
-        -- not vim.regex([[commit\|rebase]]):match_str(vim.bo.filetype) TODO
-
-        if not (ft == "gitcommit") and not_in_event_handler then vim.fn.execute('normal g`"') end
-    end
 })
 
 -- -- Unfold all folds when opening a file TODO
