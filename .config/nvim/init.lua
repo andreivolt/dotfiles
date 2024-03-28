@@ -141,7 +141,7 @@ require("lazy").setup({
     {"christoomey/vim-tmux-navigator"}, -- seamless vim/tmux pane navigation
     {"clojure-vim/vim-jack-in", dependencies = {"vim-dispatch", "vim-dispatch-neovim"}, ft = "clojure"},
     {"eraserhd/parinfer-rust", build = "cargo build --release"},
-    {"f-person/git-blame.nvim", config = function() require("plugins.f-person_git-blame") end}, -- git blame virtual text
+    {"f-person/git-blame.nvim", config = function() require("plugins.f-person_git-blame").setup() end}, -- git blame virtual text
     {"farmergreg/vim-lastplace"}, -- jump to last edit position on reopen
     {"fladson/vim-kitty"},
     {"folke/todo-comments.nvim", dependencies = "nvim-lua/plenary.nvim", config = function() require("todo-comments").setup() end},
@@ -164,8 +164,8 @@ require("lazy").setup({
     {"ms-jpq/coq_nvim", branch = "coq"},
     {"ntpeters/vim-better-whitespace"},
     {"nvim-telescope/telescope-fzf-native.nvim", build = "make"},
-    {"nvim-telescope/telescope.nvim", dependencies = {{"nvim-lua/plenary.nvim"}}, config = function() require("plugins.nvim-telescope_telescope") end},
-    {"nvim-treesitter/nvim-treesitter", build = ":TSUpdate", config = function() require("plugins.nvim-treesitter_nvim-treesitter") end},
+    {"nvim-telescope/telescope.nvim", dependencies = {"nvim-lua/plenary.nvim"}, config = function() require("plugins.nvim-telescope_telescope").setup() end},
+    {"nvim-treesitter/nvim-treesitter", build = ":TSUpdate", config = function() require("plugins.nvim-treesitter_nvim-treesitter").setup() end},
     {"nvim-treesitter/nvim-treesitter-textobjects", dependencies = { "nvim-treesitter/nvim-treesitter" }},
     {"pangloss/vim-javascript", ft = "javascript"},
     {"pierreglaser/folding-nvim"}, -- TODO
@@ -365,6 +365,7 @@ require("user.direnv")
 require("user.docker")
 require("user.folding")
 require("user.lua")
+require("user.move_lines")
 require("user.neovide")
 require("user.ruby")
 require("user.shebang")
@@ -421,10 +422,6 @@ function CopyPathAndLineNumber()
     vim.fn.setreg("+", text)
 end
 vim.api.nvim_create_user_command("CopyPathAndLineNumber", "lua CopyPathAndLineNumber()", {nargs = 0})
-
-local keymaps = {["n"] = {["<c-j>"] = ":m .+1<CR>==", ["<c-k>"] = ":m .-2<CR>=="}, ["i"] = {["<c-j>"] = "<Esc>:m .+1<CR>==gi", ["<c-k>"] = "<Esc>:m .-2<CR>==gi"}, ["v"] = {["<c-j>"] = ":m '>+1<CR>gv=gv", ["<c-k>"] = ":m '<-2<CR>gv=gv"}}
-
-for mode, bindings in pairs(keymaps) do for key, cmd in pairs(bindings) do vim.api.nvim_set_keymap(mode, key, cmd, {silent = true}) end end
 
 -- window splits sizing stabilize text
 vim.o.splitkeep = "screen"
