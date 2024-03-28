@@ -101,14 +101,14 @@ vim.g.vimsyn_embed = "lPr" -- vim embedded syntax highlighting
 
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not vim.loop.fs_stat(lazypath) then
-  vim.fn.system({
-    "git",
-    "clone",
-    "--filter=blob:none",
-    "https://github.com/folke/lazy.nvim.git",
-    "--branch=stable", -- latest stable release
-    lazypath,
-  })
+    vim.fn.system({
+        "git",
+        "clone",
+        "--filter=blob:none",
+        "https://github.com/folke/lazy.nvim.git",
+        "--branch=stable", -- latest stable release
+        lazypath,
+    })
 end
 vim.opt.rtp:prepend(lazypath)
 
@@ -141,21 +141,21 @@ require("lazy").setup({
     {"christoomey/vim-tmux-navigator"}, -- seamless vim/tmux pane navigation
     {"clojure-vim/vim-jack-in", dependencies = {"vim-dispatch", "vim-dispatch-neovim"}, ft = "clojure"},
     {"eraserhd/parinfer-rust", build = "cargo build --release"},
-    {"f-person/git-blame.nvim", config = function() require("plugins.git-blame") end}, -- git blame virtual text
+    {"f-person/git-blame.nvim", config = function() require("plugins.f-person_git-blame") end}, -- git blame virtual text
     {"farmergreg/vim-lastplace"}, -- jump to last edit position on reopen
     {"fladson/vim-kitty"},
     {"folke/todo-comments.nvim", dependencies = "nvim-lua/plenary.nvim", config = function() require("todo-comments").setup() end},
     {"folke/which-key.nvim", config = function() require("which-key").setup() end},
-    {"folke/zen-mode.nvim", config = function() require("plugins.zen-mode").setup() end},
+    {"folke/zen-mode.nvim", config = function() require("plugins.folke_zen-mode").setup() end},
     {"jessarcher/vim-heritage"}, -- automatically create parent directories when writing file
     {"jose-elias-alvarez/null-ls.nvim"},
     {"jose-elias-alvarez/nvim-lsp-ts-utils"},
     {'kyazdani42/nvim-tree.lua', dependencies = {'kyazdani42/nvim-web-devicons'}, config = function() require("plugins.kyazdani42_nvim-tree").setup({}) end},
     {"jose-elias-alvarez/typescript.nvim", config = function() require("typescript").setup({}) end},
     {"jremmen/vim-ripgrep"},
-    {"kosayoda/nvim-lightbulb", config = function() require("plugins.lightbulb").setup() end, lazy = true},
+    {"kosayoda/nvim-lightbulb", config = function() require("plugins.kosayoda_nvim-lightbulb").setup() end, lazy = true},
     {"lewis6991/gitsigns.nvim", dependencies = {"nvim-lua/plenary.nvim"}, config = function() require("gitsigns").setup() end, lazy = true}, -- Git
-    {"lukas-reineke/indent-blankline.nvim", config = function() require("plugins.indent-blankline").setup() end},
+    {"lukas-reineke/indent-blankline.nvim", config = function() require("plugins.lukas-reineke_indent-blankline").setup() end},
     {"matze/vim-move"}, -- lines move
     {"mhinz/vim-sayonara"}, -- smart quit buffer
     {"michaeljsmith/vim-indent-object"},
@@ -164,8 +164,8 @@ require("lazy").setup({
     {"ms-jpq/coq_nvim", branch = "coq"},
     {"ntpeters/vim-better-whitespace"},
     {"nvim-telescope/telescope-fzf-native.nvim", build = "make"},
-    {"nvim-telescope/telescope.nvim", dependencies = {{"nvim-lua/plenary.nvim"}}, config = function() require("plugins.telescope") end},
-    {"nvim-treesitter/nvim-treesitter", build = ":TSUpdate", config = function() require("plugins.treesitter") end},
+    {"nvim-telescope/telescope.nvim", dependencies = {{"nvim-lua/plenary.nvim"}}, config = function() require("plugins.nvim-telescope_telescope") end},
+    {"nvim-treesitter/nvim-treesitter", build = ":TSUpdate", config = function() require("plugins.nvim-treesitter_nvim-treesitter") end},
     {"nvim-treesitter/nvim-treesitter-textobjects", dependencies = { "nvim-treesitter/nvim-treesitter" }},
     {"pangloss/vim-javascript", ft = "javascript"},
     {"pierreglaser/folding-nvim"}, -- TODO
@@ -237,9 +237,9 @@ local on_attach = function(client, bufnr)
     buf_map(bufnr, "i", "<C-x><C-x>", "<cmd> LspSignatureHelp<CR>")
 
     -- -- format on save
-    if client.resolved_capabilities.document_formatting then
-        vim.cmd("autocmd BufWritePre <buffer> lua vim.lsp.buf.formatting_sync()")
-    end
+    -- if client.resolved_capabilities.document_formatting then
+    --     vim.cmd("autocmd BufWritePre <buffer> lua vim.lsp.buf.formatting_sync()")
+    -- end
 end
 
 lspconfig.tsserver.setup({
@@ -310,8 +310,7 @@ local on_attach = function(client, bufnr)
     buf_set_keymap("n", "<space>f", "<cmd>lua vim.lsp.buf.formatting()<CR>", opts)
 end
 
--- Use a loop to conveniently call 'setup' on multiple servers and
--- map buffer local keybindings when the language server attaches
+-- Use a loop to conveniently call 'setup' on multiple servers and map buffer local keybindings when the language server attaches
 local servers = {"solargraph"}
 for _, lsp in ipairs(servers) do nvim_lsp[lsp].setup({on_attach = on_attach, flags = {debounce_text_changes = 150}}) end
 
@@ -333,9 +332,9 @@ vim.api.nvim_exec([[syn match matchURL /http[s]\?:\/\/[[:alnum:]%\/_#.-]*/ conta
 vim.api.nvim_set_hl(0, 'matchURL', {underline = true, fg = 'skyblue'})
 
 -- use ripgrep for grep
-if vim.fn.executable("rg") > 0 then
+if vim.fn.executable('rg') > 0 then
     vim.opt.grepprg = "rg --hidden --glob '!.git' --no-heading --smart-case --vimgrep --follow $*"
-    vim.opt.grepformat = vim.opt.grepformat ^ {"%f:%l:%c:%m"}
+    vim.opt.grepformat = vim.opt.grepformat ^ {'%f:%l:%c:%m'}
 end
 
 -- ctags
@@ -345,18 +344,22 @@ end
 vim.api.nvim_create_autocmd("ColorScheme", {
     pattern = "*",
     callback = function()
-        -- vim.cmd('hi Question ctermfg=gray guifg=#444444')
-        -- vim.cmd('hi Folded guibg=#181818')
-        vim.cmd("hi NonText ctermfg=red")
-        vim.cmd("hi Normal ctermbg=NONE guibg=NONE")
-        vim.cmd("hi SignColumn ctermbg=NONE guibg=NONE")
-        vim.cmd("hi FoldColumn ctermbg=NONE guibg=NONE")
-        vim.cmd("hi EndOfBuffer ctermbg=NONE guibg=NONE")
-        vim.cmd("hi BufferLineFill guibg=#222222")
-        vim.cmd("hi Comment cterm=italic gui=italic")
+        vim.api.nvim_set_hl(0, 'BufferLineFill', {bg = '#222222'})
+        vim.api.nvim_set_hl(0, 'Comment', {italic = true, fg = '#777777'})
+        vim.api.nvim_set_hl(0, 'EndOfBuffer', {bg = 'black', fg = 'black'})
+        vim.api.nvim_set_hl(0, 'FoldColumn', {ctermbg = 'NONE', bg = 'black'})
+        vim.api.nvim_set_hl(0, 'Folded', {bg = '#181818'})
+        vim.api.nvim_set_hl(0, 'NonText', {fg = '#222222'})
+        vim.api.nvim_set_hl(0, 'Normal', {ctermbg = 'NONE', bg = 'black'})
+        vim.api.nvim_set_hl(0, 'NvimTreeIndentMarker', {fg = '#333333'})
+        vim.api.nvim_set_hl(0, 'NvimTreeStatusLine', {bg = 'black', fg = 'black'})
+        vim.api.nvim_set_hl(0, 'NvimTreeStatusLineNC', {bg = 'black', fg = 'black'})
+        vim.api.nvim_set_hl(0, 'Question', {ctermfg = 'gray', fg = '#444444'})
+        vim.api.nvim_set_hl(0, 'SignColumn', {ctermbg = 'NONE', bg = 'black'})
+        vim.api.nvim_set_hl(0, 'WinBar', {bg = 'black', fg = '#999999', bold = false, italic = true, underline = false, undercurl = false, strikethrough = false})
     end
 })
-vim.cmd("colorscheme aurora")
+vim.cmd('colorscheme aurora')
 
 require("user.direnv")
 require("user.docker")
@@ -472,9 +475,6 @@ vim.api.nvim_create_autocmd("BufEnter", {pattern = "*.ex", command = 'syn match 
 vim.api.nvim_create_autocmd("BufEnter", {pattern = "*.rb", command = 'syn match Error "binding.pry\\|debugger"'})
 vim.api.nvim_create_autocmd("BufEnter", {pattern = {"*.js", "*.ts", "*.tsx"}, command = 'syn match Error "colsole.log"'})
 
-vim.api.nvim_set_hl(0, "EndOfBuffer", {bg = "black", fg = "black"})
-
-vim.api.nvim_set_hl(0, 'WinBar', {bg='black', fg='#999999', bold=false, italic=true, underline=false, undercurl=false, strikethrough=false})
 
 -- resize splits to equal widths on window resize
 vim.api.nvim_create_autocmd({"VimResized"}, {callback = function() vim.cmd.wincmd("=") end})
