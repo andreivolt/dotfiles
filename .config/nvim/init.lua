@@ -192,11 +192,122 @@ require("lazy").setup({
     {"vim-test/vim-test"},
     {"windwp/nvim-autopairs", config = function() require("nvim-autopairs").setup({}) end},
     {'kyazdani42/nvim-tree.lua', dependencies = {'kyazdani42/nvim-web-devicons'}, config = function() require("plugins.kyazdani42_nvim-tree").setup({}) end},
-}, {
-    install = {
-        colorscheme = { "aurora" },
+    {
+        "neovim/nvim-lspconfig",
+        config = function()
+            local lspconfig = require("lspconfig")
+            lspconfig.lua_ls.setup({
+                on_init = function(client)
+                    local path = client.workspace_folders[1].name
+                    if not vim.loop.fs_stat(path .. "/.luarc.json") and not vim.loop.fs_stat(path .. "/.luarc.jsonc") then
+                        client.config.settings = vim.tbl_deep_extend("force", client.config.settings, {
+                            Lua = {
+                                diagnostics = {
+                                    globals = {"vim", "hs", "spoon"},
+                                },
+                                runtime = {
+                                    version = "LuaJIT",
+                                },
+                                telemetry = {enable = false},
+                                workspace = {
+                                    checkThirdParty = false,
+                                    library = vim.env.VIMRUNTIME,
+                                },
+                            },
+                        })
+                    end
+                    return true
+                end,
+            })
+        end,
     },
-})
+}, {
+        install = {
+            colorscheme = { "aurora" },
+        },
+    })
+
+require("user.direnv")
+require("user.docker")
+require("user.folding")
+require("user.lua")
+require("user.move_lines")
+require("user.neovide")
+require("user.open_url")
+require("user.ruby")
+require("user.shebang")
+require("user.tmux")
+
+-- resize splits to equal widths on window resize
+vim.api.nvim_create_autocmd({"VimResized"}, {callback = function() vim.cmd.wincmd("=") end})
+
+vim.keymap.set("n", "<ESC>", ":nohlsearch<Bar>echo<CR>")
+vim.keymap.set("n", "<C-L>", function()
+    vim.cmd(":nohlsearch")
+    if vim.fn.has("diff") == 1 then vim.cmd(":diffupdate") end
+    vim.cmd("<C-L>")
+end)
+
+vim.keymap.set("n", "<leader>sc", ":source $MYVIMRC")
+
+vim.keymap.set("n", "<leader><leader>", ":edit #<CR>")
+
+-- buffer next/prev
+vim.keymap.set("v", "<leader>bn", ":bnext")
+vim.keymap.set("v", "<leader>bp", ":bprev")
+
+-- tmux style window navigation
+vim.keymap.set("n", "<C-h>", "<C-w><C-h>")
+vim.keymap.set("n", "<C-l>", "<C-w><C-l>")
+vim.keymap.set("n", "<C-j>", "<C-w><C-j>")
+vim.keymap.set("n", "<C-k>", "<C-w><C-k>")
+
+vim.keymap.set("n", "<leader>fb", require("telescope.builtin").buffers)
+vim.keymap.set("n", "<leader>ff", require("telescope.builtin").find_files)
+vim.keymap.set("n", "<leader>fg", require("telescope.builtin").live_grep)
+vim.keymap.set("n", "<leader>fh", require("telescope.builtin").help_tags)
+
+vim.keymap.set("n", "<leader>n", ":NvimTreeFindFileToggle<CR>", { silent = true })
+vim.keymap.set("n", "gp", "`[v`]")
+
+-- visual indent
+vim.keymap.set("v", "<Tab>", ">gv")
+vim.keymap.set("v", "<S-Tab>", "<gv")
+vim.keymap.set("v", "<C-Right>", ">gv")
+vim.keymap.set("v", "<C-Left>", "<gv")
+
+vim.keymap.set("n", "<C-W>m", "<Cmd>MaximizerToggle!<CR>")
+vim.keymap.set("n", "<leader>gm", "<Cmd>MaximizerToggle!<CR>")
+
+vim.keymap.set('x', 'v', require'nvim-treesitter.incremental_selection'.node_incremental)
+vim.keymap.set('x', 'V', require'nvim-treesitter.incremental_selection'.node_decremental)
+
+vim.keymap.set('n', '<leader>gn', ':set number!<CR>')
+
+-- keep the cursor in place while joining lines
+vim.keymap.set("n", "J", "mzJ`z")
+
+vim.keymap.set("n", "<leader>u", OpenURL)
+
+-- allow gf to open non-existent files
+vim.keymap.set("n", "gf", ":edit <cfile><CR>")
+
+vim.keymap.set("n", "<leader>q", "<cmd>Sayonara!<CR>")
+
+vim.keymap.set("n", "<leader>z", require("zen-mode").toggle)
+
+vim.keymap.set("n", "<leader>gj", "<cmd>SplitjoinJoin<CR>", {desc = "Join in a single line"})
+vim.keymap.set("n", "<leader>gs", "<cmd>SplitjoinSplit<CR>", {desc = "Split in a single line"})
+
+-- use visual lines with word wrap
+-- vim.keymap.set('n', 'k', function() return vim.v.count == 0 and 'gk' or 'k' end, { expr = true })
+-- vim.keymap.set('n', 'j', function() return vim.v.count == 0 and 'gj' or 'j' end, { expr = true })
+
+-- vim.keymap.set("v", "y", "ygv<Esc>") -- yank restore cursor position
+vim.keymap.set("v", "y", function()
+    return "my\"" .. vim.v.register .. "y`y"
+end, { expr = true })
+
 
 local lspconfig = require("lspconfig")
 local null_ls = require("null-ls")
@@ -360,17 +471,6 @@ vim.api.nvim_create_autocmd("ColorScheme", {
 })
 vim.cmd('colorscheme aurora')
 
-require("user.direnv")
-require("user.docker")
-require("user.folding")
-require("user.lua")
-require("user.move_lines")
-require("user.neovide")
-require("user.open_url")
-require("user.ruby")
-require("user.shebang")
-require("user.tmux")
-
 -- go to the github repo of plugins
 vim.api.nvim_create_autocmd("FileType", {
     pattern = "init.lua",
@@ -447,75 +547,6 @@ vim.api.nvim_create_autocmd("BufEnter", {pattern = "*.rb", command = 'syn match 
 vim.api.nvim_create_autocmd("BufEnter", {pattern = {"*.js", "*.ts", "*.tsx"}, command = 'syn match Error "colsole.log"'})
 
 
--- resize splits to equal widths on window resize
-vim.api.nvim_create_autocmd({"VimResized"}, {callback = function() vim.cmd.wincmd("=") end})
-
-vim.keymap.set("n", "<ESC>", ":nohlsearch<Bar>echo<CR>")
-vim.keymap.set("n", "<C-L>", function()
-    vim.cmd(":nohlsearch")
-    if vim.fn.has("diff") == 1 then vim.cmd(":diffupdate") end
-    vim.cmd("<C-L>")
-end)
-
-vim.keymap.set("n", "<leader>sc", ":source $MYVIMRC")
-
-vim.keymap.set("n", "<leader><leader>", ":edit #<CR>")
-
--- buffer next/prev
-vim.keymap.set("v", "<leader>bn", ":bnext")
-vim.keymap.set("v", "<leader>bp", ":bprev")
-
--- tmux style window navigation
-vim.keymap.set("n", "<C-h>", "<C-w><C-h>")
-vim.keymap.set("n", "<C-l>", "<C-w><C-l>")
-vim.keymap.set("n", "<C-j>", "<C-w><C-j>")
-vim.keymap.set("n", "<C-k>", "<C-w><C-k>")
-
-vim.keymap.set("n", "<leader>fb", require("telescope.builtin").buffers)
-vim.keymap.set("n", "<leader>ff", require("telescope.builtin").find_files)
-vim.keymap.set("n", "<leader>fg", require("telescope.builtin").live_grep)
-vim.keymap.set("n", "<leader>fh", require("telescope.builtin").help_tags)
-
-vim.keymap.set("n", "<leader>n", ":NvimTreeFindFileToggle<CR>", { silent = true })
-vim.keymap.set("n", "gp", "`[v`]")
-
--- visual indent
-vim.keymap.set("v", "<Tab>", ">gv")
-vim.keymap.set("v", "<S-Tab>", "<gv")
-vim.keymap.set("v", "<C-Right>", ">gv")
-vim.keymap.set("v", "<C-Left>", "<gv")
-
-vim.keymap.set("n", "<C-W>m", "<Cmd>MaximizerToggle!<CR>")
-vim.keymap.set("n", "<leader>gm", "<Cmd>MaximizerToggle!<CR>")
-
-vim.keymap.set('x', 'v', require'nvim-treesitter.incremental_selection'.node_incremental)
-vim.keymap.set('x', 'V', require'nvim-treesitter.incremental_selection'.node_decremental)
-
-vim.keymap.set('n', '<leader>gn', ':set number!<CR>')
-
--- keep the cursor in place while joining lines
-vim.keymap.set("n", "J", "mzJ`z")
-
-vim.keymap.set("n", "<leader>u", OpenURL)
-
--- allow gf to open non-existent files
-vim.keymap.set("n", "gf", ":edit <cfile><CR>")
-
-vim.keymap.set("n", "<leader>q", "<cmd>Sayonara!<CR>")
-
-vim.keymap.set("n", "<leader>z", require("zen-mode").toggle)
-
-vim.keymap.set("n", "<leader>gj", "<cmd>SplitjoinJoin<CR>", {desc = "Join in a single line"})
-vim.keymap.set("n", "<leader>gs", "<cmd>SplitjoinSplit<CR>", {desc = "Split in a single line"})
-
--- use visual lines with word wrap
--- vim.keymap.set('n', 'k', function() return vim.v.count == 0 and 'gk' or 'k' end, { expr = true })
--- vim.keymap.set('n', 'j', function() return vim.v.count == 0 and 'gj' or 'j' end, { expr = true })
-
--- vim.keymap.set("v", "y", "ygv<Esc>") -- yank restore cursor position
-vim.keymap.set("v", "y", function()
-    return "my\"" .. vim.v.register .. "y`y"
-end, { expr = true })
 
 --	-- Setup nvim-cmp.
 --	local cmp = require'cmp'
