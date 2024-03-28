@@ -169,11 +169,11 @@ require("lazy").setup({
     {"rafalbromirski/vim-aurora"},
     {"rhysd/committia.vim", lazy = true}, -- Git commit
     {"romgrk/barbar.nvim", dependencies = {"lewis6991/gitsigns.nvim", "nvim-tree/nvim-web-devicons"}},
-    {"RRethy/nvim-treesitter-endwise", dependencies = "nvim-treesitter/nvim-treesitter", config = function() require("nvim-treesitter.configs").setup({endwise = {enable = true}}) end},
+    {"RRethy/nvim-treesitter-endwise", dependencies = "nvim-treesitter/nvim-treesitter", config = function() require("plugins.RRethy_nvim-treesitter-endwise").setup() end},
     {"ruanyl/vim-gh-line"}, -- browser open line
     {"sickill/vim-pasta"}, -- auto pasting indentation
     {"simrat39/symbols-outline.nvim"},
-    {"SmiteshP/nvim-navic", dependencies = "neovim/nvim-lspconfig", config = function() require("nvim-navic").setup({lsp = {auto_attach = true}}) end},
+    {"SmiteshP/nvim-navic", dependencies = "neovim/nvim-lspconfig", config = function() require('plugins.SmiteshP_nvim-navic').setup() end},
     {"sQVe/sort.nvim"},
     {"szw/vim-maximizer", config = function() vim.g.maximizer_set_default_mapping = false end, cmd = {"MaximizerToggle"}, lazy = true},
     {"thiagoalessio/rainbow_levels.vim"},
@@ -450,7 +450,6 @@ end
 -- ctags
 -- TODO setglobal tags-=./tags tags-=./tags; tags^=./tags; # https://github.com/tpope/vim-sensible/blob/master/plugin/sensible.vim#L65
 
-
 vim.api.nvim_create_autocmd("ColorScheme", {
     pattern = "*",
     callback = function()
@@ -538,15 +537,12 @@ vim.api.nvim_create_autocmd({"BufEnter", "BufWritePost", "FocusGained"}, {
     end
 })
 
-
 -- highlight on yank
 vim.api.nvim_create_autocmd("TextYankPost", {pattern = "*", callback = function() vim.highlight.on_yank({on_visual = true}) end})
 
 vim.api.nvim_create_autocmd("BufEnter", {pattern = "*.ex", command = 'syn match Error "IO.puts\\|IO.inspect"'})
 vim.api.nvim_create_autocmd("BufEnter", {pattern = "*.rb", command = 'syn match Error "binding.pry\\|debugger"'})
 vim.api.nvim_create_autocmd("BufEnter", {pattern = {"*.js", "*.ts", "*.tsx"}, command = 'syn match Error "colsole.log"'})
-
-
 
 --	-- Setup nvim-cmp.
 --	local cmp = require'cmp'
