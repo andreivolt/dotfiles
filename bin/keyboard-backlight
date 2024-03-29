@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 import sys
+
 import dbus
+
 
 def set_keyboard_brightness(delta):
     system_bus = dbus.SystemBus()
