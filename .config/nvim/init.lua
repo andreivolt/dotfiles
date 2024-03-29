@@ -125,13 +125,11 @@ require("lazy").setup({
   -- {"hrsh7th/cmp-nvim-lsp", lazy = true},
   -- {"hrsh7th/cmp-path", lazy = true},
   -- {"hrsh7th/nvim-cmp", lazy = true},
-  -- {"junegunn/fzf", build = vim.fn["fzf#install"], dependencies = "junegunn/fzf.vim", lazy = true},
   -- {"kchmck/vim-coffee-script", lazy = true},
   -- {"matze/vim-move"}, -- lines move
   -- {"nvim-treesitter/nvim-treesitter-context", dependencies = "nvim-treesitter/nvim-treesitter", lazy = true},
   -- {"SmiteshP/nvim-navic", dependencies = "neovim/nvim-lspconfig", config = function() require('plugins.SmiteshP_nvim-navic').setup() end},
   -- {'airblade/vim-rooter"}, -- chdir to root
-  -- {'numToStr/Comment.nvim', lazy = false}, -- TODO
   {"alvan/vim-closetag"},
   {"AndrewRadev/splitjoin.vim"},
   {"andymass/vim-matchup", dependencies = "nvim-treesitter/nvim-treesitter", config = function() require("nvim-treesitter.configs").setup({matchup = {enable = true}}) end},
@@ -192,7 +190,7 @@ require("lazy").setup({
   {"tpope/vim-unimpaired"},
   {"Tyilo/applescript.vim", ft = "applescript"},
   {"vim-test/vim-test"},
-  {"windwp/nvim-autopairs", config = function() require("nvim-autopairs").setup({}) end},
+  {"windwp/nvim-autopairs", config = function() require("nvim-autopairs").setup() end},
   {'kyazdani42/nvim-tree.lua', dependencies = {'kyazdani42/nvim-web-devicons'}, config = function() require("plugins.kyazdani42_nvim-tree").setup({}) end},
   {'neovim/nvim-lspconfig', config = function() require('user.lua')() end, },
 }, {
