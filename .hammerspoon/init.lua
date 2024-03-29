@@ -42,11 +42,11 @@ hs.hotkey.bind({}, "²", function()
 end)
 
 hs.hotkey.bind({"ctrl", "cmd"}, "r", function()
-  hs.execute("/Users/andrei/drive/bin/randomtab", true)
+  hs.execute("/Users/andrei/bin/randomtab", true)
 end)
 
 hs.hotkey.bind({"ctrl", "cmd"}, "v", function()
-  hs.execute("/Users/andrei/drive/bin/vision -c", true)
+  hs.execute("/Users/andrei/bin/vision -c", true)
 end)
 
 

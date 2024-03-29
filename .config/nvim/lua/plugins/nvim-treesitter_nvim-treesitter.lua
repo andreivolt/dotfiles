@@ -1,6 +1,4 @@
-local M = {}
-
-M.setup = function()
+return function()
   require 'nvim-treesitter.configs'.setup {
     auto_install = true,
     ensure_installed = "all", -- TODO
@@ -54,5 +52,3 @@ M.setup = function()
     end,
   }
 end
-
-return M
