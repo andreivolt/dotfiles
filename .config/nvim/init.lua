@@ -21,10 +21,9 @@ vim.opt.hidden = true
 vim.opt.showbreak = "↳ "
 vim.opt.title = true
 vim.opt.ruler = false
-
 vim.opt.fillchars = {
-  vert = "│", -- vertical window separators
-  eob = " ", -- suppress ~ at EndOfBuffer
+  vert = "│",
+  eob = " ",
   diff = "⣿", -- alternatives = ⣿ ░ ─ ╱
   msgsep = "‾",
   foldopen = "▾",
@@ -139,7 +138,7 @@ require("lazy").setup({
   {"f-person/git-blame.nvim", config = function() require("plugins.f-person_git-blame").setup() end}, -- git blame virtual text
   {"farmergreg/vim-lastplace"}, -- jump to last edit position on reopen
   {"fladson/vim-kitty"},
-  {"folke/todo-comments.nvim", dependencies = "nvim-lua/plenary.nvim", config = function() require("todo-comments").setup() end},
+  {"folke/todo-comments.nvim", dependencies = "nvim-lua/plenary.nvim", config = require('plugins.folke_todo-comments').setup},
   {"folke/which-key.nvim", config = function() require("which-key").setup() end},
   {"folke/zen-mode.nvim", config = function() require("plugins.folke_zen-mode").setup() end},
   {"jessarcher/vim-heritage"}, -- automatically create parent directories when writing file
@@ -159,7 +158,7 @@ require("lazy").setup({
   {"ms-jpq/coq_nvim", branch = "coq"}, -- TODO
   {"ntpeters/vim-better-whitespace"},
   {"nvim-telescope/telescope.nvim", dependencies = {"nvim-lua/plenary.nvim", {"nvim-telescope/telescope-fzf-native.nvim", build = "make"}}, config = function() require("plugins.nvim-telescope_telescope").setup() end}, -- TODO
-  {"nvim-treesitter/nvim-treesitter", build = ":TSUpdate", config = function() require("plugins.nvim-treesitter_nvim-treesitter").setup() end},
+  {"nvim-treesitter/nvim-treesitter", build = ":TSUpdate", config = require("plugins.nvim-treesitter_nvim-treesitter")},
   {"nvim-treesitter/nvim-treesitter-textobjects", dependencies = { "nvim-treesitter/nvim-treesitter" }}, -- TODO
   {"Olical/conjure", ft = {"clojure", "fennel", "janet"}, dependencies = { 'tpope/vim-dispatch', 'clojure-vim/vim-jack-in', 'folke/which-key.nvim', }},
   {"pangloss/vim-javascript", ft = "javascript"},
@@ -180,7 +179,6 @@ require("lazy").setup({
   {"tommcdo/vim-fugitive-blame-ext"}, -- statusbar commit message
   {"tpope/vim-bundler", ft = "ruby"},
   {"tpope/vim-commentary"},
-  {"tpope/vim-dispatch", lazy = true},
   {"tpope/vim-eunuch", cmd = { "Cfind", "Chmod", "Clocate", "Delete", "Lfind", "Llocate", "Mkdir", "Move", "Remove", "Rename", "SudoEdit", "SudoWrite", "Wall", }, },
   {"tpope/vim-fugitive"}, -- Git
   {"tpope/vim-rails", ft = "ruby"},
@@ -192,7 +190,7 @@ require("lazy").setup({
   {"vim-test/vim-test"},
   {"windwp/nvim-autopairs", config = function() require("nvim-autopairs").setup() end},
   {'kyazdani42/nvim-tree.lua', dependencies = {'kyazdani42/nvim-web-devicons'}, config = function() require("plugins.kyazdani42_nvim-tree").setup({}) end},
-  {'neovim/nvim-lspconfig', config = function() require('user.lua')() end, },
+  {'neovim/nvim-lspconfig', config = require('user.lua')},
 }, {
     install = {
       colorscheme = { "aurora" },
@@ -213,7 +211,6 @@ vim.api.nvim_create_autocmd("FileType", {
 })
 
 require("user.direnv")
-require("user.docker")
 require("user.filetype")
 require("user.lua")
 require("user.move_lines")
@@ -290,12 +287,12 @@ vim.keymap.set("n", "<leader>u", OpenURL)
 -- allow gf to open non-existent files
 vim.keymap.set("n", "gf", function() vim.cmd("edit <cfile>") end)
 
-vim.keymap.set("n", "<leader>q", function() vim.cmd("Sayonara!") end)
+vim.keymap.set("n", "<leader>q", function() vim.cmd("Sayonara") end, {desc = "delete current buffer and close window"})
 
 vim.keymap.set("n", "<leader>z", require("zen-mode").toggle)
 
-vim.keymap.set("n", "<leader>gj", function() vim.cmd("SplitjoinJoin") end, {desc = "Join in a single line"})
-vim.keymap.set("n", "<leader>gs", function() vim.cmd("SplitjoinSplit") end, {desc = "Split in a single line"})
+vim.keymap.set("n", "<leader>gj", function() vim.cmd("SplitjoinJoin") end, {desc = "join in a single line"})
+vim.keymap.set("n", "<leader>gs", function() vim.cmd("SplitjoinSplit") end, {desc = "split in a single line"})
 
 
 
@@ -462,8 +459,8 @@ vim.api.nvim_create_autocmd("ColorScheme", {
     vim.api.nvim_set_hl(0, 'Question', {ctermfg = 'gray', fg = '#444444'})
     vim.api.nvim_set_hl(0, 'SignColumn', {ctermbg = 'NONE', bg = 'black'})
     vim.api.nvim_set_hl(0, 'WinBar', {bg = 'black', fg = '#999999', bold = false, italic = true, underline = false, undercurl = false, strikethrough = false})
-    vim.api.nvim_set_hl(0, 'ZenBg', {bg = 'black'})
     vim.api.nvim_set_hl(0, 'WinSeparator', {bg = 'black', fg = '#222222'})
+    vim.api.nvim_set_hl(0, 'ZenBg', {bg = 'black'})
   end
 })
 vim.cmd('colorscheme aurora')
@@ -517,7 +514,9 @@ vim.api.nvim_create_autocmd("BufEnter", {pattern = "*.ex", command = 'syn match 
 vim.api.nvim_create_autocmd("BufEnter", {pattern = "*.rb", command = 'syn match Error "binding.pry\\|debugger"'})
 vim.api.nvim_create_autocmd("BufEnter", {pattern = {"*.js", "*.ts", "*.tsx"}, command = 'syn match Error "colsole.log"'})
 
-vim.api.nvim_create_autocmd("BufWritePost", {
+-- HACK
+-- TODO
+vim.api.nvim_create_autocmd({"TextChanged", "InsertLeave"}, {
   pattern = "init.lua",
   callback = function()
     vim.cmd("LspRestart")
