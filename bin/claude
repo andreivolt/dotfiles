@@ -3,11 +3,14 @@
 import argparse
 import os
 import sys
+
 sys.path.append(os.path.expanduser('~/Documents/unofficial-claude2-api/'))
-from claude2_api.client import ClaudeAPIClient, SendMessageResponse, MessageRateLimitError
-from claude2_api.session import SessionData
-from pathlib import Path
 import json
+from pathlib import Path
+
+from claude2_api.client import (ClaudeAPIClient, MessageRateLimitError,
+                                SendMessageResponse)
+from claude2_api.session import SessionData
 
 script_path = Path(sys.argv[0] if __file__ is None else __file__).resolve().parent
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
 import sys
-from Foundation import NSAppleScript
 from pprint import pprint
+
+from Foundation import NSAppleScript
 
 s = NSAppleScript.alloc().initWithSource_(
     'tell app "Safari" to {URL,name} of tabs of windows'
