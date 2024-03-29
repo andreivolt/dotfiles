@@ -160,8 +160,7 @@ require("lazy").setup({
   {"ms-jpq/coq.thirdparty", branch = "3p"}, -- TODO
   {"ms-jpq/coq_nvim", branch = "coq"}, -- TODO
   {"ntpeters/vim-better-whitespace"},
-  {"nvim-telescope/telescope-fzf-native.nvim", build = "make"},
-  {"nvim-telescope/telescope.nvim", dependencies = {"nvim-lua/plenary.nvim"}, config = function() require("plugins.nvim-telescope_telescope").setup() end}, -- TODO
+  {"nvim-telescope/telescope.nvim", dependencies = {"nvim-lua/plenary.nvim", {"nvim-telescope/telescope-fzf-native.nvim", build = "make"}}, config = function() require("plugins.nvim-telescope_telescope").setup() end}, -- TODO
   {"nvim-treesitter/nvim-treesitter", build = ":TSUpdate", config = function() require("plugins.nvim-treesitter_nvim-treesitter").setup() end},
   {"nvim-treesitter/nvim-treesitter-textobjects", dependencies = { "nvim-treesitter/nvim-treesitter" }}, -- TODO
   {"Olical/conjure", ft = {"clojure", "fennel", "janet"}, dependencies = { 'tpope/vim-dispatch', 'clojure-vim/vim-jack-in', 'folke/which-key.nvim', }},
@@ -174,7 +173,7 @@ require("lazy").setup({
   {"rhysd/committia.vim", lazy = true}, -- Git commit
   {"romgrk/barbar.nvim", dependencies = {"lewis6991/gitsigns.nvim", "nvim-tree/nvim-web-devicons"}, init = function() vim.g.barbar_auto_setup = false end, opts = require('plugins.romgrk_barbar')},
   {"RRethy/nvim-treesitter-endwise", dependencies = "nvim-treesitter/nvim-treesitter", config = function() require("plugins.RRethy_nvim-treesitter-endwise").setup() end},
-  {"ruanyl/vim-gh-line"}, -- browser open line
+  {"ruanyl/vim-gh-line", event = "VeryLazy"}, -- browser open line
   {"sickill/vim-pasta"}, -- auto pasting indentation
   {"simrat39/symbols-outline.nvim"},
   {"sQVe/sort.nvim", cmd = 'Sort'},
