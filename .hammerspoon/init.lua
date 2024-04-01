@@ -1,57 +1,51 @@
 hs.loadSpoon("SpoonInstall")
-spoon.SpoonInstall:updateAllRepos()
 
-local ipc = require("hs.ipc")
-if not ipc.cliStatus("/usr/local") then
-  ipc.cliInstall()
-end
+spoon.SpoonInstall:updateAllRepos()
 
 local screen = require("hs.screen")
 local application = require("hs.application")
 
--- local function resizeKittyWindow()
---     local kittyApp = hs.application.get("kitty")
---     if kittyApp then
---         local kittyPID = kittyApp:pid()
---         local kittyPath = "/Applications/kitty.app/Contents/MacOS/kitty"
---         local sockPath = string.format("/tmp/kitty-%d", kittyPID)
+local toggleApp = "kitty"
 
---         local cmd = string.format("%s @ --to=unix:%s resize-os-window --match all --action toggle-fullscreen", kittyPath, sockPath)
-
---         hs.console.printStyledtext(cmd)
---         hs.execute(cmd)
---         hs.execute(cmd)
---     end
--- end
--- screen.watcher.newWithActiveScreen(resizeKittyWindow):start()
+local function toggleTerminalApp()
+    if toggleApp == "kitty" then
+        toggleApp = "neovide"
+    else
+        toggleApp = "kitty"
+    end
+    hs.console.printStyledtext("Switched toggle app to " .. toggleApp)
+end
 
 hs.hotkey.bind({}, "²", function()
-  local app = hs.application.get("kitty")
-  if app then
-    if not app:mainWindow() then
-      app:selectMenuItem({"kitty", "New OS window"})
-    elseif app:isFrontmost() then
-      app:hide()
+    local app = hs.application.get(toggleApp)
+    if app then
+        if not app:mainWindow() then
+            if toggleApp == "kitty" then
+                app:selectMenuItem({"kitty", "New OS window"})
+            else
+                hs.application.launchOrFocus("neovide")
+            end
+        elseif app:isFrontmost() then
+            app:hide()
+        else
+            app:activate()
+        end
     else
-      app:activate()
+        hs.application.launchOrFocus(toggleApp)
+        app = hs.application.get(toggleApp)
     end
-  else
-    hs.application.launchOrFocus("kitty")
-    app = hs.application.get("kitty")
-  end
 end)
 
 hs.hotkey.bind({"ctrl", "cmd"}, "r", function()
-  hs.execute("/Users/andrei/bin/randomtab", true)
+    hs.execute("/Users/andrei/bin/randomtab", true)
 end)
 
 hs.hotkey.bind({"ctrl", "cmd"}, "v", function()
-  hs.execute("/Users/andrei/bin/vision -c", true)
+    hs.execute("/Users/andrei/bin/vision -c", true)
 end)
 
-
 function activateApp(appName)
-  hs.application.launchOrFocus(appName)
+    hs.application.launchOrFocus(appName)
 end
 
 hs.hotkey.bind({"ctrl", "cmd"}, "1", function() activateApp("Google Chrome") end)
@@ -60,13 +54,13 @@ hs.hotkey.bind({"ctrl", "cmd"}, "3", function() activateApp("Spotify") end)
 hs.hotkey.bind({"ctrl", "cmd"}, "4", function() activateApp("Sublime Text") end)
 
 hs.hotkey.bind({"ctrl", "cmd"}, "d", function()
-  hs.osascript.applescript([[
-    tell application "System Events"
-      tell appearance preferences
-        set dark mode to not dark mode
-      end tell
-    end tell
-  ]])
+    hs.osascript.applescript([[
+        tell application "System Events"
+            tell appearance preferences
+                set dark mode to not dark mode
+            end tell
+        end tell
+    ]])
 end)
 
 spoon.SpoonInstall:andUse("ReloadConfiguration", {
@@ -75,6 +69,7 @@ spoon.SpoonInstall:andUse("ReloadConfiguration", {
         hs.configdir, -- Default Hammerspoon config directory
     }
 })
+
 spoon.ReloadConfiguration:start()
 
 spoon.SpoonInstall:andUse("WinWin", {
@@ -107,14 +102,16 @@ local windowFilter = hs.window.filter.new(true)
         end
     end)
 
--- ctrl-alt +
 spoon.SpoonInstall:andUse("AppLauncher", {
-  hotkeys = {
-    c = "Calendar",
-    b = "Calendar",
-    d = "Discord",
-    f = "Firefox",
-    t = "Kitty",
-    z = "Zoom.us",
-  }
+    hotkeys = {
+        c = "Calendar",
+        b = "Calendar",
+        d = "Discord",
+        f = "Firefox",
+        t = "Kitty",
+        z = "Zoom.us",
+    }
 })
+
+-- Toggle function to switch between Kitty and Neovide
+hs.hotkey.bind({"cmd", "alt", "ctrl"}, "T", toggleTerminalApp)

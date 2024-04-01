@@ -3,62 +3,76 @@
 require 'fileutils'
 require 'tmpdir'
 require 'find'
+require 'pathname'
+
+require 'bundler/inline'
+
+gemfile do
+  source 'https://rubygems.org'
+  gem 'tty-tree'
+end
 
 def is_text_file?(file_path)
   mime_type = `file --mime --brief "#{file_path}"`.chomp
   mime_type.start_with?('text/')
 end
 
-def print_git_repo(repo_path, commit_sha = nil)
-  puts "###################################  Tree:  ###################################"
-  system("tree '#{repo_path}'")
+def build_tree(paths, common_root)
+  tree = {}
+  paths.each do |path|
+    relative_path = Pathname.new(path).relative_path_from(common_root).to_s
+    parts = relative_path.split('/')
+    current = tree
+    parts.each do |part|
+      current[part] ||= {}
+      current = current[part]
+    end
+  end
+  tree
+end
+
+def print_paths(paths, commit_sha = nil)
+  common_root = Pathname.new(paths.first).ascend.find { |path|
+    paths.all? { |file_path| Pathname.new(file_path).ascend.include?(path) }
+  }
+
+  puts "################################### Tree: ###################################"
+  tree = build_tree(paths, common_root)
+  puts TTY::Tree.new(tree).render
   puts
 
-  if File.exist?("#{repo_path}/README.md")
+  if File.exist?("#{common_root}/README.md") && paths.include?("#{common_root}/README.md")
     puts "---------- README.md ----------"
-    puts File.read("#{repo_path}/README.md")
+    puts File.read("#{common_root}/README.md")
     puts
   end
 
-  puts "###################################  Files:  ###################################"
-  Dir.chdir(repo_path) do
-    checkout_cmd = commit_sha ? "git checkout '#{commit_sha}'" : nil
-    system(checkout_cmd) if checkout_cmd
-
-    tracked_files = `git ls-files`.split("\n")
-    untracked_files = `git ls-files --others --exclude-standard`.split("\n")
-
-    all_files = tracked_files + untracked_files
-    all_files.each do |file|
-      next unless File.file?(file) && is_text_file?(file)
-
-      filename = File.basename(file)
+  puts "################################### Files: ###################################"
+  paths.each do |path|
+    if File.file?(path) && is_text_file?(path)
+      filename = Pathname.new(path).relative_path_from(common_root).to_s
       puts "---------- #{filename} ----------"
-      puts File.read(file)
+      puts File.read(path)
       puts
     end
   end
 end
 
 if ARGV.empty?
-  abort "Usage: #{$PROGRAM_NAME} <git_repo_url_or_dir_path>"
+  abort "Usage: #{$PROGRAM_NAME} <github_url> | #{$PROGRAM_NAME} <path1> [path2 ...]"
 end
 
 input_path = ARGV[0]
-commit_sha = nil
 
 if input_path.match?(/^https:\/\/github.com\/[^\/]+\/[^\/]+(?:\/tree\/)?([^\/]*)?$/)
   repo_url = input_path.sub(/\/tree\/.*$/, '')
   commit_sha = Regexp.last_match(1)
-
   Dir.mktmpdir do |tmpdir|
     system("git clone '#{repo_url}' '#{tmpdir}'")
     repo_name = File.basename(repo_url, '.git')
-    print_git_repo(tmpdir, commit_sha)
+    print_paths(Dir.glob("#{tmpdir}/**/*"), commit_sha)
   end
-elsif File.directory?(input_path)
-  print_git_repo(input_path)
 else
-  puts "Error: Input must be a Git repository URL or a directory path."
-  abort "Usage: #{$PROGRAM_NAME} <git_repo_url_or_dir_path>"
+  paths = ARGV.select { |path| File.file?(path) || File.directory?(path) }
+  print_paths(paths)
 end
