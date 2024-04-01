@@ -1,32 +1,7 @@
--- vim.opt.guicursor = {
---   'n-v-c-sm:block-Cursor',
---   'i-ci-ve:ver25-Cursor',
---   'r-cr-o:hor20-Cursor'
--- }
-
-local cursors = {
-  block = 'block-Cursor',
-  vertical_bar = 'ver25-Cursor',
-  horizontal_bar = 'hor20-Cursor'
-}
-
-local modes = {
-  normal = 'n',
-  visual = 'v',
-  command = 'c',
-  select = 'sm',
-  insert = 'i',
-  command_line_insert = 'ci',
-  virtual_replace = 've',
-  replace = 'r',
-  command_line_replace = 'cr',
-  operator_pending = 'o'
-}
-
 vim.opt.guicursor = {
-  modes.normal .. '-' .. modes.visual .. '-' .. modes.command .. '-' .. modes.select .. ':' .. cursors.block,
-  modes.insert .. '-' .. modes.command_line_insert .. '-' .. modes.virtual_replace .. ':' .. cursors.vertical_bar,
-  modes.replace .. '-' .. modes.command_line_replace .. '-' .. modes.operator_pending .. ':' .. cursors.horizontal_bar
+  'n-v-c-sm:block-Cursor',
+  'i-ci-ve:ver25-Cursor',
+  'r-cr-o:hor20-Cursor'
 }
 
 local cursor_colors = {

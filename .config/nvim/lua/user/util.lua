@@ -1,6 +1,9 @@
 local M = {}
 
--- Open a URL in the default browser, if multiple URLs are present on the current line, open the URL under the cursor
+function M.clip(text)
+    vim.fn.setreg('+', text)
+end
+
 function M.open_url()
     local line = vim.api.nvim_get_current_line()
     local cursor_col = vim.fn.col(".")
@@ -30,10 +33,6 @@ function M.open_url()
             end
         end
     end
-end
-
-function M.clip(text)
-    vim.fn.setreg('+', text)
 end
 
 return M

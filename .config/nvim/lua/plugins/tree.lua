@@ -20,7 +20,4 @@ return {
       width = 35,
     }
   },
-  init = function()
-    vim.keymap.set("n", "<leader>n", require("nvim-tree.api").tree.toggle)
-  end,
 }

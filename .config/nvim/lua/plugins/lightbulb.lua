@@ -1,9 +1,8 @@
 return {
-  "kosayoda/nvim-lightbulb",
-  enabled = false,
-  opts = {
-    autocmd = {
-      enabled = true
-    }
-  },
+  -- "kosayoda/nvim-lightbulb",
+  -- opts = {
+  --   autocmd = {
+  --     enabled = true
+  --   }
+  -- },
 }

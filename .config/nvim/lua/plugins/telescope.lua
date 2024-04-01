@@ -10,20 +10,22 @@ return {
   },
   cmd = { "Telescope" },
   config = function()
-    local actions = require('telescope.actions')
-
     require('telescope').setup {
       defaults = {
+        results_title = "",
+    borderchars = { '─', '│', '─', '│', '╭', '╮', '╯', '╰' },
+    border = true,
+    border_attr = { fg = 'red' },
         mappings = {
           i = {
             ["<C-u>"] = false,
-            ["<C-k>"] = actions.move_selection_previous,
-            ["<C-j>"] = actions.move_selection_next,
+            ["<C-k>"] = require('telescope.actions').move_selection_previous,
+            ["<C-j>"] = require('telescope.actions').move_selection_next,
           },
           n = {
-            ["<C-k>"] = actions.move_selection_previous,
-            ["<C-j>"] = actions.move_selection_next,
-            ["q"] = actions.close,
+            ["<C-k>"] = require('telescope.actions').move_selection_previous,
+            ["<C-j>"] = require('telescope.actions').move_selection_next,
+            ["q"] = require('telescope.actions').close,
           },
         },
       },
@@ -32,10 +34,8 @@ return {
     require('telescope').load_extension('fzf')
   end,
   init = function()
-    local telescope_builtin = require("telescope.builtin")
-
-    vim.keymap.set("n", "<leader>fb", telescope_builtin.buffers)
-    vim.keymap.set("n", "<leader>ff", telescope_builtin.find_files)
-    vim.keymap.set("n", "<leader>fg", telescope_builtin.live_grep)
+    vim.keymap.set("n", "<leader>fb", require("telescope.builtin").buffers)
+    vim.keymap.set("n", "<leader>ff", require("telescope.builtin").find_files)
+    vim.keymap.set("n", "<leader>fg", require("telescope.builtin").live_grep)
   end,
 }
