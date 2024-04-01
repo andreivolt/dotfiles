@@ -16,7 +16,7 @@ require "tempfile"
 
 options = {
   prompt: "What's in this image?",
-  capture: false
+  capture: false,
 }
 
 OptionParser.new do |opts|
@@ -53,9 +53,7 @@ response = OpenAI::Client.new(access_token: ENV["OPENAI_API_KEY"]).chat(
         role: "user",
         content: [
           { type: "text", text: options[:prompt] },
-          *base64_images.map { |base64_image|
-            { type: "image_url", image_url: { url: "data:image/png;base64,#{base64_image}" } }
-          }
+          *base64_images.map { |base64_image| { type: "image_url", image_url: { url: "data:image/png;base64,#{base64_image}" } } }
         ]
       }
     ],

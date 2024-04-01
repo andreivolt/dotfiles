@@ -1,9 +1,4 @@
-vim.api.nvim_create_autocmd({
-  "BufEnter",
-  "BufWritePost",
-  "FocusGained",
-},
-{
+vim.api.nvim_create_autocmd({ "BufEnter", "BufWritePost", "FocusGained" }, {
   pattern = "*",
   callback = function()
     if vim.bo.buftype == "" then
