@@ -5,5 +5,4 @@ return {
     "tpope/vim-dispatch",
   },
   ft = "clojure",
-  lazy = true
 }

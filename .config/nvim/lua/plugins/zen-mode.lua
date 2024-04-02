@@ -41,5 +41,4 @@ return {
       vim.cmd('ScrollbarShow')
     end
   },
-  lazy = true,
 }

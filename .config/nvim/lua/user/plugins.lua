@@ -8,6 +8,9 @@ require("lazy").setup({ { import = "plugins" } }, {
   install = {
     colorscheme = { "aurora" },
   },
+  defaults = {
+    lazy = true
+  },
   change_detection = {
     notify = false,
   },

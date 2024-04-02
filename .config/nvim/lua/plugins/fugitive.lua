@@ -28,5 +28,4 @@ return {
     "Gwq",
     "Gwrite",
   },
-  lazy = true
 }

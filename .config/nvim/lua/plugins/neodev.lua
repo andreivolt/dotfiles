@@ -2,24 +2,25 @@ return {
   "folke/neodev.nvim",
   dependencies = {
     "neovim/nvim-lspconfig",
-    'hrsh7th/nvim-cmp'
+    'hrsh7th/nvim-cmp',
+    "SmiteshP/nvim-navic",
   },
   ft = "lua",
+  init = function()
+    vim.o.winbar = "%{%v:lua.require'nvim-navic'.get_location()%}"
+  end,
   config = function(_, opts)
     require("neodev").setup(opts)
+
+    local navic = require("nvim-navic")
 
     require("lspconfig").lua_ls.setup({
       inlay_hints = {
         enabled = true,
       },
-      settings = {
-        Lua = {
-          telemetry = {
-            enable = false
-          },
-        },
-      },
+      on_attach = function(client, bufnr)
+          navic.attach(client, bufnr)
+      end
     })
   end,
-  lazy = true
 }

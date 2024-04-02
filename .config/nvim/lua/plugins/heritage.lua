@@ -1,4 +1,4 @@
 return {
   "jessarcher/vim-heritage",
-  event = "VeryLazy"
+  event = "VeryLazy",
 }

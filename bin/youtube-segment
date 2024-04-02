@@ -26,9 +26,7 @@ with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True}) as ydl:
     video_meta = ydl.extract_info(args.video_url, download=False)
 
 formats = video_meta["formats"]
-video_url = next((f for f in reversed(formats) if f.get("acodec") != "none"), None)[
-    "url"
-]
+video_url = next((f for f in reversed(formats) if f.get("acodec") != "none"), None)["url"]
 video_id = video_meta["id"]
 title = video_meta["title"].replace(" ", "_")
 start_time = args.start
@@ -39,7 +37,10 @@ if args.output == "-":
 else:
     output_file_name = args.output or f"{title}_[{start_time}-{end_time}][yt:{video_id}].mkv"
 
-noverbose = ["-hide_banner", "-loglevel", "error"]
+noverbose = [
+    "-hide_banner",
+    "-loglevel", "error"
+]
 
 process1 = (
     ffmpeg.input(video_url, ss=start_time, to=end_time)

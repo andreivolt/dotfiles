@@ -16,12 +16,11 @@ return {
     'hrsh7th/cmp-path',
     'hrsh7th/cmp-cmdline',
     'uga-rosa/cmp-dictionary',
-    'hrsh7th/cmp-nvim-lua',
-    'hrsh7th/cmp-emoji',
+    -- 'hrsh7th/cmp-emoji',
     'saadparwaiz1/cmp_luasnip',
     'petertriho/cmp-git',
-    'andersevenrud/cmp-tmux',
-    'onsails/lspkind.nvim',
+    -- 'andersevenrud/cmp-tmux',
+    -- 'onsails/lspkind.nvim',
   },
   init = function()
     local cmp = require('cmp')
@@ -47,18 +46,11 @@ return {
     end
 
     cmp.setup({
-      performance = {
-        max_view_entries = 7,
-      },
       snippet = {
         expand = function(args)
           require('luasnip').lsp_expand(args.body)
           -- vim.snippet.expand(args.body) -- TODO
         end,
-      },
-      window = {
-        completion = cmp.config.window.bordered(),
-        documentation = cmp.config.window.bordered(),
       },
 
       mapping = cmp.mapping.preset.insert({
@@ -121,13 +113,11 @@ return {
         ['<C-b>'] = cmp.mapping.scroll_docs(-4),
         ['<C-f>'] = cmp.mapping.scroll_docs(4),
         ['<C-Space>'] = cmp.mapping.complete(),
-        ['<C-e>'] = cmp.mapping.abort(),
       }),
       sources = cmp.config.sources({
         { name = 'nvim_lsp' },
-        -- { name = 'nvim_lua' }, -- TODO should not be needed with neodev
         { name = 'path' },
-        { name = "buffer", keyword_length = 5}
+        { name = "buffer",  keyword_length = 5 }
       }),
       experimental = {
         ghost_text = true,
@@ -177,8 +167,8 @@ return {
         -- }
       }),
       sources = cmp.config.sources(
-      {{ name = "cmdline" }},
-      {{ name = "path" }}
+        { { name = "cmdline" } },
+        { { name = "path" } }
       )
     })
 
@@ -242,7 +232,6 @@ return {
     --   },
     -- })
   end,
-  lazy = true
 }
 
 -- local capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities())

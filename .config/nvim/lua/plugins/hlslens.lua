@@ -9,7 +9,5 @@ return {
     { '#', function() vim.cmd('normal! #'); require('hlslens').start() end, kopts },
     { 'g*', function() vim.cmd('normal! g*'); require('hlslens').start() end, kopts },
     { 'g#', function() vim.cmd('normal! g#'); require('hlslens').start() end, kopts },
-    { '<Leader>l', function() vim.cmd('noh') end, kopts },
   },
-  lazy = true
 }

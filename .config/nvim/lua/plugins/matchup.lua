@@ -7,5 +7,4 @@ return {
       matchup = { enable = true }
     })
   end,
-  lazy = true
 }
