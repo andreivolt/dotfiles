@@ -1,4 +1,3 @@
 return {
-  "fladson/vim-kitty",
-  ft = "conf"
+  "fladson/vim-kitty"
 }

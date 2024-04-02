@@ -1,3 +1,4 @@
 return {
-  "ntpeters/vim-better-whitespace"
+  "ntpeters/vim-better-whitespace",
+  event = "VeryLazy"
 }

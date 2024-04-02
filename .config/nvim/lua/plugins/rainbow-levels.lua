@@ -8,5 +8,6 @@ return {
         vim.cmd("RainbowLevelsOn")
       end
     })
-  end
+  end,
+  lazy = true
 }
