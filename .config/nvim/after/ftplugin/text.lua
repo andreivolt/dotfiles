@@ -1,4 +1,4 @@
-require('user.spell_options')
+require('user.spell_opts')
 
 -- maintain aligment after folding TODO
 -- local indent_level = fn.indent(vim.v.foldstart)
