@@ -15,7 +15,7 @@ vim.opt.clipboard = "unnamedplus"
 vim.opt.completeopt = "menu,menuone,noselect"
 vim.opt.directory = vim.fn.getenv("TMPDIR")
 vim.opt.fillchars = { diff = "⣿", eob = " ", fold = " ", foldclose = "▸", foldopen = "▾", foldsep = "│", vert = "│" }
-vim.opt.foldcolumn = "0"
+vim.opt.foldcolumn = "1"
 vim.opt.foldenable = false
 vim.opt.foldexpr = "nvim_treesitter#foldexpr()"
 vim.opt.foldmethod = "expr"
@@ -27,7 +27,7 @@ vim.opt.ignorecase = true
 vim.opt.infercase = true
 vim.opt.iskeyword:append("-")
 vim.opt.laststatus = 0
--- vim.opt.lazyredraw = true
+vim.opt.lazyredraw = true
 vim.opt.linebreak = true
 vim.opt.list = true
 vim.opt.mouse = "a"

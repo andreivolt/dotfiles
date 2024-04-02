@@ -1,1 +1,1 @@
-require('user.spell_options')
+require('user.spell_opts')
