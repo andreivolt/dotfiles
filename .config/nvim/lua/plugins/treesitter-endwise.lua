@@ -8,5 +8,6 @@ return {
       },
     })
   end,
-  event = "VeryLazy"
+  event = "InsertEnter",
+  lazy = true
 }

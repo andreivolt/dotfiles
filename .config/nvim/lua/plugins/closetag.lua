@@ -1,4 +1,5 @@
 return {
   "alvan/vim-closetag",
-  ft = "html"
+  ft = "html",
+  lazy = true
 }

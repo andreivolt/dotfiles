@@ -1,5 +1,8 @@
 return {
   "folke/zen-mode.nvim",
+  keys = {
+    { "<leader>z", "<cmd>ZenMode<cr>" },
+  },
   opts = {
     window = {
       width = 90,
@@ -30,7 +33,13 @@ return {
         showcmd = false,
         laststatus = 0,
       }
-    }
+    },
+    on_open = function()
+      vim.cmd('ScrollbarHide')
+    end,
+    on_close = function()
+      vim.cmd('ScrollbarShow')
+    end
   },
-  event = "VeryLazy"
+  lazy = true,
 }
