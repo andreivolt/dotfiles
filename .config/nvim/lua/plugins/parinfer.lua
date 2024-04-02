@@ -9,5 +9,4 @@ return {
     "racket",
     "scheme",
   },
-  lazy = true
 }

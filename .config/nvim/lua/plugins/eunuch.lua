@@ -15,5 +15,4 @@ return {
     "SudoWrite",
     "Wall",
   },
-  lazy = true
 }

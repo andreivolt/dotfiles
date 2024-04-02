@@ -55,5 +55,6 @@ return {
       },
       on_attach = on_attach
     })
-  end
+  end,
+  lazy = false
 }

@@ -10,7 +10,6 @@ return {
     {"<c-space>", "<cmd>NvimTmuxNavigateNext<cr>"},
   },
   opts = { disable_when_zoomed = true },
-  lazy = true
 }
 
 -- return {
