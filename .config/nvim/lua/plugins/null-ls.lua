@@ -1,5 +1,6 @@
 return {
   "jose-elias-alvarez/null-ls.nvim",
+  enable = false,
   config = function()
     local null_ls = require("null-ls")
     local buf_map = function(bufnr, mode, lhs, rhs, opts) vim.api.nvim_buf_set_keymap(bufnr, mode, lhs, rhs, opts or {silent = true}) end
