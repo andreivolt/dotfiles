@@ -1,7 +1,5 @@
 return {
   "folke/zen-mode.nvim",
-  cmd = "ZenMode",
-  keys = { "<leader>z" },
   opts = {
     window = {
       width = 90,
@@ -34,7 +32,5 @@ return {
       }
     }
   },
-  init = function()
-    vim.keymap.set("n", "<leader>z", require("zen-mode").toggle)
-  end,
+  event = "VeryLazy"
 }

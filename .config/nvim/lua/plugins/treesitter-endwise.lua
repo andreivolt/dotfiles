@@ -7,5 +7,6 @@ return {
         enable = true,
       },
     })
-  end
+  end,
+  event = "VeryLazy"
 }

@@ -1,4 +1,4 @@
-local file_types = {
+local ft = {
   'gitcommit',
   'markdown',
   'scratch',
@@ -7,9 +7,9 @@ local file_types = {
 
 return {
   'dkarter/bullets.vim',
-  ft = file_types,
+  ft = ft,
   init = function()
-    vim.g.bullets_enabled_file_types = file_types
+    vim.g.bullets_enabled_file_types = ft
     vim.g.bullets_pad_right = false
   end,
 }

@@ -1,7 +1,9 @@
 return {
   "nvim-treesitter/nvim-treesitter",
   main = "nvim-treesitter.configs",
-  dependencies = { { "nvim-treesitter/nvim-treesitter-textobjects", lazy = true } },
+  dependencies = {
+    { "nvim-treesitter/nvim-treesitter-textobjects" },
+  },
   cmd = {
     "TSBufDisable",
     "TSBufEnable",
@@ -26,7 +28,15 @@ return {
     return {
       auto_install = vim.fn.executable "tree-sitter" == 1,
       highlight = { enable = true },
-      incremental_selection = { enable = true },
+      incremental_selection = {
+        enable = true,
+        keymaps = {
+          init_selection = "<cr>",
+          node_incremental = "grn",
+          scope_incremental = "grc",
+          node_decremental = "grm",
+        }
+      },
       indent = { enable = true },
       textobjects = {
         select = {
@@ -88,7 +98,6 @@ return {
     }
   end,
   config = function(plugin, opts)
-    local ts = require(plugin.main)
-    ts.setup(opts)
+    require(plugin.main).setup(opts)
   end
 }
