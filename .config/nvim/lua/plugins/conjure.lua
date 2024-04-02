@@ -6,4 +6,5 @@ return {
     "janet",
     "python",
   },
+  lazy = true
 }

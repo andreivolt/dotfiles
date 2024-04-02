@@ -1,15 +1,16 @@
 return {
   'alexghergh/nvim-tmux-navigation',
-  event = "VeryLazy",
+  enabled = vim.env.TMUX,
+  keys = {
+    {"<c-h>", "<cmd>NvimTmuxNavigateLeft<cr>"},
+    {"<c-j>", "<cmd>NvimTmuxNavigateDown<cr>"},
+    {"<c-k>", "<cmd>NvimTmuxNavigateUp<cr>"},
+    {"<c-l>", "<cmd>NvimTmuxNavigateRight<cr>"},
+    {"<c-\\>", "<cmd>NvimTmuxNavigateLastActive<cr>"},
+    {"<c-space>", "<cmd>NvimTmuxNavigateNext<cr>"},
+  },
   opts = { disable_when_zoomed = true },
-  config = function()
-    vim.keymap.set('n', "<c-h>", require('nvim-tmux-navigation').NvimTmuxNavigateLeft)
-    vim.keymap.set('n', "<c-j>", require('nvim-tmux-navigation').NvimTmuxNavigateDown)
-    vim.keymap.set('n', "<c-k>", require('nvim-tmux-navigation').NvimTmuxNavigateUp)
-    vim.keymap.set('n', "<c-l>", require('nvim-tmux-navigation').NvimTmuxNavigateRight)
-    vim.keymap.set('n', "<c-\\>", require('nvim-tmux-navigation').NvimTmuxNavigateLastActive)
-    vim.keymap.set('n', "<c-space>", require('nvim-tmux-navigation').NvimTmuxNavigateNext)
-  end,
+  lazy = true
 }
 
 -- return {

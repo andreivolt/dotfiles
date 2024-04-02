@@ -62,9 +62,9 @@ vim.diagnostic.config({
   severity_sort = true,
 })
 
-require("user.lazy")
+require("user.plugins")
 
-require("user.syntax")
+require("user.debug_highlight")
 require("user.colorscheme")
 require("user.commands")
 require("user.keymaps")

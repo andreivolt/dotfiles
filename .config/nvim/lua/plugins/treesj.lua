@@ -4,7 +4,11 @@ return {
   keys = {
     { "<leader>m", "<cmd>TSJToggle<CR>", desc = "Toggle Treesitter Join" },
   },
-  cmd = { "TSJToggle", "TSJSplit", "TSJJoin" },
+  cmd = {
+    "TSJJoin",
+    "TSJSplit",
+    "TSJToggle",
+  },
   opts = {
     use_default_keymaps = false,
     max_join_length = math.huge

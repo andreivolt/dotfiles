@@ -1,6 +1,9 @@
 return {
   'hrsh7th/nvim-cmp',
-  event = { "InsertEnter", "CmdlineEnter" },
+  event = {
+    "CmdlineEnter",
+    "InsertEnter",
+  },
   dependencies = {
     {
       'L3MON4D3/LuaSnip',
@@ -44,6 +47,9 @@ return {
     end
 
     cmp.setup({
+      performance = {
+        max_view_entries = 7,
+      },
       snippet = {
         expand = function(args)
           require('luasnip').lsp_expand(args.body)

@@ -8,5 +8,6 @@ return {
     "lisp",
     "racket",
     "scheme",
-  }
+  },
+  lazy = true
 }

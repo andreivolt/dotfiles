@@ -5,16 +5,16 @@ vim.opt.guicursor = {
 }
 
 local cursor_colors = {
-  n = '#ff0000',  -- Normal mode
+  n = '#ffffff',  -- Normal mode
   i = '#00ff00',  -- Insert mode
   v = '#0000ff',  -- Visual mode
   V = '#0000ff',  -- Visual line mode
-  ['\22'] = '#0000ff',  -- Visual block mode
-  c = '#ffff00',  -- Command mode
-  r = '#ff00ff',  -- Replace mode
-  R = '#ff00ff',  -- Replace mode (virtual)
-  ['!'] = '#ff00ff',  -- Shell command mode
-  t = '#00ffff'   -- Terminal mode
+  ['\22'] = '#ff0000',  -- Visual block mode
+  c = '#ff0000',  -- Command mode
+  r = '#ff0000',  -- Replace mode
+  R = '#ff0000',  -- Replace mode (virtual)
+  ['!'] = '#ff0000',  -- Shell command mode
+  t = '#ff0000'   -- Terminal mode
 }
 
 local function set_cursor_color()
