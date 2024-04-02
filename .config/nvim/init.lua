@@ -21,13 +21,13 @@ vim.opt.foldexpr = "nvim_treesitter#foldexpr()"
 vim.opt.foldmethod = "expr"
 vim.opt.foldtext = [[substitute(getline(v:foldstart),'\\t',repeat('\ ',&tabstop),'g').'...'.trim(getline(v:foldend)) . ' (' . (v:foldend - v:foldstart + 1) . ' lines)']]
 -- vim.wo.foldtext = 'getline(vim.v.foldstart).."..."..string.match(getline(vim.v.foldend), "^%s*(.-)%s*$")'
-vim.opt.guifont = "Iosevka Nerd Font Mono:h24:w-3:#h-none"
+vim.opt.guifont = "Iosevka Nerd Font Mono:h21:w-3:#h-none"
 vim.opt.hidden = true
 vim.opt.ignorecase = true
 vim.opt.infercase = true
 vim.opt.iskeyword:append("-")
 vim.opt.laststatus = 0
-vim.opt.lazyredraw = true
+-- vim.opt.lazyredraw = true
 vim.opt.linebreak = true
 vim.opt.list = true
 vim.opt.mouse = "a"

@@ -1,6 +1,5 @@
 return {
   "folke/noice.nvim",
-  event = "VeryLazy",
   opts = {
     cmdline = {
       format = {
@@ -34,5 +33,6 @@ return {
         stages = "fade",
       }
     },
-  }
+  },
+  event = "VeryLazy",
 }
