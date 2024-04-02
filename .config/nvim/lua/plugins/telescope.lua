@@ -9,13 +9,12 @@ return {
     },
   },
   keys = {
-    {"<leader>fb", "<cmd>Telescope buffers<cr>"},
-    {"<leader>ff", "<cmd>Telescope find_files<cr>"},
-    {"<leader>fg", "<cmd>Telescope live_grep<cr>"},
+    { "<leader>fb", "<cmd>Telescope buffers<cr>" },
+    { "<leader>ff", "<cmd>Telescope find_files<cr>" },
+    { "<leader>fg", "<cmd>Telescope live_grep<cr>" },
   },
-  cmd = { "Telescope" },
-  config = function()
-    require('telescope').setup {
+  opts = function()
+    return {
       defaults = {
         results_title = "",
         mappings = {
@@ -28,12 +27,21 @@ return {
             ["<C-k>"] = require('telescope.actions').move_selection_previous,
             ["<C-j>"] = require('telescope.actions').move_selection_next,
             ["q"] = require('telescope.actions').close,
-          },
-        },
+          }
+        }
       },
+      pickers = {
+        buffers = { theme = "dropdown" },
+        find_files = { theme = "dropdown" },
+        live_grep = { theme = "dropdown" },
+      }
     }
+  end,
+  config = function(_, opts)
+    require('telescope').setup(opts)
 
     require('telescope').load_extension('fzf')
   end,
-  lazy = true
+  cmd = "Telescope",
+  event = "VeryLazy",
 }

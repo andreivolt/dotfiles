@@ -1,4 +1,4 @@
 return {
-  {"pbrisbin/vim-colors-off", lazy = true},
-  {"rafalbromirski/vim-aurora", lazy = true},
+  {"pbrisbin/vim-colors-off"},
+  {"rafalbromirski/vim-aurora"},
 }

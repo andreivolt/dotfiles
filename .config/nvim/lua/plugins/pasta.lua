@@ -1,4 +1,4 @@
 return {
   "sickill/vim-pasta",
-  event = 'VeryLazy',
+  lazy = false
 }

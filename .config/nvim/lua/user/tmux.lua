@@ -4,11 +4,11 @@ vim.api.nvim_create_autocmd({ "BufEnter", "BufWritePost", "FocusGained" }, {
     if vim.bo.buftype == "" then
       local filename = vim.fn.expand("%:t")
 
-      if filename ~= "" then
-        vim.fn.system("tmux rename-window ' " .. filename .. "'")
-      else
-        vim.fn.system("tmux rename-window ' <no file>'")
-      end
+      vim.fn.system(
+        "tmux rename-window '"
+        .. (filename ~= "" and filename or " <no file>") ..
+        "'"
+      )
     end
   end
 })

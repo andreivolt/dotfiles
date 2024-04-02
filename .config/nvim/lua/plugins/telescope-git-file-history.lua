@@ -10,5 +10,4 @@ return {
   init = function()
     require('telescope').load_extension('git_file_history')
   end,
-  lazy = true
 }

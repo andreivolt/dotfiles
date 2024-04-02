@@ -3,5 +3,6 @@ return {
   event = {
     "BufNewFile",
     "BufReadPre",
-  }
+  },
+  lazy = false
 }

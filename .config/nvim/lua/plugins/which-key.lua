@@ -1,11 +1,10 @@
 return {
   "folke/which-key.nvim",
   keys = "<leader>",
-  config = function()
+  init = function()
     vim.o.timeout = true
     vim.o.timeoutlen = 300
-
-    require("which-key").setup()
   end,
-  lazy = true,
+  config = true,
+  event = "VeryLazy"
 }

@@ -5,5 +5,4 @@ return {
     check_ts = true
   },
   config = true,
-  lazy = true
 }

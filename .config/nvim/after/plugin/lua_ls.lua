@@ -16,7 +16,6 @@
 --             -- TODO
 --             -- path = vim.split(package.path, ';')
 --           },
---           telemetry = { enable = false },
 --           workspace = {
 --             -- stop "Do you need to configure your work environment as `luassert`?" spam
 --             checkThirdParty = false,
