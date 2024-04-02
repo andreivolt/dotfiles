@@ -5,11 +5,24 @@ end
 vim.opt.rtp:prepend(lazypath)
 
 require("lazy").setup({ { import = "plugins" } }, {
-  install = { colorscheme = { "aurora" } },
-  change_detection = { notify = false },
+  install = {
+    colorscheme = { "aurora" },
+  },
+  change_detection = {
+    notify = false,
+  },
   performance = {
     rtp = {
-      disabled_plugins = { "gzip", "matchit", "matchparen", "netrwPlugin", "tarPlugin", "tohtml", "tutor", "zipPlugin" },
+      disabled_plugins = {
+        "gzip",
+        "matchit",
+        "matchparen",
+        "netrwPlugin",
+        "tarPlugin",
+        "tohtml",
+        "tutor",
+        "zipPlugin",
+      },
     },
   },
 })
