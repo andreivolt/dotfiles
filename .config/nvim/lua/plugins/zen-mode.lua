@@ -26,7 +26,7 @@ return {
       },
       kitty = {
         enabled = true,
-        font = '+3',
+        font = '+4',
       },
       options = {
         enabled = true,
@@ -41,4 +41,5 @@ return {
       vim.cmd('ScrollbarShow')
     end
   },
+  cmd = "ZenMode",
 }

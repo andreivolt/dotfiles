@@ -5,7 +5,6 @@ return {
     'hrsh7th/nvim-cmp',
     "SmiteshP/nvim-navic",
   },
-  ft = "lua",
   init = function()
     vim.o.winbar = "%{%v:lua.require'nvim-navic'.get_location()%}"
   end,
@@ -23,4 +22,5 @@ return {
       end
     })
   end,
+  ft = "lua",
 }

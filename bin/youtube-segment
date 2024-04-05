@@ -1,7 +1,6 @@
 #!/usr/bin/env pip-run yt_dlp ffmpeg-python
 
 import argparse
-import json
 import sys
 
 import ffmpeg
