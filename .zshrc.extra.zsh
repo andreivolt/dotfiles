@@ -272,4 +272,6 @@ alias tidal-dl-ng='pipx run tidal-dl-ng'
 
 # eval "$(register-python-argcomplete textract)"
 
-[[ -n "$TMUX" && "$TERM" = "xterm-kitty" ]] || tmux attach || tmux
+[[ -z $NVIM ]] && {
+  [[ -n "$TMUX" && "$TERM" = "xterm-kitty" ]] || tmux attach || tmux
+}

@@ -19,16 +19,19 @@ return {
         results_title = "",
         mappings = {
           i = {
+            ["<esc>"] = require('telescope.actions').close, -- close on first esc instead of going to normal mode
+
             ["<C-u>"] = false,
             ["<C-k>"] = require('telescope.actions').move_selection_previous,
             ["<C-j>"] = require('telescope.actions').move_selection_next,
           },
-          n = {
-            ["<C-k>"] = require('telescope.actions').move_selection_previous,
-            ["<C-j>"] = require('telescope.actions').move_selection_next,
-            ["q"] = require('telescope.actions').close,
-          }
-        }
+          -- n = {
+          --   ["<C-k>"] = require('telescope.actions').move_selection_previous,
+          --   ["<C-j>"] = require('telescope.actions').move_selection_next,
+          --   ["q"] = require('telescope.actions').close,
+          -- }
+        },
+        -- set_env = { ["COLORTERM"] = "truecolor" },
       },
       pickers = {
         buffers = { theme = "dropdown" },
@@ -40,8 +43,7 @@ return {
   config = function(_, opts)
     require('telescope').setup(opts)
 
-    require('telescope').load_extension('fzf')
+    pcall(require('telescope').load_extension('fzf'))
   end,
   cmd = "Telescope",
-  event = "VeryLazy",
 }

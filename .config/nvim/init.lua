@@ -9,10 +9,15 @@ vim.g.loaded_ruby_provider = 0
 vim.g.mapleader = " "
 vim.g.maplocalleader = ","
 
+-- vim.opt.belloff = ""
+-- vim.opt.errorbells = true
+-- vim.opt.winblend = 25
 vim.opt.breakindent = true
 vim.opt.clipboard = "unnamedplus"
 vim.opt.cmdheight = 0
+vim.opt.cmdwinheight = 10
 vim.opt.completeopt = "menu,menuone,noselect"
+vim.opt.confirm = true
 vim.opt.fillchars = { eob = " " }
 vim.opt.guifont = "Iosevka Nerd Font Mono:h22:w-3:#h-none"
 vim.opt.ignorecase = true
@@ -21,6 +26,7 @@ vim.opt.laststatus = 0
 vim.opt.lazyredraw = true
 vim.opt.linebreak = true
 vim.opt.list = true
+vim.opt.listchars = { nbsp = '␣', tab = '» ', trail = '·' }
 vim.opt.mouse = "a"
 vim.opt.path:append({ "**" })
 vim.opt.pumblend = 25
@@ -35,6 +41,7 @@ vim.opt.showmode = false
 vim.opt.signcolumn = "yes"
 vim.opt.smartcase = true
 vim.opt.smartindent = true
+vim.opt.spelloptions = 'camel'
 vim.opt.splitbelow = true
 vim.opt.splitkeep = "screen"
 vim.opt.splitright = true

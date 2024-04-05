@@ -13,9 +13,9 @@ function M.open_url()
         table.insert(urls, url)
     end
 
-    if #urls == 0 then
-        return
-    elseif #urls == 1 then
+    if #urls == 0 then return end
+
+    if #urls == 1 then
         vim.fn.system('open "' .. urls[1] .. '"')
     else
         local found_url = false

@@ -49,3 +49,10 @@ vim.keymap.set("v", "y", function() return 'my"' .. vim.v.register .. "y`y" end,
 vim.keymap.set("n", "n", "nzzzv", { desc = "center search hits vertically on screen and expand folds if hit is inside" })
 vim.keymap.set("n", "N", "Nzzzv", { desc = "center search hits vertically on screen and expand folds if hit is inside" })
 -- vim.keymap.set("v", "y", "ygv<Esc>") -- TODO
+
+vim.keymap.set('n', '[d', vim.diagnostic.goto_prev, { desc = 'Go to previous [D]iagnostic message' })
+vim.keymap.set('n', ']d', vim.diagnostic.goto_next, { desc = 'Go to next [D]iagnostic message' })
+vim.keymap.set('n', '<leader>e', vim.diagnostic.open_float, { desc = 'Show diagnostic [E]rror messages' })
+-- vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
+
+vim.keymap.set('t', '<Esc><Esc>', '<C-\\><C-n>', { desc = 'Exit terminal mode' })
