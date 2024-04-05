@@ -9,7 +9,9 @@ return {
     {"<c-\\>", "<cmd>NvimTmuxNavigateLastActive<cr>"},
     {"<c-space>", "<cmd>NvimTmuxNavigateNext<cr>"},
   },
-  opts = { disable_when_zoomed = true },
+  opts = {
+    disable_when_zoomed = true,
+  },
 }
 
 -- return {

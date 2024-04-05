@@ -1,20 +1,23 @@
 return {
   "jose-elias-alvarez/null-ls.nvim",
-  enable = false,
   config = function()
     local null_ls = require("null-ls")
     local buf_map = function(bufnr, mode, lhs, rhs, opts) vim.api.nvim_buf_set_keymap(bufnr, mode, lhs, rhs, opts or {silent = true}) end
-    local on_attach = function(client, bufnr)
+    local on_attach = function(_, bufnr)
       vim.api.nvim_create_autocmd("CursorHold", {
         buffer = bufnr,
         callback = function()
-          local opts = {focusable = false, close_events = {"BufLeave", "CursorMoved", "InsertEnter", "FocusLost"}, border = "rounded", source = "always", prefix = " ", scope = "cursor"}
+          local opts = {
+            focusable = false,
+            close_events = {"BufLeave", "CursorMoved", "InsertEnter", "FocusLost"},
+            border = "rounded",
+            source = "always",
+            prefix = " ",
+            scope = "cursor",
+          }
           vim.diagnostic.open_float(nil, opts)
         end
       })
-
-      -- mapn('<Leader>e', function() vim.diagnostic.open_float() end) TODO
-      -- vim.api.nvim_set_keymap('n', '<Leader>e', '<cmd>lua vim.diagnostic.open_float()<CR>', opts) # TODO
 
       vim.cmd("command! LspDef lua vim.lsp.buf.definition()")
       vim.cmd("command! LspFormatting lua vim.lsp.buf.formatting()")
@@ -56,5 +59,6 @@ return {
       on_attach = on_attach
     })
   end,
-  lazy = false
+  lazy = false,
+  event = "VeryLazy"
 }

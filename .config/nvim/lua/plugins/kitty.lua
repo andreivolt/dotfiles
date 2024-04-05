@@ -1,4 +1,4 @@
 return {
   "fladson/vim-kitty",
-  lasy = false
+  lazy = false,
 }
