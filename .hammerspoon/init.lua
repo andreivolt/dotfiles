@@ -76,7 +76,7 @@ spoon.SpoonInstall:andUse("WinWin", {
   repo = "default" -- Repository where WinWin is located
 })
 
-require("finder")
+-- require("finder")
 require("terminal")
 
 local function isWhatsAppOrTelegram(window)
