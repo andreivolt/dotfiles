@@ -275,3 +275,11 @@ alias tidal-dl-ng='pipx run tidal-dl-ng'
 [[ -z $NVIM ]] && {
   [[ -n "$TMUX" && "$TERM" = "xterm-kitty" ]] || tmux attach || tmux
 }
+
+# # auto expand aliases
+# function expand-alias() {
+#     zle _expand_alias
+#     zle self-insert
+# }
+# zle -N expand-alias
+# bindkey -M main ' ' expand-alias
