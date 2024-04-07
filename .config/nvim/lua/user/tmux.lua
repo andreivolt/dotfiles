@@ -3,6 +3,9 @@ vim.api.nvim_create_autocmd({ "BufEnter", "BufWritePost", "FocusGained" }, {
   callback = function()
     if not vim.bo.buftype == "" then return end
 
+    local bufname = vim.fn.expand("%")
+    if bufname:match(".*/edir.sh$") or bufname:match(".*/dir%w+$") then return end
+
     local filename = vim.fn.expand("%:t")
 
     vim.fn.system(

@@ -1,12 +1,31 @@
-#!/usr/bin/env cached-nix-shell
-#!nix-shell -i ruby -p python3Packages.youtube-transcript-api
+#!/usr/bin/env pip-run youtube_transcript_api
 
-require 'uri'
-require 'cgi'
+import sys
+import re
+from urllib.parse import urlparse, parse_qs
+from youtube_transcript_api import YouTubeTranscriptApi
 
-begin
- video_id = ARGV[0].match?(/\A[a-zA-Z0-9_-]{11}\z/) ? ARGV[0] : CGI.parse(URI.parse(ARGV[0]).query)['v'].first
- puts `youtube_transcript_api --format text #{video_id}`.gsub(/\n/, ' ')
-rescue => e
- abort "Error: #{ARGV.empty? ? "No YouTube URL or video ID provided." : e.message}"
-end
+def get_video_id(url_or_id):
+    if re.match(r'[a-zA-Z0-9_-]{11}$', url_or_id):
+        return url_or_id
+    else:
+        parsed_url = urlparse(url_or_id)
+        query_params = parse_qs(parsed_url.query)
+        return query_params.get('v', [])[0]
+
+def main():
+    if len(sys.argv) < 2:
+        print("Error: No YouTube URL or video ID provided.")
+        sys.exit(1)
+
+    try:
+        video_id = get_video_id(sys.argv[1])
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        text = ' '.join([entry['text'].replace('\n', '') for entry in transcript])
+        print(text)
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()
