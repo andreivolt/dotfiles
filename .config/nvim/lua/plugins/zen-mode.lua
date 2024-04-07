@@ -5,7 +5,7 @@ return {
   },
   opts = {
     window = {
-      width = 90,
+      width = 65,
       height = 0.95,
     },
     options = {
@@ -26,7 +26,7 @@ return {
       },
       kitty = {
         enabled = true,
-        font = '+4',
+        font = '+5',
       },
       options = {
         enabled = true,
