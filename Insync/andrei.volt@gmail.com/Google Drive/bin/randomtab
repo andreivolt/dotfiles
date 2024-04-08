@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+cache_file=~/.cache/bt_list_cache
+
+if [[ ! -f "$cache_file" ]] || [[ $(( $(date +%s) - $(stat -c %Y "$cache_file") )) -ge 60 ]]; then
+    bt list > "$cache_file"
+fi
+
+exec bt activate $(shuf -n1 "$cache_file" | awk '{ print $1 }')

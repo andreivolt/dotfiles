@@ -1,0 +1,39 @@
+#!/usr/bin/env -S pipx run
+# /// script
+# dependencies = ["browser-cookie3"]
+# ///
+
+import argparse
+import browser_cookie3
+import sys
+
+def get_cookies(domain, browser='chrome', cookie_file=None):
+    try:
+        if browser == 'chrome':
+            cookies = browser_cookie3.chrome(domain_name=domain, cookie_file=cookie_file)
+        elif browser == 'firefox':
+            cookies = browser_cookie3.firefox(domain_name=domain)
+        elif browser == 'safari':
+            cookies = browser_cookie3.safari(domain_name=domain)
+        else:
+            print(f"Unsupported browser: {browser}", file=sys.stderr)
+            sys.exit(1)
+
+        return '; '.join(f'{c.name}={c.value}' for c in cookies)
+    except Exception as e:
+        print(f"Error: {str(e)}", file=sys.stderr)
+        sys.exit(1)
+
+def main():
+    parser = argparse.ArgumentParser(description="Extract cookies for a specified domain from a browser")
+    parser.add_argument('domain', type=str, help="Domain to extract cookies for")
+    parser.add_argument('-b', '--browser', choices=['chrome', 'firefox', 'safari'], default='chrome',
+                        help="Browser to extract cookies from (default: chrome)")
+    parser.add_argument('-c', '--cookie-file', type=str, help="Path to the cookie file")
+    args = parser.parse_args()
+
+    cookie_header = get_cookies(args.domain, args.browser, args.cookie_file)
+    print(cookie_header)
+
+if __name__ == "__main__":
+    main()

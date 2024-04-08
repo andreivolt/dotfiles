@@ -1,0 +1,59 @@
+#!/usr/bin/env pip-run yt_dlp
+
+import sys
+import os
+import argparse
+import shutil
+from yt_dlp import YoutubeDL
+
+parser = argparse.ArgumentParser(description='Download audio from YouTube using yt-dlp')
+parser.add_argument('url_or_id', nargs='?', help='YouTube URL or ID')
+parser.add_argument('--clear-cache', action='store_true', help='Clear the cache')
+
+args = parser.parse_args()
+
+cache_dir = os.environ.get('XDG_CACHE_HOME', os.path.expanduser('~/.cache'))
+my_cache_dir = os.path.join(cache_dir, 'yt_audio_cache')
+
+if args.clear_cache:
+    if os.path.exists(my_cache_dir):
+        shutil.rmtree(my_cache_dir)
+        print('Cache cleared.')
+    else:
+        print('Cache directory does not exist.')
+    sys.exit(0)
+
+if not args.url_or_id:
+    parser.print_help()
+    sys.exit(1)
+
+is_piped = not sys.stdout.isatty()
+
+if not os.path.exists(my_cache_dir):
+    os.makedirs(my_cache_dir)
+
+ydl_opts = {
+    'format': 'bestaudio/best',
+    'outtmpl': os.path.join(my_cache_dir, '%(id)s.%(ext)s'),
+    'quiet': True,
+}
+
+ydl = YoutubeDL(ydl_opts)
+
+info = ydl.extract_info(args.url_or_id, download=False)
+
+video_id = info.get('id')
+ext = info.get('ext')
+
+cached_file = os.path.join(my_cache_dir, f'{video_id}.{ext}')
+
+if not os.path.exists(cached_file):
+    ydl.download([args.url_or_id])
+
+if is_piped:
+    with open(cached_file, 'rb') as f:
+        shutil.copyfileobj(f, sys.stdout.buffer)
+else:
+    output_filename = f'{video_id}.{ext}'
+    shutil.copyfile(cached_file, output_filename)
+    print(f'Downloaded audio to {output_filename}')

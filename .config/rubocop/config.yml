@@ -1,0 +1,24 @@
+Layout/AccessModifierIndentation:
+  EnforcedStyle: outdent
+Layout/CommentIndentation:
+  enabled: false
+Lint/Debugger:
+  enabled: false
+Lint/ElseLayout:
+  Enabled: false
+Metrics/LineLength:
+  enabled: false
+Metrics/MethodLength:
+  enabled: false
+Style/CommentAnnotation:
+  enabled: false
+Style/FrozenStringLiteralComment:
+  enabled: false
+Style/MultilineBlockChain:
+  enabled: false
+Style/NumericLiterals:
+  enabled: false
+Style/StringLiterals:
+  Enabled: false
+Style/StringLiterals:
+  Enabled: false

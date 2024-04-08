@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-
-exec pandoc -f html -t markdown --wrap none
