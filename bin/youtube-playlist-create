@@ -15,7 +15,7 @@ require 'openai'
 
 OOB_URI = 'urn:ietf:wg:oauth:2.0:oob'.freeze
 APPLICATION_NAME = 'YouTube Playlist Creator'.freeze
-CONFIG_DIR = File.join(ENV['XDG_CONFIG_HOME'] || File.join(Dir.home, '.config'), 'youtube_playlist_creator')
+CONFIG_DIR = File.join(ENV.fetch('XDG_STATE_HOME', File.join(Dir.home, '.local/state')), 'youtube-playlist-creator')
 CREDENTIALS_PATH = File.join(CONFIG_DIR, 'credentials.yaml')
 SCOPE = Google::Apis::YoutubeV3::AUTH_YOUTUBE
 

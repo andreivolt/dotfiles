@@ -63,7 +63,7 @@ def main():
         chat_data = client.get_chat_data(args.chat_data)
         print(json.dumps(chat_data))
     else:
-        last_conversation_dir = os.path.expanduser('~/.local/claude')
+        last_conversation_dir = os.path.join(os.environ.get('XDG_STATE_HOME', os.path.expanduser('~/.local/state')), 'claude')
         last_conversation_file = os.path.join(last_conversation_dir, 'last_conversation_id')
 
         if not os.path.exists(last_conversation_dir):

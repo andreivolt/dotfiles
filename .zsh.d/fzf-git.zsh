@@ -1,1 +1,0 @@
-bindkey "^G" undefined-key

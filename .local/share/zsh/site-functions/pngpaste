@@ -1,0 +1,16 @@
+case "$(uname)" in
+    Darwin)
+        command pngpaste -
+        ;;
+    Linux)
+        if [[ "$XDG_SESSION_TYPE" == "wayland" ]]; then
+            wl-paste --type image/png
+        else
+            xclip -selection clipboard -t image/png -o
+        fi
+        ;;
+    *)
+        echo "Unsupported operating system" >&2
+        exit 1
+        ;;
+esac

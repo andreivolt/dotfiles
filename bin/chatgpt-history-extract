@@ -11,7 +11,7 @@ latest_file = Dir.entries(downloads_dir)
 
 abort "No files found." if latest_file.nil?
 
-destination_dir = File.expand_path('~/drive/chatgpt-history')
+destination_dir = File.expand_path('~/drive/chatgpt')
 FileUtils.mkdir_p(destination_dir)
 
 system("unzip", "-o", "-d", destination_dir, latest_file)

@@ -73,6 +73,6 @@ if text.length <= 500
   IO.popen(%w[play --type mp3 -], 'w') { |f| f.write(synthesize_speech(text, options)) }
 else
   text_chunks = split_text(text, 3000)
-  output_uris = Parallel.map(text_chunks, in_threads: text_chunks.size) { |chunk| synthesize_speech(chunk, options, stream: false) }
+  output_uris = Parallel.map(text_chunks) { |chunk| synthesize_speech(chunk, options, stream: false) }
   output_uris.each { |uri| `play #{uri}` }
 end

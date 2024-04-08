@@ -7,33 +7,34 @@ local application = require("hs.application")
 
 local toggleApp = "kitty"
 
-local function toggleTerminalApp()
-  if toggleApp == "kitty" then
-    toggleApp = "neovide"
-  else
-    toggleApp = "kitty"
-  end
-  hs.console.printStyledtext("Switched toggle app to " .. toggleApp)
+local function setToggleApp()
+    local currentWindow = hs.window.focusedWindow()
+    if currentWindow then
+        local currentApp = currentWindow:application()
+        toggleApp = currentApp:name()
+        hs.console.printStyledtext("Switched toggle app to " .. toggleApp)
+    else
+        hs.console.printStyledtext("No focused window found")
+    end
 end
 
 hs.hotkey.bind({}, "²", function()
-  local app = hs.application.get(toggleApp)
-  if app then
-    if not app:mainWindow() then
-      if toggleApp == "kitty" then
-        app:selectMenuItem({"kitty", "New OS window"})
-      else
-        hs.application.launchOrFocus("neovide")
-      end
-    elseif app:isFrontmost() then
-      app:hide()
-    else
-      app:activate()
-    end
+    if toggleApp then
+        local app = hs.application.get(toggleApp)
+        if app then
+            if not app:mainWindow() then
+                hs.application.launchOrFocus(toggleApp)
+            elseif app:isFrontmost() then
+                app:hide()
+            else
+                app:activate()
+            end
+        else
+            hs.application.launchOrFocus(toggleApp)
+        end
   else
-    hs.application.launchOrFocus(toggleApp)
-    app = hs.application.get(toggleApp)
-  end
+        hs.console.printStyledtext("No toggle app set")
+    end
 end)
 
 hs.hotkey.bind({"ctrl", "cmd"}, "r", function()
@@ -48,19 +49,19 @@ local function activateApp(appName)
   hs.application.launchOrFocus(appName)
 end
 
-hs.hotkey.bind({"ctrl", "cmd"}, "1", function() activateApp("Google Chrome") end)
-hs.hotkey.bind({"ctrl", "cmd"}, "2", function() activateApp("Kitty") end)
-hs.hotkey.bind({"ctrl", "cmd"}, "3", function() activateApp("Spotify") end)
-hs.hotkey.bind({"ctrl", "cmd"}, "4", function() activateApp("Sublime Text") end)
+-- hs.hotkey.bind({"ctrl", "cmd"}, "1", function() activateApp("Google Chrome") end)
+-- hs.hotkey.bind({"ctrl", "cmd"}, "2", function() activateApp("Kitty") end)
+-- hs.hotkey.bind({"ctrl", "cmd"}, "3", function() activateApp("Spotify") end)
+-- hs.hotkey.bind({"ctrl", "cmd"}, "4", function() activateApp("Sublime Text") end)
 
 hs.hotkey.bind({"ctrl", "cmd"}, "d", function()
   hs.osascript.applescript([[
-        tell application "System Events"
-            tell appearance preferences
-                set dark mode to not dark mode
-            end tell
+    tell application "System Events"
+        tell appearance preferences
+            set dark mode to not dark mode
         end tell
-    ]])
+    end tell
+  ]])
 end)
 
 spoon.SpoonInstall:andUse("ReloadConfiguration", {
@@ -102,15 +103,15 @@ local windowFilter = hs.window.filter.new(true)
   end
 end)
 
-spoon.SpoonInstall:andUse("AppLauncher", {
-  hotkeys = {
-    c = "Calendar",
-    b = "Calendar",
-    d = "Discord",
-    f = "Firefox",
-    t = "Kitty",
-    z = "Zoom.us",
-  }
-})
+-- spoon.SpoonInstall:andUse("AppLauncher", {
+--   hotkeys = {
+--     c = "Calendar",
+--     b = "Calendar",
+--     d = "Discord",
+--     f = "Firefox",
+--     t = "Kitty",
+--     z = "Zoom.us",
+--   }
+-- })
 
-hs.hotkey.bind({"cmd", "alt", "ctrl"}, "T", toggleTerminalApp)
+hs.hotkey.bind({"cmd", "alt", "ctrl"}, "T", setToggleApp)

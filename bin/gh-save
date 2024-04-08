@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-
-path=$(url-parser path <<<$1 | sed "s/^.//; s/.git$//; s/\/$//; s/\//_/g")
-
-git clone --depth 1 $1 $path
-

@@ -3,28 +3,28 @@
 (require '[clojure.java.io :as io])
 (require '[babashka.process :refer [process]])
 
-(def config-dir (io/file (System/getProperty "user.home") ".config" "colortemp"))
-(def temp-file-path (io/file config-dir "current-temp"))
+(def temp-file-path (io/file
+                      (if-let [xdg-state-home (System/getenv "XDG_STATE_HOME")]
+                        (io/file xdg-state-home "colortemp")
+                        (io/file (System/getProperty "user.home") ".local" "state" "colortemp"))
+                      "current-temp"))
 
 (def MAX 6500)
 (def MIN 1000)
 (def INCR 100)
 
-(defn update-temperature
-  [current action]
+(defn update-temperature [current action]
   (let [new-temp (if action (action current INCR) current)]
     (max (min new-temp MAX) MIN)))
 
-(defn read-temperature
-  []
+(defn read-temperature []
   (if (.exists temp-file-path) (Integer/parseInt (slurp temp-file-path)) MIN))
 
 (defn write-temperature [temp]
   (io/make-parents temp-file-path)
   (spit temp-file-path (str temp)))
 
-(defn adjust-temperature
-  [temp]
+(defn adjust-temperature [temp]
   (let [os-name (System/getProperty "os.name")]
     (if (.startsWith os-name "Mac")
       (do
@@ -37,8 +37,7 @@
         (process ["gammastep" "-O" temp])
         (process ["notify-send" (str temp) "--expire-time" "500"])))))
 
-(defn set-temperature
-  [temp]
+(defn set-temperature [temp]
   (adjust-temperature temp)
   (write-temperature temp)
   temp)
@@ -57,6 +56,6 @@
          (set-temperature (update-temperature current-temp action))
          (do
            (println
-            "Invalid command-line argument. Use 'up' or 'down' to adjust the temperature.")
+             "Invalid command-line argument. Use 'up' or 'down' to adjust the temperature.")
            current-temp))))]
   (println (str "New temperature: " new-temp)))

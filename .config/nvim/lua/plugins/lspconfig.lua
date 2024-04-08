@@ -54,7 +54,7 @@ return {
         'bashls',
         'clojure_lsp',
         'lua_ls',
-        'nil_ls',
+        -- 'nil_ls',
         'pyright',
         'rust_analyzer',
         'solargraph',
@@ -69,4 +69,5 @@ return {
       end,
     })
   end,
+  event = "VeryLazy"
 }

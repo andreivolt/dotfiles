@@ -39,7 +39,7 @@ end
 extension_ids = Dir.entries(File.join(profile_path, 'Extensions'))
                    .reject { |id| excluded_extensions.include?(id) }
 
-extension_info = Parallel.map(extension_ids, in_threads: Parallel.processor_count) do |id|
+extension_info = Parallel.map(extension_ids) do |id|
   get_extension_info(id)
 end.compact.sort_by(&:last)
 

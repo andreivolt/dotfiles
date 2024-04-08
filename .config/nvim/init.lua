@@ -6,6 +6,22 @@ vim.g.loaded_python3_provider = 0
 vim.g.loaded_python_provider = 0
 vim.g.loaded_ruby_provider = 0
 
+-- vim.loader.enable()
+-- vim.g.loaded_gzip = 1
+-- vim.g.loaded_tar = 1
+-- vim.g.loaded_tarPlugin = 1
+-- vim.g.loaded_zip = 1
+-- vim.g.loaded_zipPlugin = 1
+-- vim.g.loaded_getscript = 1
+-- vim.g.loaded_getscriptPlugin = 1
+-- vim.g.loaded_vimball = 1
+-- vim.g.loaded_vimballPlugin = 1
+-- vim.g.loaded_matchit = 1
+-- vim.g.loaded_matchparen = 1
+-- vim.g.loaded_2html_plugin = 1
+-- vim.g.loaded_logiPat = 1
+-- vim.g.loaded_rrhelper = 1
+
 vim.g.mapleader = " "
 vim.g.maplocalleader = ","
 
@@ -32,7 +48,7 @@ vim.opt.path:append({ "**" })
 vim.opt.pumblend = 25
 vim.opt.pumheight = 10
 vim.opt.ruler = false
-vim.opt.scrolloff = 4
+vim.opt.scrolloff = 10
 vim.opt.shiftround = true
 vim.opt.shiftwidth = 2
 vim.opt.shortmess:append({ I = true })
@@ -70,10 +86,12 @@ vim.api.nvim_create_autocmd("VimResized", {
   end,
 })
 
+require("user.globals")
 require("user.plugins")
 
 require("user.colorscheme")
 require("user.fold")
+require("user.debug_highlight")
 
 vim.api.nvim_create_autocmd('User', {
   pattern = 'VeryLazy',
@@ -82,7 +100,6 @@ vim.api.nvim_create_autocmd('User', {
     if vim.g.neovide then require("user.neovide") end
     require("user.commands")
     require("user.cursorline")
-    require("user.debug_highlight")
     require("user.keymaps")
     require("user.spell")
     require("user.text")
