@@ -1,9 +1,0 @@
-#!/usr/bin/env rust-script
-
-use std::net::{TcpListener};
-
-fn main() {
-    let listener = TcpListener::bind("0.0.0.0:0").expect("Could not bind to any port");
-    let port = listener.local_addr().expect("Could not get local address").port();
-    println!("{}", port);
-}

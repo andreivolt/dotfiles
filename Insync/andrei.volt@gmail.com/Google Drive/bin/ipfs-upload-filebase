@@ -1,0 +1,64 @@
+#!/usr/bin/env ruby
+
+require 'bundler/inline'
+
+gemfile do
+  source 'https://rubygems.org'
+  gem 'aws-sdk-s3', '~> 1.114'
+  gem 'mimemagic', '~> 0.3.10'
+  gem 'securerandom'
+  gem 'nokogiri'
+  gem 'base64'
+end
+
+require 'aws-sdk-s3'
+require 'securerandom'
+require 'optparse'
+
+Aws.config.update(profile: 'filebase')
+
+s3 = Aws::S3::Client.new
+bucket = 'andreiv'
+
+options = {}
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{$0} [options] [file]"
+  opts.on('-c', '--copy', 'Copy URL to clipboard (macOS only)') do
+    options[:copy] = true
+  end
+end.parse!
+
+if ARGV[0]
+  file_path = ARGV[0]
+  file_name = File.basename(file_path)
+  content = File.read(file_path)
+  content_type = MimeMagic.by_path(file_path).type
+else
+  content = STDIN.read
+  content_type = MimeMagic.by_magic(content).type
+  extension = MimeMagic.by_magic(content).extensions.first || 'bin'
+  file_name = "#{SecureRandom.hex(8)}.#{extension}"
+end
+
+response = s3.put_object({
+  bucket: bucket,
+  key: file_name,
+  body: content,
+  content_type: content_type,
+  metadata: { "Content-Type" => content_type }
+})
+
+head_response = s3.head_object({
+  bucket: bucket,
+  key: file_name
+})
+
+cid = head_response.metadata['cid']
+ipfs_url = "https://ipfs.filebase.io/ipfs/#{cid}"
+
+if options[:copy] && RUBY_PLATFORM =~ /darwin/
+  system("echo '#{ipfs_url}' | pbcopy")
+  puts "URL copied to clipboard"
+else
+  puts ipfs_url
+end

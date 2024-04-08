@@ -1,285 +1,230 @@
-# TODO pushd
-# TODO setopt pipefail
-# TODO strace completion
-# TODO tmux complete words from current pane https://gist.github.com/blueyed/6856354
-# TODO vcs info https://github.com/grml/grml-etc-core/blob/71bdc48d190a5369fff28a97c828db7b1edf10a9/etc/zsh/zshrc#L1964
-
-is-macos() [[ $OSTYPE == darwin* ]]
-
-path() printf "%s\n" $path
-
-# standard to request colors
-export COLORTERM=yes
-
-autoload -U colors && colors
-
-# prompt
-# source ~/.zsh.d/prompt.zsh
-if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
-  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
-fi
-source ~/.zsh-plugins/powerlevel10k/powerlevel10k.zsh-theme
-[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
-
-# Homebrew completions
-(( ${+commands[brew]} )) && fpath=(/opt/homebrew/share/zsh/site-functions $fpath)
-
-# history
 HISTSIZE="999999"
 SAVEHIST="999999"
-HISTFILE="${XDG_CACHE_HOME:-$HOME/.local}/zsh/history" # prevent cloberring shell history when starting a shell with a smaller history size
+HISTFILE="${XDG_STATE_HOME:-$HOME/.local/state}/zsh/history"
 mkdir -p ${HISTFILE:h}
 setopt hist_fcntl_lock
 setopt hist_ignore_dups
-setopt hist_ignore_space # ignore commands with leading space
-setopt hist_reduce_blanks # collapse consecutive blanks
+setopt hist_ignore_space
+setopt hist_reduce_blanks
 setopt share_history
-setopt extended_history # save timestamp and duration
+setopt extended_history
 setopt append_history
 
-# setopt cshjunkiehistory
-setopt null_glob # return an empty string instead of error when no matches
-setopt auto_cd # if a command is issued that can't be executed as a normal command, and the command is the path of a directory, perform the cd command to that directory
-setopt auto_pushd # automatically add directories to the directory stack
-setopt chase_links # cd resolve symlinks
-setopt extended_glob # in order to use #, ~ and ^ for filename generation grep word *~(*.gz|*.bz|*.bz2|*.zip|*.Z) -> searches for word not in compressed files don't forget to quote '^', '~' and '#'!
-setopt hash_list_all # whenever a command completion is attempted, make sure the entire command path # is hashed first
-setopt interactive_comments # allow comments
-setopt magicequalsubst # filename expansion in for e.g. foo=~/bar
-setopt noshwordsplit
-setopt notify # report the status of backgrounds jobs immediately
-setopt numeric_glob_sort # sort filename globs numerically
-
-source ~/.zsh.d/vi.zsh
-
-# modules
-# is-macos && source ~/.zsh.d/homebrew-command-not-found.sh
-# source ~/.zsh-plugins/system-clipboard/zsh-system-clipboard.zsh
-# source ~/.zsh.d/github.zsh
-# source ~/.zsh.d/grc.sh
-# source ~/.zsh.d/notify_when_done.zsh
-# source ~/.zsh.d/npm.zsh
-# source ~/.zsh.d/nvm.zsh
-# source ~/.zsh.d/python.zsh
-# source ~/.zsh.d/ruby.zsh
-[ $TERM = xterm-kitty ] && source ~/.zsh.d/kitty.zsh
-is-macos && source ~/.zsh.d/mac_libiconv.sh
-source ~/.zsh.d/aliases.sh
-source ~/.zsh.d/global-aliases.zsh
-eval "$(direnv hook zsh)"
-
-export ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=244"
-source ~/.zsh-plugins/autosuggestions/zsh-autosuggestions.zsh
-unset ZSH_AUTOSUGGEST_USE_ASYNC # powerlevel10k
-
-source ~/.zsh-plugins/history-substring-search/zsh-history-substring-search.zsh
-bindkey '^[[A' history-substring-search-up
-bindkey '^[[B' history-substring-search-down
-
-# # better sudo prompt
-# alias sudo="sudo -p '%u->%U, enter password: ' "
-
-# ctrl-z to toggle fg/bg
-fancy-ctrl-z () {
-  if [[ $#BUFFER -eq 0 ]]; then
-    BUFFER="fg"
-    zle accept-line -w
-  else
-    zle push-input -w
-    zle clear-screen -w
-  fi
-}
-zle -N fancy-ctrl-z
-bindkey '^Z' fancy-ctrl-z
-
-bindkey '^[[1;3C' forward-word
-bindkey '^[[1;3D' backward-word
-
-# suffix aliases, open files with just filename
-alias -s txt=cat
-alias -s md=mdcat
-alias -s json='jq .'
-alias -s {flac,mp3,wav,ogg}='mpv --no-audio-display'
-is-macos && {
-  quicklook() { qlmanage -p "$*" &>/dev/null }
-  alias -s {gif,jpg,jpeg,mp4,pdf}=quicklook
-}
-
-# report on cpu-/system-/user-time of long-running commands
-REPORTTIME=30
-
-autoload -Uz zsh-mime-setup
-
-# do history expansion on space
-bindkey ' ' magic-space
-
-# # load the lookup subsystem if it's available on the system
-# zrcautoload lookupinit && lookupinit
-
-# export READNULLCMD=${READNULLCMD:-$PAGER}
-
-# man
-export MANWIDTH=100
-export MANPAGER='nvim +Man!'
-
-## autoload own functions. _*-functions will be loaded by the compinit builtin
-# fpath=(~/.zfunc $fpath)
-# (: ~/.zfunc/(^_*)(.)) 2>|/dev/null && \
-# autoload -Uz ${fpath[1]}/(^_*)(.:t)
-# autoload -Uz zcalc zmv zargs
-
-# history grep
-hgrep() {
-  fc -ifl -m "*(#i)$1*" 1 |
-    grep -i --color $1
-}
-
-# cd to temp dir
-cdt() {
-  builtin cd $(mktemp -d)
-}
-
-alias -- +x='chmod +x'
-
-## TODO
-## quote line
-#__quote-line () {
-# zle beginning-of-line
-# zle forward-word
-
-# RBUFFER=${(q)RBUFFER}
-# zle end-of-line
-#}
-#zle -N mquote && bindkey '^q' __quote-line
-## quote word or region
-#__quote_word_or_region() {
-#  emulate -L zsh
-#    if (( $REGION_ACTIVE )); then
-#      zle quote-region
-#    else
-#      # Alternative:{{{
-#      #
-#      #     RBUFFER+="'"
-#      #     zle vi-backward-blank-word
-#      #     LBUFFER+="'"
-#      #     zle vi-forward-blank-word
-#      #}}}
-#      zle set-mark-command
-#      zle vi-backward-blank-word
-#      zle quote-region
-#    fi
-#}
-#zle -N __quote_word_or_region
-##    │
-##    └ -N widget [ function ]
-## Create a user-defined widget.  When the  new widget is invoked from within the
-## editor, the specified shell function is called.
-## If no function name is specified, it defaults to the same name as the widget.
-#bindkey '^Q' __quote_word_or_region
-
-# # just type '...' to get '../..'
-# rationalise-dot() {
-# local MATCH
-# if [[ $LBUFFER =~ '(^|/| |	|'$'\n''|\||;|&)\.\.$' ]]; then
-#   LBUFFER+=/
-#   zle self-insert
-#   zle self-insert
-# else
-#   zle self-insert
-# fi
-# }
-# zle -N rationalise-dot
-# bindkey . rationalise-dot
-# # without this, typing a . aborts incremental history search
-# bindkey -M isearch . self-insert
-
-# use lf to switch directories and bind it to ctrl-o
-lfcd () {
-  tmp="$(mktemp -uq)"
-  trap 'rm -f $tmp >/dev/null 2>&1' HUP INT QUIT TERM PWR EXIT
-  lf -last-dir-path="$tmp" "$@"
-  if [ -f "$tmp" ]; then
-    dir="$(cat "$tmp")"
-    [ -d "$dir" ] && [ "$dir" != "$(pwd)" ] && cd "$dir"
-  fi
-}
-bindkey -s '^o' '^ulfcd\n'
-
-# source $(which env_parallel.zsh) # allow using functions in parallel
-
-# TODO
-# highlight-pid-pstree() {
-#   pstree -p --show-parents --arguments $$ --unicode |
-#     rg --passthru --colors "match:fg:yellow" --color always --pcre2 "(?<=,)[0-9]*"
-# }
-
-# highlight() {
-#   rg \
-#   --passthru \
-#   --colors "match:fg:$1" --color always \
-#   --pcre2 "$2"
-# }
-
-# colors for macOS ls
-export CLICOLOR=1
-
-# use macOS instead of Nix versions
-is-macos && {
-  alias apropos=/usr/bin/apropos
-  alias whatis=/usr/bin/whatis
-}
-
-# bind ctrl-left/right to move back and forward word
-bindkey "^[[1;5C" forward-word
-bindkey "^[[1;5D" backward-word
-
-# # autocorrect
-# # setopt correct # spelling correction
-# setopt correct_all
-autoload -U colors && colors
-# export SPROMPT="Correct $fg_bold[red]%R$reset_color to $fg_bold[green]%r?$reset_color ($fg_bold[green]Yes$reset_color, $fg_bold[yellow]No$reset_color, $fg_bold[red]Abort$reset_color, $fg_bold[blue]Edit$reset_color) "
-
-# ignore likely errors beginning of command
-alias \$=''
-alias \%=''
-
-source ~/.zsh-plugins/nix-shell/nix-shell.plugin.zsh
-source ~/.zsh.d/autopair.zsh
-source ~/.zsh.d/brotab.zsh
-source ~/.zsh.d/completion.zsh
-source ~/.zsh.d/delta.zsh
-source ~/.zsh.d/direnv.zsh
-source ~/.zsh.d/fzf.zsh
-source ~/.zsh.d/gpg.zsh
-source ~/.zsh.d/grep.zsh
-source ~/.zsh.d/keephack.zsh
-source ~/.zsh.d/less-colors.sh
-source ~/.zsh.d/ls-colors.sh
-source ~/.zsh.d/ripgrep.zsh
-source ~/.zsh.d/tmux.zsh
-source ~/.zsh.d/orbstack.zsh
+setopt auto_cd
+setopt auto_pushd
+setopt extended_glob
+setopt hash_list_all
+setopt interactive_comments
+setopt magic_equal_subst
+setopt no_sh_word_split
+setopt notify
+setopt null_glob
+setopt numeric_glob_sort
 
 fpath+=~/.local/share/zsh/site-functions
 mkdir -p ${fpath[-1]}
 autoload -Uz $fpath[-1]/*(.:t)
 
-# syntax highlighting: needs to be sourced after anything else that add hooks to modify the command-line buffer
-source ~/.zsh-plugins/syntax-highlighting/zsh-syntax-highlighting.zsh
+bindkey -v
 
-alias modal='pipx run modal'
-alias rawdog='pipx run rawdog-ai'
-alias tidal-dl-ng='pipx run tidal-dl-ng'
+export KEYTIMEOUT=1
 
-# eval "$(register-python-argcomplete textract)"
+autoload -Uz edit-command-line; zle -N edit-command-line
+bindkey -M vicmd v edit-command-line
 
-[[ -z $NVIM ]] && {
-  [[ -n "$TMUX" && "$TERM" = "xterm-kitty" ]] || tmux attach || tmux
+bindkey -M vicmd 'H' run-help
+
+bindkey ''${terminfo[kcbt]:-^\[\[Z} reverse-menu-complete
+
+bindkey '^n' expand-or-complete
+bindkey '^p' reverse-menu-complete
+
+bindkey -M viins '\e[1;5C' forward-word
+bindkey -M viins '\e[1;5D' backward-word
+
+autoload -Uz select-bracketed
+zle -N select-bracketed
+for m in visual viopp; do
+  for c in {a,i}''${(s..)^:-'()[]{}<>bB'}; do
+    bindkey -M $m $c select-bracketed
+  done
+done
+
+autoload -Uz select-quoted
+zle -N select-quoted
+for m in visual viopp; do
+  for c in {a,i}{\',\",\`}; do
+    bindkey -M $m $c select-quoted
+  done
+done
+
+autoload -U surround
+zle -N add-surround surround
+zle -N change-surround surround
+zle -N delete-surround surround
+bindkey -a cs change-surround
+bindkey -a ds delete-surround
+bindkey -a ys add-surround
+bindkey -M visual S add-surround
+
+# change cursor according to mode
+function zle-keymap-select zle-line-init zle-line-finish {
+  case $KEYMAP in
+    vicmd) print -n '\033[1 q' ;; # block
+    viins|main) print -n '\033[6 q' ;; # line
+  esac
 }
+zle -N zle-line-init; zle -N zle-line-finish; zle -N zle-keymap-select
 
-# # auto expand aliases
-# function expand-alias() {
-#     zle _expand_alias
-#     zle self-insert
+# completion menu
+zmodload zsh/complist
+bindkey -M menuselect 'h' vi-backward-char
+bindkey -M menuselect 'j' vi-down-line-or-history
+bindkey -M menuselect 'k' vi-up-line-or-history
+bindkey -M menuselect 'l' vi-forward-char
+bindkey -M menuselect 'i' accept-and-menu-complete
+bindkey -M menuselect 'u' undo
+# jump between categories of matches
+bindkey -M menuselect 'n' vi-forward-blank-word
+bindkey -M menuselect 'b' vi-backward-blank-word
+
+bindkey '^G' push-line-or-edit
+bindkey -M vicmd '^G' push-line-or-edit
+bindkey -M viins '^G' push-line-or-edit
+
+source ~/.zsh.d/aliases.sh
+source ~/.zsh.d/global-aliases.zsh
+source ~/.zsh.d/prompt.zsh
+
+export DELTA_PAGER='less -R'
+
+export GPG_TTY="$(tty)"
+
+export LS_COLORS="di=1;34:ln=1;35:so=1;35:pi=1;33:ex=1;32:bd=1;33:cd=1;33:su=1;31:sg=1;31:tw=1;34:ow=1;33:"
+
+export MANPAGER='nvim +Man!' MANWIDTH=100
+
+export READNULLCMD=$PAGER
+
+autoload -Uz compinit
+[[ -f ~/.cache/zsh/zcompdump(#qN.mh+24) ]] && compinit -d ~/.cache/zsh/zcompdump || compinit -C -d ~/.cache/zsh/zcompdump
+
+(( ${+commands[brew]} )) && fpath=(/opt/homebrew/share/zsh/site-functions $fpath)
+# eval "$(register-python-argcomplete pipx)"
+# eval "$(register-python-argcomplete textract)"
+# complete -C aws_completer aws
+
+bindkey '^n' expand-or-complete
+bindkey '^p' reverse-menu-complete
+
+_comp_options+=(globdots)
+
+bindkey -M menuselect '^o' accept-and-menu-complete
+bindkey -M menuselect "+" accept-and-menu-complete
+
+setopt no_list_ambiguous
+setopt glob_complete
+setopt complete_in_word
+setopt list_packed
+
+zstyle ':completion:*' use-cache on
+zstyle ':completion:*' cache-path "$XDG_CACHE_HOME/zsh/.zcompcache"
+
+zstyle ':completion:*' accept-exact '*(N)'
+zstyle ':completion:*' auto-description 'specify: %d' # format of informational and error messages
+zstyle ':completion:*' completer _complete _approximate # auto correct misspellings
+# zstyle ':completion:*' file-sort date
+zstyle ':completion:*' format 'Completing %d'
+zstyle ':completion:*' matcher-list '' 'm:{a-zA-Z}={A-Za-z}' # match case-sensitive only if there are no case-sensitive matches
+zstyle ':completion:*' matcher-list '' 'm:{a-z}={A-Z}' 'm:{a-zA-Z}={A-Za-z}' 'r:|[._-]=* r:|=* l:|=*' # ignore case
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}' # match lowercase to uppercase
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
+zstyle ':completion:*' menu select
+zstyle ':completion:*' menu yes=long select
+zstyle ':completion:*' rehash true # automatic rehash
+zstyle ':completion:*' squeeze-slashes yes # expand // to / instead of /*/
+zstyle ':completion:*' verbose true
+zstyle ':completion:*:(correct|approximate[^:]#):*' original false
+zstyle ':completion:*:(correct|approximate[^:]#):*' tag-order '! original'
+zstyle ':completion:*:*:-subscript-:*' tag-order indexes parameters # configure completion for array subscripts: prioritize completing array indexes first, then parameters. This affects how completions are offered when the user is entering an array subscript (e.g., $array[...]).
+zstyle ':completion:*:approximate:' max-errors 'reply=( $((($#PREFIX+$#SUFFIX)/3 )) numeric )' # allow one error for every three characters typed in approximate completer
+zstyle ':completion:*:default' list-colors ${(s.:.)LS_COLORS} 'ma=30;46'
+zstyle ':completion:*:default' select-prompt '%SMatch %M Line %L %P%s' # when matches don't fit screen
+zstyle ':completion:*:expand-alias:*' global true
+zstyle ':completion:*:expand:*' tag-order all-expansions # insert all expansions for expand completer
+zstyle ':completion:*:history-words' list false
+zstyle ':completion:*:man:*' menu yes select
+zstyle ':completion:*:manuals' separate-sections true
+zstyle ':completion:*:manuals.*' insert-sections true
+zstyle ':completion:*:matches' group 'yes'
+zstyle ':completion:*:messages' format '%d'
+zstyle ':completion:*:options' auto-description '%d'
+zstyle ':completion:*:options' description 'yes'
+zstyle ':completion:*:processes' command 'ps -au $USER'
+zstyle ':completion:*:processes-names' command 'ps c -u ${USER} -o command | uniq'
+zstyle ':completion:*:warnings' format "%B$fg[red]%}No matches for: $fg[white]%d%b"
+zstyle ':completion::(^approximate*):*:functions' ignored-patterns '_*' # ignore completion functions for commands you don't have
+zstyle ':completion::*:(bindkey|zle):*:widgets' ignored-patterns '.*'
+zstyle ':completion::*:(mv|cp|rm|chmod|chown|vi):*' ignore-line true # remove files from selection menu if already present in command line
+zstyle ':completion::*:(scp|rsync):*' list-colors "=(#b)(*)/=0="${${${(s.:.)LS_COLORS}[(r)di=<->]}/di=/} '='${^${(M)${(s.:.)LS_COLORS}:#\**}}
+zstyle ':completion::complete:*' rehash true
+zstyle -e ':completion:*:approximate-extreme:*' max-errors \ '(( reply=($#PREFIX+$#SUFFIX)/1.2 ))'
+zstyle -e ':completion:*:approximate:*' max-errors '(( reply=($#PREFIX+$#SUFFIX)/3 ))'
+
+# completer: easy and low-profile for first try, approximation on second and extreme approximation on consecutive tries
+zstyle -e ':completion:*' completer '
+  case $_last_try in
+    $HISTNO$BUFFER$CURSOR)
+      reply=(_ignored _approximate _complete)
+      _last_try="$HISTNO$BUFFER${CURSOR}x"
+      ;;
+    $HISTNO$BUFFER${CURSOR}x)
+      reply=(_approximate:-extreme _complete)
+    ;;
+    *)
+      _last_try="$HISTNO$BUFFER$CURSOR"
+      reply=(_expand_alias _complete _prefix)
+    ;;
+  esac
+'
+
+# filenames
+zstyle ':completion:*' file-patterns '%p:globbed-files' '*(-/):directories'
+zstyle ':completion:*:*:*:default' menu yes select
+zstyle ':completion:*' group-name ''
+zstyle ':completion:*' insert-unambiguous true
+
+# TODO tmux complete words from current pane https://gist.github.com/blueyed/6856354
+
+# setopt correct_all
+# export SPROMPT="Correct $fg_bold[red]%R$reset_color to $fg_bold[green]%r?$reset_color ($fg_bold[green]Yes$reset_color, $fg_bold[yellow]No$reset_color, $fg_bold[red]Abort$reset_color, $fg_bold[blue]Edit$reset_color) "
+
+# # run rehash on completion so new installed program are found automatically:
+# _force_rehash() {
+# (( CURRENT == 1 )) && rehash
+# return 1
 # }
-# zle -N expand-alias
-# bindkey -M main ' ' expand-alias
+
+(( $+commands[orbctl] )) && source ~/.zsh.d/orbstack.zsh
+[[ $OSTYPE == darwin* ]] && source ~/.zsh.d/mac.zsh
+[[ $TERM == xterm-kitty ]] && source ~/.zsh.d/kitty.zsh
+source ~/.local/share/zsh/plugins/nix-shell/nix-shell.plugin.zsh
+source ~/.zsh.d/accept-line.zsh
+source ~/.zsh.d/autopair.zsh
+source ~/.zsh.d/autosuggestions.zsh
+source ~/.zsh.d/direnv.zsh
+source ~/.zsh.d/fzf.zsh
+source ~/.zsh.d/grc.sh
+source ~/.zsh.d/grep.sh
+source ~/.zsh.d/history-substring-search.zsh
+source ~/.zsh.d/keep.zsh
+source ~/.zsh.d/tmux.zsh
+
+# history expansion
+bindkey ' ' magic-space
+
+alias -- +x='chmod +x'
+
+source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
+
+export FZF_CTRL_R_OPTS="--nth=2.."

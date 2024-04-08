@@ -1,4 +1,0 @@
-# better context in Ruby diffs
-*.rb diff=ruby
-*.rake diff=ruby
-*_spec.rb diff=rspec

@@ -1,11 +1,3 @@
-# colorize
-
-for x in \
-  configure \
-  diff \
-  gcc \
-  netstat \
-  ping \
-  traceroute \
-  wdiff
-do; alias $x="grc $x"; done
+alias netstat='grc netstat'
+alias ping='grc ping'
+alias traceroute='grc traceroute'

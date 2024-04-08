@@ -1,0 +1,72 @@
+#!/usr/bin/env ruby
+
+require 'bundler/inline'
+
+gemfile do
+  source 'https://rubygems.org'
+  gem 'httparty'
+  gem 'json'
+  gem 'launchy'
+end
+
+require 'fileutils'
+require 'json'
+
+class TempMail
+  API_URL = 'https://www.1secmail.com/api/v1/'
+  POLL_INTERVAL = 10 # seconds
+
+  def initialize
+    @state_dir = ENV['XDG_STATE_HOME'] || File.expand_path('~/.local/state/tmpmail.rb')
+    FileUtils.mkdir_p(@state_dir)
+    @email_file = File.join(@state_dir, 'email.json')
+    load_or_generate_email
+    @last_email_id = 0
+  end
+
+  def load_or_generate_email
+    if File.exist?(@email_file)
+      @email = JSON.parse(File.read(@email_file))
+    else
+      generate_email
+    end
+  end
+
+  def generate_email
+    response = HTTParty.get("#{API_URL}?action=genRandomMailbox&count=1")
+    @email = JSON.parse(response.body).first
+    File.write(@email_file, @email.to_json)
+  end
+
+  def check_emails
+    username, domain = @email.split('@')
+    response = HTTParty.get("#{API_URL}?action=getMessages&login=#{username}&domain=#{domain}")
+    messages = JSON.parse(response.body)
+
+    new_messages = messages.select { |msg| msg['id'] > @last_email_id }
+    new_messages.each do |msg|
+      view_email(msg['id'])
+      @last_email_id = msg['id'] if msg['id'] > @last_email_id
+    end
+  end
+
+  def view_email(id)
+    username, domain = @email.split('@')
+    response = HTTParty.get("#{API_URL}?action=readMessage&login=#{username}&domain=#{domain}&id=#{id}")
+    email_content = JSON.parse(response.body)
+
+    temp_file = File.join(@state_dir, "email_#{id}.txt")
+    File.write(temp_file, "From: #{email_content['from']}\nSubject: #{email_content['subject']}\n\n#{email_content['textBody']}")
+    Launchy.open(temp_file)
+  end
+
+  def run
+    puts @email
+    loop do
+      check_emails
+      sleep POLL_INTERVAL
+    end
+  end
+end
+
+TempMail.new.run

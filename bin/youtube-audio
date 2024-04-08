@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-
-filename=$(yt-dlp -o '%(title)s' --get-filename $1)
-
-yt-dlp -f bestaudio/best -o '%(title)s.%(ext)s' -v --extract-audio $1
-
-echo $filename
