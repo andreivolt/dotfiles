@@ -1,0 +1,91 @@
+#!/usr/bin/env ruby
+
+def get_current_volume
+  `osascript -e "output volume of (get volume settings)"`.strip.to_i
+end
+
+def set_volume(volume)
+  begin
+    abort "Error: Volume must be between 0 and 100." unless (0..100).include?(volume)
+    spawn("osascript -e 'set volume output volume #{volume}'").tap { |pid| Process.detach(pid) }
+  rescue => e
+    abort "Failed to set volume: #{e.message}"
+  end
+end
+
+def mute_volume
+  spawn("osascript -e 'set volume with output muted'").tap { |pid| Process.detach(pid) }
+  puts "Volume muted."
+end
+
+def unmute_volume
+  spawn("osascript -e 'set volume without output muted'").tap { |pid| Process.detach(pid) }
+  puts "Volume unmuted."
+end
+
+def is_muted?
+  `osascript -e "output muted of (get volume settings)"`.strip == "true"
+end
+
+def print_current_volume
+  current = get_current_volume
+  muted = is_muted?
+  status = muted ? " (muted)" : ""
+  puts "Current volume: #{current}%#{status}"
+end
+
+def print_usage
+  puts <<~USAGE
+    Usage: vol [command]
+
+    Commands:
+      +[NUMBER]     Increase volume by NUMBER (default: 5)
+      -[NUMBER]     Decrease volume by NUMBER (default: 5)
+      [NUMBER]      Set volume to NUMBER (0-100)
+      mute          Mute the volume
+      unmute        Unmute the volume
+      help          Display this help message
+
+    Examples:
+      vol          # Get current volume and mute status
+      vol +        # Increase volume by 5%
+      vol +10      # Increase volume by 10%
+      vol -        # Decrease volume by 5%
+      vol -15      # Decrease volume by 15%
+      vol 50       # Set volume to 50%
+      vol mute     # Mute the volume
+      vol unmute   # Unmute the volume
+  USAGE
+end
+
+if ARGV.empty?
+  print_current_volume
+  exit 0
+end
+
+command = ARGV[0].downcase
+
+case command
+when /^\+(\d+)?$/
+  increment = $1.to_i.nonzero? || 5
+  new_volume = [get_current_volume + increment, 100].min
+  set_volume(new_volume)
+  puts "Volume increased to #{new_volume}%"
+when /^-(\d+)?$/
+  decrement = $1.to_i.nonzero? || 5
+  new_volume = [get_current_volume - decrement, 0].max
+  set_volume(new_volume)
+  puts "Volume decreased to #{new_volume}%"
+when /^\d+$/
+  new_volume = command.to_i
+  set_volume(new_volume)
+  puts "Volume set to #{new_volume}%"
+when "mute"
+  mute_volume
+when "unmute"
+  unmute_volume
+when "help"
+  print_usage
+else
+  abort "Unknown command: #{command}\n\n#{print_usage}"
+end

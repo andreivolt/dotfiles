@@ -11,6 +11,8 @@ vim.api.nvim_create_autocmd("ColorScheme", {
     vim.api.nvim_set_hl(0, "TelescopeBorder", { fg = "#333333" })
     vim.api.nvim_set_hl(0, "WinSeparator", { bg = "black", fg = "#333333" })
     vim.api.nvim_set_hl(0, "ZenBg", { bg = "black" })
+
+    -- vim.api.nvim_set_hl(0, "CmpPmenuBorder", { bg = "#333333" })
   end,
 })
 

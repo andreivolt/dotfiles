@@ -1,0 +1,69 @@
+#!/usr/bin/env cached-nix-shell
+#!nix-shell -i bash -p antiword coreutils python3Packages.docx2txt file ghostscript html2text jq odt2txt poppler_utils ripmime sox tesseract unrtf libxml2
+
+input_file="$1"
+
+if [ ! -f "$input_file" ]; then
+  echo "File not found: $input_file" >&2
+  exit 1
+fi
+
+mime_type=$(file --mime-type -b "$input_file")
+
+case "$mime_type" in
+  text/*)
+    cat "$input_file"
+    ;;
+  application/pdf)
+    pdftotext "$input_file" -
+    ;;
+  application/msword)
+    antiword "$input_file"
+    ;;
+  application/vnd.openxmlformats-officedocument.wordprocessingml.document)
+    docx2txt "$input_file" -
+    ;;
+  application/vnd.ms-excel|application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+    unoconv -f csv --stdout "$input_file"
+    ;;
+  application/vnd.ms-powerpoint|application/vnd.openxmlformats-officedocument.presentationml.presentation)
+    unoconv -f txt --stdout "$input_file"
+    ;;
+  text/csv)
+    cat "$input_file"
+    ;;
+  text/html)
+    html2text "$input_file"
+    ;;
+  application/epub+zip)
+    ebook-convert "$input_file" - | cat
+    ;;
+  image/*)
+    tesseract "$input_file" stdout
+    ;;
+  message/rfc822)
+    ripmime --name-by-type --textname stdout.txt -i "$input_file" && cat stdout.txt && rm stdout.txt
+    ;;
+  application/vnd.oasis.opendocument.text)
+    odt2txt "$input_file"
+    ;;
+  application/rtf)
+    unrtf --text "$input_file"
+    ;;
+  application/postscript)
+    ps2ascii "$input_file"
+    ;;
+  application/json)
+    jq '.' "$input_file"
+    ;;
+  application/xml)
+    xmllint --format "$input_file"
+    ;;
+  audio/*)
+    sox "$input_file" -r 16000 -b 16 -c 1 -t wav - | pocketsphinx_continuous -infile /dev/stdin
+    ;;
+  *)
+    echo "Unsupported MIME type: $mime_type" >&2
+    exit 1
+    ;;
+esac

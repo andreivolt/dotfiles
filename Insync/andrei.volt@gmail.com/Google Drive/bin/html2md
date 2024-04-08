@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+pandoc -f html -t markdown --lua-filter=<(echo '
+function Div(el)
+	el.classes = {}
+	el.attributes = {}
+
+	return el.content
+end
+
+function Span(el)
+	el.classes = {}
+	el.attributes = {}
+
+	return el.content
+end
+
+function Header(el)
+	el.classes = {}
+	el.attributes = {}
+
+	return el
+end
+') --wrap none

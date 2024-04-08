@@ -1,0 +1,1 @@
+firefox_decrypt -f json | jq -r '.[] | select(.url == "https://accounts.firefox.com") | "\(.user) \(.password)"' | head -n1
