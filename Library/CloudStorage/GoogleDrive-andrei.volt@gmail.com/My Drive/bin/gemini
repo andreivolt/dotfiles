@@ -1,0 +1,33 @@
+#!/usr/bin/env -S pipx run
+# /// script
+# dependencies = ["google-generativeai>=0.1.0"]
+# ///
+
+import os
+import sys
+import argparse
+import google.generativeai as genai
+
+parser = argparse.ArgumentParser(description="Usage: script.py [options]")
+parser.add_argument("-p", "--prompt", required=True, help="Prompt to be used")
+group = parser.add_mutually_exclusive_group()
+group.add_argument("--pro", action="store_true", help="Use gemini-1.5-pro model")
+group.add_argument("--flash", action="store_true", help="Use gemini-1.5-flash-8b model (default)")
+args = parser.parse_args()
+
+model_name = 'gemini-1.5-flash-8b'
+if args.pro:
+    model_name = 'gemini-1.5-pro'
+
+input_lines = ""
+if not sys.stdin.isatty():
+    input_lines = sys.stdin.read()
+
+formatted_prompt = f"{args.prompt}\n{input_lines}"
+
+genai.configure(api_key=os.getenv('GOOGLEAI_API_KEY'))
+
+model = genai.GenerativeModel(model_name)
+response = model.generate_content(formatted_prompt)
+
+print(response.text)

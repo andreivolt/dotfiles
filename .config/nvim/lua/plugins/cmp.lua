@@ -46,11 +46,27 @@ return {
     end
 
     cmp.setup({
+      -- TODO
+      -- completion = {
+      --   autocomplete = false,
+      -- },
+
       snippet = {
         expand = function(args)
           require('luasnip').lsp_expand(args.body)
           -- vim.snippet.expand(args.body) -- TODO
         end,
+      },
+
+      window = {
+        completion = {
+          border = globals.border_chars,
+          winhighlight = 'Normal:CmpPmenu,FloatBorder:CmpPmenuBorder,CursorLine:PmenuSel,Search:None',
+        },
+        documentation = {
+          border = globals.border_chars,
+          winhighlight = 'Normal:CmpPmenu,FloatBorder:CmpPmenuBorder,CursorLine:PmenuSel,Search:None',
+        }
       },
 
       mapping = cmp.mapping.preset.insert({
@@ -65,6 +81,8 @@ return {
         --   s = cmp.mapping.confirm({ select = true }),
         --   c = cmp.mapping.confirm({ behavior = cmp.ConfirmBehavior.Replace, select = true }),
         -- }),
+
+        ["<CR>"] = cmp.mapping.confirm({ select = false }),
 
         ['<Tab>'] = cmp.mapping(function(fallback)
           if cmp.visible() then
@@ -117,7 +135,8 @@ return {
       sources = cmp.config.sources({
         { name = 'nvim_lsp' },
         { name = 'path' },
-        { name = "buffer",  keyword_length = 5 }
+        { name = "buffer",  keyword_length = 5 },
+        -- { name = 'tmux', option = { all_panes = true } } -- TODO
       }),
       experimental = {
         ghost_text = true,

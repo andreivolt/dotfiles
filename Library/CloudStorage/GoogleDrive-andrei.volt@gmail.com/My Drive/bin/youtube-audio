@@ -1,0 +1,42 @@
+#!/usr/bin/env pip-run yt_dlp
+
+import sys
+import yt_dlp
+
+def download_best_audio(url, output_to_pipe=False):
+    ydl_opts = {
+        "quiet": True,
+        "ignore_config": True,
+        "no_warnings": True,
+        "format": "bestaudio/best",
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "best",
+            "preferredquality": "0",
+        }],
+    }
+
+    if output_to_pipe:
+        ydl_opts["outtmpl"] = "-"
+    else:
+        ydl_opts["outtmpl"] = "%(title)s.%(ext)s"
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=not output_to_pipe)
+
+    if not output_to_pipe:
+        audio_codec = info["acodec"]
+        audio_ext = "m4a" if audio_codec.startswith("mp4a") else audio_codec
+
+        filename = f"{info['title']}.{audio_ext}"
+        print(filename)
+
+# Example usage
+if len(sys.argv) < 2:
+    print("Please provide a YouTube URL as a command-line argument.")
+    sys.exit(1)
+
+url = sys.argv[1]
+output_to_pipe = not sys.stdout.isatty()
+
+download_best_audio(url, output_to_pipe)

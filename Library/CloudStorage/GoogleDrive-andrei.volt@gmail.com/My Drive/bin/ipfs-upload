@@ -1,0 +1,44 @@
+#!/usr/bin/env ruby
+require 'bundler/inline'
+gemfile do
+  source 'https://rubygems.org'
+  gem 'mime-types'
+end
+require 'optparse'
+require 'securerandom'
+require 'tempfile'
+require 'shellwords'
+require 'fileutils'
+
+options = {}
+OptionParser.new do |opts|
+  opts.banner = "Usage: ipfs-upload [options] [file_path]"
+  opts.on("-fNAME", "--filename=NAME", "Set filename") { |v| options[:filename] = v }
+  opts.on("-c", "--clipboard", "Copy to clipboard") { options[:clipboard] = true }
+end.parse!
+
+input_file = ARGV[0]
+if input_file
+  file_path = input_file
+  options[:filename] ||= File.basename(file_path)
+else
+  temp_file = Tempfile.new
+  IO.copy_stream(STDIN, temp_file)
+  temp_file.close
+  mime = `file --brief --mime-type #{Shellwords.escape(temp_file.path)}`.strip
+  mime_type = MIME::Types[mime].first
+  ext = mime_type ? ".#{mime_type.extensions.first}" : ''
+  options[:filename] ||= "#{SecureRandom.hex}#{ext}"
+  file_path = "#{Dir.tmpdir}/#{options[:filename]}"
+  FileUtils.mv(temp_file.path, file_path)
+  at_exit { File.delete(file_path) if File.exist?(file_path) }
+end
+
+output = `pinata upload --cid-only #{Shellwords.escape(file_path)}`
+cid = output.strip.split("\n").last
+url = "https://ipfs.io/ipfs/#{cid}"
+if options[:clipboard]
+  `echo "#{url}" | pbcopy`
+else
+  puts url
+end

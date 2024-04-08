@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+pkill -f MacOS/Dock
+defaults write com.apple.dock persistent-apps -array

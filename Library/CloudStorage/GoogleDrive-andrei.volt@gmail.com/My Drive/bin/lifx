@@ -1,0 +1,200 @@
+#!/usr/bin/env -S pip-run lifxlan
+
+import argparse
+import socket
+import time
+
+BROADCAST_ADDR = '255.255.255.255'
+BROADCAST_PORT = 56700
+RECV_SIZE = 1024
+
+class LifxLAN:
+    def __init__(self):
+        self.lights = []
+        self.source_id = 0
+        print("LifxLAN object created")
+        print(f"lights: {self.lights}")
+        print(f"dir(self.lights): {dir(self.lights)}")
+
+    def get_sequential_seqnum(self):
+        self.source_id = (self.source_id + 1) % 0xffff
+        print(f"get_sequential_seqnum: {self.source_id}")
+        return self.source_id
+
+    def broadcast_with_resp(self, msg_type, payload={}, timeout=2.0, max_tries=5):
+        if not self.lights:  # No lights yet? Use broadcast
+            print("No lights found, using broadcast")
+            responses = []
+            for _ in range(max_tries):
+                responses = []
+                seq_num = self.get_sequential_seqnum()
+                msg = msg_type(None if BROADCAST_MAC == '' else BROADCAST_MAC, self.source_id, seq_num=seq_num, payload=payload, ack_requested=False, response_requested=True)
+                if not isinstance(msg, Message):
+                    raise ValueError("msg_type must be a Message")
+                msg_bytes = bytes(msg)
+                self.sock.sendto(msg_bytes, (BROADCAST_ADDR, BROADCAST_PORT))
+                print(f"Sent broadcast message: {msg_bytes}")
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    try:
+                        resp, addr = self.sock.recvfrom(RECV_SIZE)
+                        responses.append((resp, addr))
+                        print(f"Received response from {addr}: {resp}")
+                    except socket.timeout:
+                        print("Socket timeout")
+                        break
+                print(f"Total responses received: {len(responses)}")
+            print(f"Final responses: {responses}")
+            print(f"dir(responses): {dir(responses)}")
+            return responses
+        else:
+            print("Lights found, sending unicast messages")
+            responses = [self.send_message_with_resp(msg_type, payload, light) for light in self.lights]
+            print(f"Responses from unicast: {responses}")
+            print(f"dir(responses): {dir(responses)}")
+            return responses
+
+    def discover_devices(self):
+        print("Discovering devices...")
+        self.lights = []
+        self.devices = []
+        responses = self.broadcast_with_resp(GetService, StateService)
+        print(f"Responses from broadcast_with_resp: {responses}")
+        print(f"dir(responses): {dir(responses)}")
+        for r in responses:
+            print(f"Response: {r}")
+            print(f"dir(r): {dir(r)}")
+            device = Device(r.target_addr, r.ip_addr, r.service, r.port, self.source_id, self.verbose)
+            print(f"Device created: {device}")
+            print(f"dir(device): {dir(device)}")
+            try:
+                if device.is_light():
+                    print("Device is a light")
+                    print(f"Supports color: {device.supports_color()}")
+                    print(f"Supports temperature: {device.supports_temperature()}")
+                    print(f"Supports multizone: {device.supports_multizone()}")
+                    print(f"Supports chain: {device.supports_chain()}")
+                    if device.supports_multizone():
+                        print("Device supports multizone")
+                        device = MultiZoneLight(r.target_addr, r.ip_addr, r.service, r.port, self.source_id, self.verbose)
+                        print(f"Created MultiZoneLight: {device}")
+                    elif device.supports_chain():
+                        print("Device supports chain")
+                        device = TileChain(r.target_addr, r.ip_addr, r.service, r.port, self.source_id, self.verbose)
+                        print(f"Created TileChain: {device}")
+                    else:
+                        print("Device is a regular light")
+                        device = Light(r.target_addr, r.ip_addr, r.service, r.port, self.source_id, self.verbose)
+                        print(f"Created Light: {device}")
+                    self.lights.append(device)
+                    self.devices.append(device)
+                    print(f"Lights: {self.lights}")
+                    print(f"dir(self.lights): {dir(self.lights)}")
+                    print(f"Devices: {self.devices}")
+                    print(f"dir(self.devices): {dir(self.devices)}")
+                else:
+                    print("Device is not a light")
+                    self.devices.append(device)
+                    print(f"Devices: {self.devices}")
+                    print(f"dir(self.devices): {dir(self.devices)}")
+            except WorkflowException as e:
+                print(f"WorkflowException: {e}")
+                # cheating -- it just so happens that all LIFX devices are lights right now
+                device = Light(r.target_addr, r.ip_addr, r.service, r.port, self.source_id, self.verbose)
+                self.lights.append(device)
+                self.devices.append(device)
+                print(f"Lights (after WorkflowException): {self.lights}")
+                print(f"dir(self.lights): {dir(self.lights)}")
+                print(f"Devices (after WorkflowException): {self.devices}")
+                print(f"dir(self.devices): {dir(self.devices)}")
+
+    def get_lights(self):
+        print(f"get_lights: Returning {self.lights}")
+        print(f"dir(self.lights): {dir(self.lights)}")
+        return self.lights
+
+    # Other methods for LifxLAN class
+
+def list_devices(lan):
+    print("list_devices function called")
+    lights = lan.get_lights()
+    print(f"Lights received from lan.get_lights(): {lights}")
+    print(f"dir(lights): {dir(lights)}")
+    for light in lights:
+        print(f"Light: {light}")
+        print(f"dir(light): {dir(light)}")
+        label = light.get_label()
+        group_label = light.get_group_label()
+        mac_addr = light.get_mac_addr()
+        print(f"Label: {label}, Group: {group_label}, MAC: {mac_addr}")
+
+def set_light(lan, identifier, temperature=None, brightness=None):
+    print(f"set_light function called with identifier: {identifier}, temperature: {temperature}, brightness: {brightness}")
+    light = None
+    if len(identifier) == 17 and ":" in identifier:  # MAC address
+        print(f"Identifier is a MAC address: {identifier}")
+        light = lan.get_device_by_mac_address(identifier)
+        print(f"Light found by MAC address: {light}")
+        print(f"dir(light): {dir(light)}")
+    else:
+        print(f"Identifier is not a MAC address: {identifier}")
+        lights = lan.get_lights()
+        print(f"Lights received from lan.get_lights(): {lights}")
+        print(f"dir(lights): {dir(lights)}")
+        for l in lights:
+            print(f"Light: {l}")
+            print(f"dir(l): {dir(l)}")
+            if l.get_label() == identifier or l.get_group_label() == identifier:
+                light = l
+                print(f"Light found by label or group: {light}")
+                print(f"dir(light): {dir(light)}")
+                break
+
+    if light:
+        print(f"Light found: {light}")
+        print(f"dir(light): {dir(light)}")
+        if temperature:
+            temperature = max(1500, min(temperature, 9000))
+            current_color = light.get_color()
+            print(f"Current color: {current_color}")
+            print(f"dir(current_color): {dir(current_color)}")
+            light.set_color((current_color[0], current_color[1], current_color[2], temperature))
+            print(f"Set color with temperature: {temperature}")
+
+        if brightness:
+            brightness = max(0, min(brightness, 65535))
+            current_color = light.get_color()
+            print(f"Current color: {current_color}")
+            print(f"dir(current_color): {dir(current_color)}")
+            light.set_color((current_color[0], brightness, current_color[2], current_color[3]))
+            print(f"Set color with brightness: {brightness}")
+
+        if light.get_power() == 0:
+            light.set_power(True)
+            print("Turned light on")
+    else:
+        print(f"Light not found with identifier: {identifier}")
+
+if __name__ == '__main__':
+    print("__main__ block")
+    parser = argparse.ArgumentParser(description="Control LIFX lights.")
+    parser.add_argument("identifier", type=str, nargs='?', help="Label, group name, or MAC address of the light to control")
+    parser.add_argument("-t", "--temperature", type=int, help="Color temperature in Kelvin (1500-9000)")
+    parser.add_argument("-b", "--brightness", type=int, help="Brightness level (0-65535)")
+    parser.add_argument("-l", "--list", action="store_true", help="List available lights")
+    args = parser.parse_args()
+    print(f"Arguments: {args}")
+    print(f"dir(args): {dir(args)}")
+
+    lan = LifxLAN()
+    print(f"LifxLAN object: {lan}")
+    print(f"dir(lan): {dir(lan)}")
+
+    if args.list:
+        print("Listing devices...")
+        list_devices(lan)
+    elif args.identifier:
+        print(f"Setting light with identifier: {args.identifier}, temperature: {args.temperature}, brightness: {args.brightness}")
+        set_light(lan, args.identifier, args.temperature, args.brightness)
+    else:
+        parser.print_help()

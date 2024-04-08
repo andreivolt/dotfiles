@@ -26,7 +26,11 @@ return {
       },
       kitty = {
         enabled = true,
-        font = '+5',
+        font = '+4',
+      },
+      alacritty = {
+        enabled = true,
+        font = '30',
       },
       options = {
         enabled = true,
@@ -36,6 +40,7 @@ return {
     },
     on_open = function()
       vim.cmd('ScrollbarHide')
+      vim.cmd('set statuscolumn=""') -- TODO
     end,
     on_close = function()
       vim.cmd('ScrollbarShow')

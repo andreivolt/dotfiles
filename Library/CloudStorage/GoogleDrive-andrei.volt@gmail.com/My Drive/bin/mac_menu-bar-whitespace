@@ -1,0 +1,2 @@
+defaults write -globalDomain NSStatusItemSelectionPadding -int $1
+defaults write -globalDomain NSStatusItemSpacing -int $1

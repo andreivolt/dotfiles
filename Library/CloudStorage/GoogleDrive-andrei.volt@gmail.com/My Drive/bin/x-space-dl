@@ -1,0 +1,49 @@
+#!/usr/bin/env ruby
+require 'fileutils'
+require 'tempfile'
+
+if ARGV.empty?
+  puts "Usage: #{$0} <stream_url>"
+  exit 1
+end
+
+space_url = ARGV[0]
+original_dir = Dir.pwd
+
+file_name = `yt-dlp --cookies-from-browser chrome --get-filename -o '%(upload_date)s - %(uploader_id)s.%(title)s.%(id)s.%(ext)s' #{space_url}`.strip
+
+Dir.mktmpdir do |tmp_dir|
+  Dir.chdir(tmp_dir)
+
+  at_exit do
+    FileUtils.rm_f('stream.m3u8')
+    FileUtils.rm_f('modified.m3u8')
+    Dir.glob('*.aac').each { |file| FileUtils.rm_f(file) }
+    Dir.chdir(original_dir)
+  end
+
+  stream = `yt-dlp --cookies-from-browser chrome -g #{space_url}`.strip
+  stream_path = stream.match(%r{^.*\/})[0]
+
+  unless system("wget -q -O stream.m3u8 '#{stream}'")
+    puts "Failed to download the stream."
+    exit 1
+  end
+
+  File.open('modified.m3u8', 'w') do |modified|
+    File.foreach('stream.m3u8') do |line|
+      modified.puts line.match?(/^[^.#]+\.aac$/) ? "#{stream_path}#{line}" : line
+    end
+  end
+
+  `aria2c -i modified.m3u8`
+  `ffmpeg -i stream.m3u8 -c copy '#{file_name}'`
+
+  FileUtils.mv(file_name, original_dir)
+end
+
+if File.exist?(File.join(original_dir, file_name))
+  puts "File downloaded and saved in the original directory: #{file_name}"
+else
+  puts "Failed to download the file."
+end
