@@ -1,0 +1,45 @@
+#!/usr/bin/env ruby
+
+require 'tmpdir'
+require 'optparse'
+
+options = {}
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{__FILE__} [options] [chrome_args]"
+
+  opts.on("--app-name NAME", "Specify alternate app name for macOS") do |name|
+    options[:app_name] = name
+  end
+
+  opts.on("--remote-debugging-port PORT", Integer, "Specify remote debugging port") do |port|
+    options[:remote_debugging_port] = port
+  end
+end.parse!(ARGV)
+
+if RUBY_PLATFORM.include?("darwin")
+  app_name = options[:app_name] || 'Google Chrome'
+else
+  chrome_path = "google-chrome-unstable"
+end
+
+tmpdir = Dir.mktmpdir
+
+at_exit do
+  FileUtils.rm_rf(tmpdir) if File.exist?(tmpdir)
+end
+
+chrome_options = [
+  "--auto-open-devtools-for-tabs",
+  "--no-first-run",
+  "--remote-debugging-port=#{options[:remote_debugging_port] || 9999}",
+  "--start-maximized",
+  "--user-data-dir=#{tmpdir}",
+  *ARGV
+].compact
+
+if RUBY_PLATFORM.include?("darwin")
+  # Use '-n' to open a new instance even if one is already running
+  system 'open', '-n', '-a', app_name, '--args', *chrome_options
+else
+  system chrome_path, *chrome_options
+end

@@ -1,0 +1,94 @@
+#!/usr/bin/env ruby
+
+require 'bundler/inline'
+
+gemfile do
+  source 'https://rubygems.org'
+  gem 'websocket-client-simple'
+  gem 'coreaudio'
+  gem 'json'
+end
+
+require 'websocket-client-simple'
+require 'coreaudio'
+require 'json'
+require 'base64'
+
+API_KEY = ENV['SPEECHMATICS_API_KEY']
+SAMPLE_RATE = 44100
+CHANNELS = 1
+CHUNK_SIZE = 8192
+
+unless API_KEY
+  puts "Please set the SPEECHMATICS_API_KEY environment variable."
+  exit 1
+end
+
+def start_recognition
+  {
+    type: "StartRecognition",
+    audio_format: {
+      type: "raw",
+      encoding: "pcm_f32le",
+      sample_rate: SAMPLE_RATE
+    },
+    transcription_config: {
+      language: "en",
+      enable_partials: true,
+      max_delay: 2
+    }
+  }
+end
+
+ws = WebSocket::Client::Simple.connect "wss://eu2.rt.speechmatics.com/v2"
+
+ws.on :open do
+  puts "Connected to Speechmatics"
+  ws.send(start_recognition.to_json)
+end
+
+ws.on :message do |msg|
+  data = JSON.parse(msg.data)
+  case data['type']
+  when 'RecognitionStarted'
+    puts "Recognition started"
+  when 'AddTranscript'
+    if data['metadata']['is_final']
+      print "\r" + " " * 80 + "\r"  # Clear the line
+      puts data['metadata']['transcript']
+    else
+      print "\r" + data['metadata']['transcript'] + " " * 20
+    end
+  when 'EndOfTranscript'
+    puts "\nTranscription ended"
+    exit
+  end
+end
+
+ws.on :error do |e|
+  puts "WebSocket Error: #{e.message}"
+end
+
+ws.on :close do |e|
+  puts "WebSocket Connection Closed: #{e.code} #{e.reason}"
+  exit
+end
+
+begin
+  input = CoreAudio.default_input_device
+  buffer = CoreAudio::Buffer.new(CHUNK_SIZE, CHANNELS)
+  
+  input.input_loop(buffer) do |buffer, _|
+    audio_data = buffer.each_chan.first.to_a
+    base64_audio = Base64.strict_encode64(audio_data.pack('e*'))
+    ws.send({
+      type: "AddAudio",
+      audio_data: base64_audio
+    }.to_json)
+  end
+rescue Interrupt
+  puts "\nStopping transcription..."
+  ws.send({ type: "EndOfStream" }.to_json)
+  sleep 2  # Give some time for final results to come in
+  ws.close
+end

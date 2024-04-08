@@ -1,0 +1,1 @@
+jq '.addons[] | select(.id | test("@mozilla") | not)' "$FIREFOX_PROFILE_PATH/extensions.json"

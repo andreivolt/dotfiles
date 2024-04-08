@@ -1,0 +1,127 @@
+#!/usr/bin/env gorun
+
+// go.mod >>>
+// module screenshot
+//
+// go 1.21.8
+//
+// require (
+//     golang.org/x/exp v0.0.0-20240314144324-c7f7c6466f7f
+//     golang.org/x/term v0.8.0
+// )
+// <<< go.mod
+
+// go.sum >>>
+// golang.org/x/exp v0.0.0-20240314144324-c7f7c6466f7f h1:3CW0unweImhOzd5FmYuRsD4Y4oQFKZIjAnKbjV4WIrw=
+// golang.org/x/exp v0.0.0-20240314144324-c7f7c6466f7f/go.mod h1:CxmFvTBINI24O/j8iY7H1xHzx2i4OsyguNBmN/uPtqc=
+// golang.org/x/sys v0.8.0 h1:EBmGv8NaZBZTWvrbjNoL6HVt+IVy3QDQpJs7VRIw3tU=
+// golang.org/x/sys v0.8.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+// golang.org/x/term v0.8.0 h1:n5xxQn2i3PC0yLAbjTpNT85q/Kgzcr2gIoX9OrJUols=
+// golang.org/x/term v0.8.0/go.mod h1:xPskH00ivmX89bAKVGSKKtLOWNx2+17Eiy94tnKShWo=
+// <<< go.sum
+
+package main
+
+import (
+    "fmt"
+    "io/ioutil"
+    "os"
+    "os/exec"
+    "path/filepath"
+    "runtime"
+    "strings"
+
+    "golang.org/x/exp/slices"
+    "golang.org/x/term"
+)
+
+const doc = `Usage:
+  screenshot (selection | window | full) [<filename>]`
+
+func main() {
+    args := os.Args[1:]
+
+    if len(args) == 0 || strings.HasSuffix(args[len(args)-1], ".png") {
+        if !slices.ContainsFunc(args, func(arg string) bool {
+            return slices.Contains([]string{"selection", "window", "full"}, arg)
+        }) {
+            args = append([]string{"selection"}, args...)
+        }
+    }
+
+    if len(args) < 1 {
+        fmt.Println(doc)
+        os.Exit(1)
+    }
+
+    var osName string
+    if runtime.GOOS == "darwin" {
+        osName = "darwin"
+    } else {
+        osName = "linux"
+    }
+
+    var filename string
+    if len(args) > 1 && strings.HasSuffix(args[len(args)-1], ".png") {
+        filename = args[len(args)-1]
+    }
+
+    var output string
+    if filename != "" {
+        output = "file"
+    } else if term.IsTerminal(int(os.Stdout.Fd())) {
+        output = "clipboard"
+    } else {
+        output = "stdout"
+    }
+
+    target := args[0]
+    if !slices.Contains([]string{"selection", "window", "full"}, target) {
+        target = "selection"
+    }
+
+    optionsMap := map[string]map[string]string{
+        "selection": {"darwin": "-i", "linux": "area"},
+        "window":    {"darwin": "-W", "linux": "window"},
+        "full":      {"darwin": "", "linux": "screen"},
+    }
+
+    captureOption := optionsMap[target][osName]
+
+    var filePath string
+    if output == "clipboard" && osName == "darwin" {
+        captureCommand := fmt.Sprintf("screencapture -c %s", captureOption)
+        exec.Command("sh", "-c", captureCommand).Run()
+    } else {
+        tempFile, _ := ioutil.TempFile("", "screenshot*.png")
+        filePath = tempFile.Name()
+        tempFile.Close()
+        defer tempFile.Close()
+        defer os.Remove(filePath)
+
+        var captureCommand string
+        if osName == "darwin" {
+            captureCommand = fmt.Sprintf("screencapture %s %q", captureOption, filePath)
+        } else {
+            captureCommand = fmt.Sprintf("grimshot save %s %q", captureOption, filePath)
+        }
+        exec.Command("sh", "-c", captureCommand).Run()
+
+        if output == "stdout" {
+            content, _ := ioutil.ReadFile(filePath)
+            os.Stdout.Write(content)
+        } else if output == "file" {
+            os.Rename(filePath, filename)
+            filePath, _ = filepath.Abs(filename)
+        }
+    }
+
+    if output != "stdout" {
+        if osName == "darwin" {
+            notificationCommand := fmt.Sprintf(`terminal-notifier -title 'Screenshot' -message 'Screenshot taken' -open 'file://%s' -contentImage '%s'`, filePath, filePath)
+            exec.Command("sh", "-c", notificationCommand).Run()
+        } else {
+            exec.Command("sh", "-c", "notify-send 'Screenshot' 'Screenshot taken'").Run()
+        }
+    }
+}

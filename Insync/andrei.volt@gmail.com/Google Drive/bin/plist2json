@@ -1,0 +1,11 @@
+#!/usr/bin/env cached-nix-shell
+#!nix-shell -i bash -p jc
+
+if [[ $# -eq 0 && -p /dev/stdin ]]; then
+  jc --plist
+elif [[ $# -eq 1 && -f "$1" ]]; then
+  cat "$1" | jc --plist
+else
+  echo "Error: Missing data or file not found."
+  exit 1
+fi

@@ -1,0 +1,1 @@
+$(gh pr list --search 'review-requested:andreivolt' --json url --jq length) -gt 0

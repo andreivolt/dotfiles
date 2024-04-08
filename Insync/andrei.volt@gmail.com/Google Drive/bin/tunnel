@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+
+SCRIPT_NAME=$(basename "$0")
+
+eval "$(docopts -h - : "$@" <<EOF
+Usage: $SCRIPT_NAME -l <local_port> -r <remote_port> -u <username> -h <remote_host> [-i <identity_file>]
+
+Options:
+  -l <local_port>, --local-port <local_port>           Local port to be forwarded.
+  -r <remote_port>, --remote-port <remote_port>        Remote port on the server.
+  -u <username>, --username <username>                 Remote server username.
+  -h <remote_host>, --remote-host <remote_host>        Remote server host.
+  -i <identity_file>, --identity-file <identity_file>  SSH identity file [optional].
+  --help                                               Show this screen.
+EOF
+)"
+
+RANDOM_HI_PORT=$((RANDOM % 30000 + 30000))
+
+SSH_CMD="ssh"
+if [ -n "$identity_file" ]; then
+  SSH_CMD="$SSH_CMD -i $identity_file"
+fi
+SSH_CMD="$SSH_CMD -R $RANDOM_HI_PORT:localhost:$local_port $username@$remote_host"
+
+SOCAT_CMD="socat TCP-LISTEN:$remote_port,fork,reuseaddr TCP:localhost:$RANDOM_HI_PORT"
+
+echo "Executing: $SSH_CMD '$SOCAT_CMD'"
+$SSH_CMD "$SOCAT_CMD" &
+
+sleep 5
+
+while true; do
+  if ! ps aux | grep -q "[s]sh -R $RANDOM_HI_PORT:localhost:$local_port"; then
+    echo "SSH tunnel disconnected. Restarting..."
+    $SSH_CMD "$SOCAT_CMD" &
+    sleep 5
+  fi
+  sleep 60
+done

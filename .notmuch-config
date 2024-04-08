@@ -1,7 +1,0 @@
-[database]
-path = /home/avo/Mail
-
-[user]
-name=Andrei Volt
-primary_email=andrei@avolt.net
-other_email=andrei.volt@gmail.com

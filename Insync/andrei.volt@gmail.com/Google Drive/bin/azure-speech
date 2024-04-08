@@ -1,0 +1,163 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'optparse'
+
+require 'bundler/inline'
+gemfile do
+  source :rubygems
+  gem 'httparty', '~> 0.2'
+  gem 'nokogiri'
+  gem 'terminal-table'
+end
+
+class AzureSpeechSynthesizer
+  include HTTParty
+
+  CACHE_DIR = File.expand_path('~/.cache/azure-speech')
+  VOICES_CACHE_FILE = File.join(CACHE_DIR, 'voices.json')
+  TOKEN_CACHE_FILE = File.join(CACHE_DIR, 'token.json')
+
+  def initialize(region, key)
+    @region = region
+    self.class.base_uri "https://#{@region}.tts.speech.microsoft.com"
+    @options = {
+      headers: {
+        'Ocp-Apim-Subscription-Key' => key
+      }
+    }
+  end
+
+  def get_access_token
+    if File.exist?(TOKEN_CACHE_FILE)
+      token_data = JSON.parse(File.read(TOKEN_CACHE_FILE))
+      expiry_time = Time.parse(token_data['expiry_time'])
+      if expiry_time > Time.now
+        return token_data['access_token']
+      end
+    end
+
+    token_uri = URI("https://#{@region}.api.cognitive.microsoft.com/sts/v1.0/issueToken")
+    token_response = HTTParty.post(token_uri,
+      headers: {
+        'Content-type' => 'application/x-www-form-urlencoded',
+        'Content-Length' => '0',
+        'Ocp-Apim-Subscription-Key' => @options[:headers]['Ocp-Apim-Subscription-Key']
+      }
+    )
+    access_token = token_response.body
+    expiry_time = Time.now + 10 * 60 # token is valid for 10 minutes
+
+    token_data = {
+      'access_token' => access_token,
+      'expiry_time' => expiry_time.to_s
+    }
+    FileUtils.mkdir_p(CACHE_DIR)
+    File.write(TOKEN_CACHE_FILE, token_data.to_json)
+
+    access_token
+  end
+
+  def voices
+    if File.exist?(VOICES_CACHE_FILE)
+      JSON.parse(File.read(VOICES_CACHE_FILE))
+    else
+      response = self.class.get('/cognitiveservices/voices/list', @options)
+      FileUtils.mkdir_p(CACHE_DIR)
+      File.write(VOICES_CACHE_FILE, response.body)
+      response.parsed_response
+    end
+  end
+
+  def synthesize(content, voice_name, prosody_rate, format, tempo)
+    voice = voices.find { |v| v['DisplayName'] == voice_name }
+
+    if voice.nil?
+      puts "Voice '#{voice_name}' not found. Please provide a valid voice name."
+      return
+    end
+
+    voice_tags = content.scan(/<voice\s+name=".*?">.*<\/voice>/m)
+
+    ssml_content =
+      if voice_tags.any?
+        voice_tags.join("\n")
+      else
+        <<~XML
+          <voice name='#{voice['ShortName']}'>
+            <prosody rate='#{prosody_rate}'>#{content}</prosody>
+          </voice>
+        XML
+      end
+
+    ssml_xml = <<~XML
+      <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">
+        #{ssml_content}
+      </speak>
+    XML
+
+    synthesize_speech(ssml_xml, format, tempo)
+  end
+
+  private
+
+  def synthesize_speech(ssml_xml, format, tempo)
+    access_token = get_access_token
+    response = self.class.post('/cognitiveservices/v1',
+      headers: {
+        'Content-Type' => 'application/ssml+xml',
+        'X-Microsoft-OutputFormat' => format,
+        'Authorization' => "Bearer #{access_token}"
+      },
+      body: ssml_xml
+    )
+
+    if response.success?
+      IO.popen("ffmpeg -i - -filter:a 'atempo=#{tempo}' -f mp3 - | sox -t mp3 - -d", 'wb') do |ffmpeg|
+        ffmpeg.write(response.body)
+      end
+    else
+      puts "Speech synthesis failed with status code: #{response.code}"
+      puts "Response body: #{response.body}"
+    end
+  end
+end
+
+options = {
+  voice_name: 'Aria',
+  prosody_rate: '-10.00%',
+  format: 'audio-48khz-192kbitrate-mono-mp3',
+  tempo: 1.4
+}
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{$0} [options] [content]"
+
+  opts.on('-v', '--voice VOICE', "Voice name (default: #{options[:voice_name]})")
+  opts.on('-p', '--prosody RATE', "Prosody rate (default: #{options[:prosody_rate]})")
+  opts.on('-f', '--format FORMAT', "Output audio format (default: #{options[:format]})")
+  opts.on('-t', '--tempo TEMPO', Float, "Audio tempo adjustment (default: #{options[:tempo]})")
+  opts.on('-l', '--list_voices', 'List available voices')
+end.parse!(into: options)
+
+content = ARGV.join(' ')
+
+if options[:list_voices].nil? && content.empty? && !$stdin.tty?
+  content = $stdin.read
+end
+
+if options[:list_voices].nil? && content.empty?
+  abort "Please provide the content to synthesize either as positional parameters or through stdin."
+end
+
+synthesizer = AzureSpeechSynthesizer.new(ENV['AZURE_SPEECH_REGION'], ENV['AZURE_SPEECH_KEY'])
+
+if options[:list_voices]
+  voices = synthesizer.voices
+  puts Terminal::Table.new(
+    headings: ['Language', 'Voice Name', 'Gender', 'Locale Name', 'Voice Type', 'Status'],
+    rows: voices.map { |voice| voice.values_at('Locale', 'DisplayName', 'Gender', 'LocaleName', 'VoiceType', 'Status') }
+  )
+else
+  synthesizer.synthesize(content, options[:voice_name], options[:prosody_rate], options[:format], options[:tempo])
+end

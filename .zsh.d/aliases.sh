@@ -1,22 +1,17 @@
-alias da="du -sch"
-alias diff="colordiff --nobanner"
 alias eza="eza --icons auto"
-alias gc='git clone --depth 1'
-alias gist="gh gist"
-alias gp='git push'
-alias gpf='git push -f'
-alias gr='cd $(git root)'
-alias gron="fastgron"
-alias gsp="git stash && git pull"
-alias gspp="gsp && git stash pop"
-alias info="info --vi-keys"
-alias j="jobs"
 alias l="ls -1"
 alias la="ls -a"
 alias ll="ls -l --classify=auto --git"
 alias lla="ll -a"
 alias ls="eza"
+
+alias cal="cal -m"
+alias diff="colordiff --nobanner"
+alias gc='git clone --depth 1'
+alias gist="gh gist"
+alias gron="fastgron"
+alias j="jobs"
+alias rg='rg --smart-case --colors match:bg:yellow --colors match:fg:black'
 alias rm="rm --verbose"
 alias vi="nvim"
-alias vim="nvim"
 alias yt-dlp="yt-dlp --cookies-from-browser firefox"

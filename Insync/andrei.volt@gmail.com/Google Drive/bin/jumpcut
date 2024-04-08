@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+selection=$(cat ~/Library/Application\ Support/Jumpcut/JCEngine.save | plist2json | jq '.jcList[].Contents' | sed 's/^"//; s/"$//' | fzf --preview 'echo -n {}')
+
+if [ -n "$selection" ]; then
+  case "$1" in
+    -c)
+      echo -n "$selection" | pbcopy
+      hs -c "hs.alert.show('Copied ' .. [[${selection}]])"
+      ;;
+    *)
+      echo -e "$selection"
+      ;;
+  esac
+fi

@@ -1,0 +1,59 @@
+#!/usr/bin/env ruby
+require 'bundler/inline'
+gemfile do
+  source 'https://rubygems.org'
+  gem 'json'
+  gem 'tty-tree'
+end
+require 'json'
+require 'optparse'
+require 'tty-tree'
+
+options = {indent: 4, as: :dir}
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{$PROGRAM_NAME} [-p] [-i INDENT] [-n] [file]"
+  opts.on("-p", "--pretty", "Output as pretty tree") { options[:pretty] = true }
+  opts.on("-i", "--indent INDENT", Integer, "Indentation for tree (default: 4)") { |i| options[:indent] = i }
+  opts.on("-n", "--number", "Use number rendering instead of directory style") { options[:as] = :number }
+end.parse!
+
+input = ARGF.read
+posts = input.lines.map { |line| JSON.parse(line) }
+post_hash = posts.each_with_object({}) do |post, hash|
+  post['replies'] = []
+  hash[post['id_str']] = post
+end
+
+root_posts = post_hash.values.select do |post|
+  parent_id = post['inReplyToTweetIdStr']
+  if parent_id && post_hash[parent_id]
+    post_hash[parent_id]['replies'] << post
+    false
+  else
+    true
+  end
+end.sort_by { |post| post['date'] }.reverse
+
+if options[:pretty]
+  def build_tree(post)
+    content = "#{post['user']['username']}: #{post['rawContent']}".strip
+    return nil if content.empty?
+
+    node = { content => {} }
+    unless post['replies'].empty?
+      replies = post['replies'].map { |reply| build_tree(reply) }.compact
+      node[content] = replies.reduce({}, :merge) unless replies.empty?
+    end
+    node
+  end
+
+  tree = root_posts.map { |post| build_tree(post) }.compact.reduce({}, :merge)
+
+  if tree.empty?
+    puts "No valid posts to display."
+  else
+    puts TTY::Tree.new(tree).render(as: options[:as], indent: options[:indent])
+  end
+else
+  puts JSON.pretty_generate(root_posts)
+end

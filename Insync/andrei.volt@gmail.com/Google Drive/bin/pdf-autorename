@@ -1,0 +1,92 @@
+#!/usr/bin/env nix-shell
+#!nix-shell -i ruby -p poppler_utils
+
+require 'bundler/inline'
+
+gemfile do
+  source 'https://rubygems.org'
+  gem 'pdf-reader'
+  gem 'ruby-openai'
+end
+
+require 'pdf-reader'
+require 'open3'
+require 'openai'
+require 'base64'
+
+# Set up OpenAI API credentials
+OpenAI.configure do |config|
+  config.access_token = ENV['OPENAI_API_KEY']
+end
+
+TITLE_PROMPT = "Extract the full title and author (if available) from the given text or image. If there is no author, only provide the title. Do not include any other text or explanations, just the title and author (if available) in the format 'Title by Author' or 'Title':"
+
+def extract_title_and_author_from_text(text)
+  client = OpenAI::Client.new
+  response = client.chat(
+    parameters: {
+      messages: [
+        {
+          role: "user",
+          content: "#{TITLE_PROMPT}\n\n#{text}"
+        }
+      ],
+      frequency_penalty: 0,
+      max_tokens: 100,
+      model: "gpt-4-0125-preview",
+      presence_penalty: 0,
+      temperature: 0.7,
+      top_p: 1
+    }
+  )
+
+  response.dig("choices", 0, "message", "content").strip
+end
+
+def extract_title_and_author_from_image(image_path)
+  client = OpenAI::Client.new
+  base64_image = Base64.strict_encode64(File.read(image_path))
+
+  response = client.chat(
+    parameters: {
+      model: "gpt-4-vision-preview",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: TITLE_PROMPT },
+            { type: "image_url", image_url: { url: "data:image/png;base64,#{base64_image}" } }
+          ]
+        }
+      ],
+    }
+  )
+
+  response.dig("choices", 0, "message", "content").strip
+rescue
+  nil
+end
+
+pdf_path = ARGV[0]
+
+# Extract text from the first page of the PDF
+text = extract_text_from_pdf(pdf_path)
+
+# If text extraction fails, convert the first page to an image and use OpenAI API
+if text.nil?
+  image_path = 'first_page.jpg'
+  system("pdftoppm -jpeg -f 1 -l 1 #{pdf_path} > #{image_path}")
+  title_and_author = extract_title_and_author_from_image(image_path)
+  File.delete(image_path)
+else
+  title_and_author = extract_title_and_author_from_text(text)
+end
+
+if title_and_author
+  new_pdf_name = "#{title_and_author}.pdf"
+  new_pdf_path = new_pdf_name.gsub(/[^\w\-\. ]/, '_')
+  File.rename(pdf_path, new_pdf_path)
+  puts "PDF renamed to: #{new_pdf_path}"
+else
+  puts "Failed to extract title and author from the PDF."
+end

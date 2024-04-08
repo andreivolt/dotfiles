@@ -1,0 +1,2 @@
+fc -ifl -m "*(#i)$1*" 1 | grep -i --color $1
+

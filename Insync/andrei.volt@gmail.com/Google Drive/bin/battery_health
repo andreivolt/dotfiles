@@ -1,0 +1,4 @@
+system_profiler SPPowerDataType -json | jq -r '
+	.SPPowerDataType[]
+	| select(._name == "spbattery_information")
+	| "capacity \(.sppower_battery_health_info.sppower_battery_health_maximum_capacity) (\(.sppower_battery_health_info.sppower_battery_cycle_count) cycles)"'

@@ -1,0 +1,38 @@
+#!/usr/bin/env bb
+
+(require '[cheshire.core :as json]
+         '[clojure.string :as str])
+
+(defn extract-post-id [quotelink]
+  (when-let [id (second (re-find #"#p(\d+)" quotelink))]
+    (parse-long id)))
+
+(defn find-post [posts post-id]
+  (some #(when (= (:no %) post-id) %) posts))
+
+(defn add-reply [post reply]
+  (update post :replies conj reply))
+
+(defn build-tree [posts]
+  (reduce (fn [acc post]
+            (let [parent-ids (map extract-post-id (re-seq #"<a href=\"#p\d+\" class=\"quotelink\">" (:com post)))
+                  post-with-replies (assoc post :replies [])]
+              (if (empty? parent-ids)
+                (conj acc post-with-replies)
+                (if-let [parent-post (find-post acc (first parent-ids))]
+                  (map (fn [p]
+                         (if (= (:no p) (:no parent-post))
+                           (add-reply p post-with-replies)
+                           p))
+                       acc)
+                  (conj acc post-with-replies)))))
+          []
+          posts))
+
+(defn -main []
+  (let [json-data (slurp "https://a.4cdn.org/g/thread/99505988.json")
+        data (json/parse-string json-data true)
+        posts (build-tree (:posts data))]
+    (println (json/generate-string posts {:pretty true}))))
+
+(-main)

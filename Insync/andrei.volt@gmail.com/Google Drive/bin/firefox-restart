@@ -1,0 +1,16 @@
+#!/bin/bash
+
+pgrep -f 'firefox-nightly|Nightly.app/Contents/MacOS/firefox' | while read -r pid; do
+    if ! ps -p "$pid" -o command | grep -q -- "-P\|--profile"; then
+        kill "$pid"
+        sleep 1
+        kill -9 "$pid" 2>/dev/null
+    fi
+done
+
+sleep 1
+if [ "$(uname)" = "Darwin" ]; then
+    open -a "Firefox Nightly"
+else
+    firefox-nightly
+fi

@@ -1,0 +1,27 @@
+#!/usr/bin/env -S pip-run pyobjc>=9.2
+
+import sys
+from pprint import pprint
+
+from Foundation import NSAppleScript
+
+s = NSAppleScript.alloc().initWithSource_(
+    'tell app "Safari" to {URL,name} of tabs of windows'
+)
+
+result, _ = s.executeAndReturnError_(None)
+
+num_windows = result.descriptorAtIndex_(1).numberOfItems()
+
+tabs = []
+
+for page_idx, win_num in enumerate(range(1, num_windows + 1), start=1):
+    urls = [result.descriptorAtIndex_(1).descriptorAtIndex_(page_idx).descriptorAtIndex_(tab_num).stringValue()
+            for tab_num in range(1, result.descriptorAtIndex_(1).descriptorAtIndex_(page_idx).numberOfItems() + 1)]
+    titles = [result.descriptorAtIndex_(2).descriptorAtIndex_(page_idx).descriptorAtIndex_(tab_num).stringValue()
+              for tab_num in range(1, result.descriptorAtIndex_(1).descriptorAtIndex_(page_idx).numberOfItems() + 1)]
+
+    for url, title in zip(urls, titles):
+        tabs.append(f"{title}\t{url}")
+
+print("\n".join(tabs))

@@ -1,0 +1,73 @@
+#!/usr/bin/env pip-run yt_dlp ffmpeg-python
+
+import argparse
+import sys
+import os
+import ffmpeg
+import yt_dlp
+from datetime import datetime
+
+parser = argparse.ArgumentParser()
+parser.add_argument("-s", "--start", help="start (HH:MM:SS)")
+parser.add_argument("-e", "--end", help="end (HH:MM:SS)")
+parser.add_argument("-o", "--output", help='output file name')
+parser.add_argument("video_url", help="URL")
+args = parser.parse_args()
+
+if not args.video_url:
+   sys.exit("missing URL")
+
+cache_dir = os.path.expanduser("~/.cache/yt-dlp")
+os.makedirs(cache_dir, exist_ok=True)
+
+ydl_opts = {
+   "quiet": True,
+   "outtmpl": os.path.join(cache_dir, "%(id)s.%(ext)s"),
+}
+
+with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+   video_meta = ydl.extract_info(args.video_url, download=False)
+   video_id = video_meta["id"]
+   video_ext = video_meta["ext"]
+   title = video_meta["title"].replace(" ", "_")
+   cached_video_path = os.path.join(cache_dir, f"{video_id}.{video_ext}")
+
+   if not os.path.exists(cached_video_path):
+       ydl.download([args.video_url])
+
+if sys.stdout.isatty():
+   if not args.output:
+       output_file_name = f"{title}_{args.start}-{args.end}_{video_id}.mp4"
+   else:
+       output_file_name = args.output
+else:
+   output_file_name = "pipe:"
+
+noverbose = ["-hide_banner", "-loglevel", "error"]
+
+try:
+   out, err = (
+       ffmpeg.input(cached_video_path, ss=args.start, to=args.end)
+       .output(
+           output_file_name,
+           vcodec="libx264",
+           crf=23,
+           preset="medium",
+           movflags="+faststart",
+           format="mp4" if output_file_name != "pipe:" else "mpegts",
+           **{"metadata:s:v:0": f"title={title}"}
+       )
+       .global_args("-y", *noverbose)
+       .run(capture_stdout=True, capture_stderr=True)
+   )
+except ffmpeg.Error as e:
+   print(f"FFmpeg error: {e.stderr.decode('utf-8')}")
+   sys.exit(1)
+
+if output_file_name == "pipe:":
+   sys.stdout.buffer.write(out)
+else:
+   if err:
+       print(f"Error: {err.decode('utf-8')}")
+       sys.exit(1)
+   print(output_file_name)

@@ -1,0 +1,69 @@
+#!/usr/bin/env lua
+
+local MAX_TEMP, MIN_TEMP, STEP = 6500, 1000, 100
+local TEMP_FILE = os.getenv("XDG_STATE_HOME") and (os.getenv("XDG_STATE_HOME") .. "/redshift_temp") or (os.getenv("HOME") .. "/.local/state/redshift_temp")
+
+local function file_exists(path)
+    local file = io.open(path, "r")
+    if file then
+        file:close()
+        return true
+    end
+    return false
+end
+
+local function read_file(path)
+    local file = io.open(path, "r")
+    if not file then return nil end
+    local content = file:read("*all")
+    file:close()
+    return content
+end
+
+local function write_file(path, content)
+    local file = io.open(path, "w")
+    if not file then return false end
+    file:write(content)
+    file:close()
+    return true
+end
+
+local function ensure_directory_exists(path)
+    local dir = path:match("(.*)/")
+    os.execute("mkdir -p " .. dir)
+end
+
+local function clamp(value, min, max)
+    return math.max(min, math.min(max, value))
+end
+
+if #arg == 0 then
+    print("Usage: " .. arg[0]:match("([^/]+)$") .. " [+|-][<number>] or <temperature>")
+    os.exit(1)
+end
+
+local current_temp = file_exists(TEMP_FILE) and tonumber(read_file(TEMP_FILE)) or 6500
+local input = arg[1]
+local new_temp
+
+if input == "+" then
+    new_temp = current_temp + STEP
+elseif input == "-" then
+    new_temp = current_temp - STEP
+elseif input:match("^[+-]%d+$") then
+    new_temp = current_temp + tonumber(input)
+elseif input:match("^%d+$") then
+    new_temp = tonumber(input)
+else
+    print("Invalid input. Usage: " .. arg[0]:match("([^/]+)$") .. " [+|-][<number>] or <temperature>")
+    os.exit(1)
+end
+
+new_temp = clamp(new_temp, MIN_TEMP, MAX_TEMP)
+
+ensure_directory_exists(TEMP_FILE)
+write_file(TEMP_FILE, tostring(new_temp))
+
+os.execute("pkill redshift")
+os.execute("redshift -O " .. new_temp .. " > /dev/null 2>&1 &")
+print("Temperature set to " .. new_temp .. "K")

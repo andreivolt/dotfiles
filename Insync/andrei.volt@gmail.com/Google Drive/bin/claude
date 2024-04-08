@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+
+import argparse
+import os
+import sys
+import tempfile
+import json
+from pathlib import Path
+
+sys.path.append(os.path.expanduser('~/drive/unofficial-claude2-api/'))
+from claude_api.client import (ClaudeAPIClient, MessageRateLimitError,
+                               SendMessageResponse)
+from claude_api.session import SessionData
+
+script_path = Path(sys.argv[0] if __file__ is None else __file__).resolve().parent
+
+def main():
+    parser = argparse.ArgumentParser(description='Interact with Claude API')
+    parser.add_argument('prompt', nargs='?', default='', help='Chat prompt')
+    parser.add_argument('--attach', nargs='*', help='File paths for attachments', default=[])
+    parser.add_argument('--list-chats', action='store_true', help='List all chat IDs')
+    parser.add_argument('--delete-chat', help='Delete a specific chat by ID')
+    parser.add_argument('--delete-all', action='store_true', help='Delete all chats')
+    parser.add_argument('--chat-data', help='Get data for a specific chat ID')
+    parser.add_argument('--model', default=None, choices=['claude-2.0', 'claude-2.1', 'claude-3-haiku-20240307', 'claude-3-opus-20240229', 'claude-3-sonnet-20240229'], help='Specify the Claude model to use')
+    parser.add_argument('--id', help='Specify the chat ID (use "last" for the previous conversation)')
+    parser.add_argument('--discard', action='store_true', help='Discard the chat after completion')
+    parser.add_argument('-o', '--open-browser', action='store_true', help='Open browser with chat after response')
+    parser.add_argument('--stream', action='store_true', help='Stream the response as it arrives')
+
+    args, unknown_args = parser.parse_known_args()
+
+    temp_files = []
+
+    if not sys.stdin.isatty():
+        piped_input = sys.stdin.read().strip()
+        # Write piped input to a temporary file
+        fd, tmp_file_path = tempfile.mkstemp(suffix='.txt')
+        with os.fdopen(fd, 'w', encoding='utf-8') as tmp_file:
+            tmp_file.write(piped_input)
+        temp_files.append(tmp_file_path)
+        args.attach.append(tmp_file_path)
+        combined_prompt = args.prompt.strip()
+    else:
+        combined_prompt = ' '.join([args.prompt] + unknown_args)
+
+    cookie_header_value = os.getenv('CLAUDE_COOKIE')
+    if not cookie_header_value:
+        print("Cookie not set in environment variable 'CLAUDE_COOKIE'")
+        quit()
+
+    user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    organization_id = os.getenv('CLAUDE_ORGANIZATION_ID')
+    session = SessionData(cookie_header_value, user_agent, organization_id)
+    client = ClaudeAPIClient(session, timeout=240, model_name=args.model)
+
+    if args.list_chats:
+        chat_ids = client.get_all_chat_ids()
+        for chat_id in chat_ids:
+            print(chat_id)
+    elif args.delete_chat:
+        success = client.delete_chat(args.delete_chat)
+        if success:
+            print(f"Chat {args.delete_chat} deleted successfully.")
+        else:
+            print(f"Failed to delete chat {args.delete_chat}.")
+    elif args.delete_all:
+        success = client.delete_all_chats()
+        if success:
+            print("All chats deleted successfully.")
+        else:
+            print("Failed to delete all chats.")
+    elif args.chat_data:
+        chat_data = client.get_chat_data(args.chat_data)
+        print(json.dumps(chat_data))
+    else:
+        last_conversation_dir = os.path.join(os.environ.get('XDG_STATE_HOME', os.path.expanduser('~/.local/state')), 'claude')
+        last_conversation_file = os.path.join(last_conversation_dir, 'last_conversation_id')
+
+        if not os.path.exists(last_conversation_dir):
+            os.makedirs(last_conversation_dir)
+
+        if args.id:
+            if args.id.lower() == 'last':
+                if os.path.exists(last_conversation_file):
+                    with open(last_conversation_file, 'r') as f:
+                        chat_id = f.read().strip()
+                else:
+                    print("No previous conversation found.")
+                    quit()
+            else:
+                chat_id = args.id
+        else:
+            chat_id = client.create_chat()
+            print(chat_id)
+            if not chat_id:
+                print("\nMessage limit hit, cannot create chat...")
+                quit()
+
+        try:
+            if args.stream:
+                for chunk in client.send_message_stream(chat_id, combined_prompt, attachment_paths=args.attach):
+                    print(chunk, end='', flush=True)
+                print()  # Ensure newline after streaming
+                with open(last_conversation_file, 'w') as f:
+                    f.write(chat_id)
+                if args.discard:
+                    client.delete_chat(chat_id)
+                if args.open_browser:
+                    import webbrowser
+                    url = f'https://claude.ai/chat/{chat_id}'
+                    webbrowser.open(url)
+            else:
+                res: SendMessageResponse = client.send_message(chat_id, combined_prompt, attachment_paths=args.attach)
+                if res.answer:
+                    print(res.answer)
+                    with open(last_conversation_file, 'w') as f:
+                        f.write(chat_id)
+                    if args.discard:
+                        client.delete_chat(chat_id)
+                    if args.open_browser:
+                        import webbrowser
+                        url = f'https://claude.ai/chat/{chat_id}'
+                        webbrowser.open(url)
+                else:
+                    print(f"\nError code {res.status_code}, response -> {res.raw_answer}")
+        except MessageRateLimitError as e:
+            print(f"\nMessage limit hit, resets at {e.reset_date}")
+            quit()
+        finally:
+            # Clean up temporary files
+            for temp_file in temp_files:
+                os.unlink(temp_file)
+
+if __name__ == "__main__":
+    main()

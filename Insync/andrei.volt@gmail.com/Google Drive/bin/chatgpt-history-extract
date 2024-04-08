@@ -1,0 +1,20 @@
+#!/usr/bin/env ruby
+
+require 'fileutils'
+
+downloads_dir = File.expand_path('~/Downloads')
+
+latest_file = Dir.entries(downloads_dir)
+  .select { |file| file.match?(%r{^[0-9a-f]{64}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}\.zip$}) }
+  .map { |file| File.join(downloads_dir, file) }
+  .max_by { |file| File.mtime(file) }
+
+abort "No files found." if latest_file.nil?
+
+destination_dir = File.expand_path('~/drive/chatgpt')
+FileUtils.mkdir_p(destination_dir)
+
+system("unzip", "-o", "-d", destination_dir, latest_file)
+File.delete(latest_file)
+
+puts "Extraction complete."

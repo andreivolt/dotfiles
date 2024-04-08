@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+if [ -z "$1" ]; then
+		echo "Usage: $0 <device_name>"
+		exit 1
+fi
+
+AUTH="${TAILSCALE_API_KEY}:"
+API_BASE_URL="https://api.tailscale.com/api/v2"
+
+FULL_HOSTNAME="${1}.${TAILSCALE_NET}"
+
+DEVICE_ID=$(curl -s -u "${AUTH}" "${API_BASE_URL}/tailnet/${TAILSCALE_ORG}/devices" | \
+		jq -r --arg hostname "${FULL_HOSTNAME}" '.devices[] | select(.name == $hostname) | .id')
+
+if [ -z "$DEVICE_ID" ]; then
+		echo "Error: Device '${FULL_HOSTNAME}' not found."
+		exit 1
+fi
+
+RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -u "${AUTH}" -X DELETE "${API_BASE_URL}/device/${DEVICE_ID}")
+
+if [ "$RESPONSE" -eq 200 ]; then
+		echo "Device '${FULL_HOSTNAME}' deleted."
+else
+		echo "Error: Failed to delete device '${FULL_HOSTNAME}'. HTTP Status Code: $RESPONSE"
+fi

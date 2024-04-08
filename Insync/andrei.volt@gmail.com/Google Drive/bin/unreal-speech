@@ -1,0 +1,78 @@
+#!/usr/bin/env ruby
+
+require 'bundler/inline'
+
+gemfile do
+  source :rubygems
+  gem 'parallel'
+  gem 'httparty', '~> 0.2'
+end
+
+require 'json'
+require 'optparse'
+
+options = {
+  voice_id: 'Liv',
+  bitrate: '320k',
+  speed: '0.5',
+  pitch: '1.0',
+  codec: 'libmp3lame',
+  temperature: 0.5
+}
+
+OptionParser.new do |opts|
+  opts.on('-v', '--voice_id VOICE', "Voice ID (Scarlett, Dan, Liv, Will, Amy) (default: #{options[:voice_id]})")
+  opts.on('-b', '--bitrate BITRATE', "Bitrate (320k, 256k, 192k, ...) (default: #{options[:bitrate]})")
+  opts.on('-s', '--speed SPEED', "Speed (-1.0 to 1.0) (default: #{options[:speed]})")
+  opts.on('-p', '--pitch PITCH', "Pitch (0.5 to 1.5) (default: #{options[:pitch]})")
+  opts.on('-c', '--codec CODEC', "Codec (libmp3lame, pcm_mulaw, pcm_s16le) (default: #{options[:codec]})")
+  opts.on('-t', '--temperature TEMP', Float, "Temperature (0.1 to 0.8) (default: #{options[:temperature]})")
+end.parse!(into: options)
+
+text = ARGV.empty? ? $stdin.read : ARGV.join(' ')
+
+def split_text(text, max_length)
+  text
+    .split(/(?<=\.|\?|!)/)
+    .map(&:strip)
+    .each_with_object([]) do |sentence, chunks|
+      if chunks.empty? || chunks.last.length + sentence.length > max_length
+        chunks << sentence
+      else
+        chunks.last << " #{sentence}"
+      end
+    end
+end
+
+def synthesize_speech(text_chunk, options, stream: true)
+  endpoint = stream ? 'stream' : 'speech'
+  uri = "https://api.v6.unrealspeech.com/#{endpoint}"
+  body = {
+    Text: text_chunk,
+    VoiceId: options[:voice_id],
+    Bitrate: options[:bitrate],
+    Pitch: options[:pitch],
+    Speed: options[:speed],
+    Codec: options[:codec],
+    Temperature: options[:temperature]
+  }
+  response = HTTParty.post uri,
+    body: body.to_json,
+    headers: {
+      'Content-Type' => 'application/json',
+      'Authorization' => "Bearer #{ENV['UNREAL_SPEECH_API_KEY']}"
+    }
+  if endpoint == 'speech'
+    JSON.parse(response.body)['OutputUri']
+  else
+    response.body
+  end
+end
+
+if text.length <= 500
+  IO.popen(%w[play --type mp3 -], 'w') { |f| f.write(synthesize_speech(text, options)) }
+else
+  text_chunks = split_text(text, 3000)
+  output_uris = Parallel.map(text_chunks) { |chunk| synthesize_speech(chunk, options, stream: false) }
+  output_uris.each { |uri| `play #{uri}` }
+end

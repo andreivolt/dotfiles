@@ -1,0 +1,128 @@
+#!/usr/bin/env ruby
+require "bundler/inline"
+$VERBOSE = nil
+gemfile do
+  source :rubygems
+  gem "ruby-openai"
+  gem 'uri', '0.13.1'
+  gem 'base64'
+end
+
+require 'openai'
+require 'base64'
+require 'json'
+require 'optparse'
+require 'tempfile'
+require 'uri'
+
+MAX_IMAGE_SIZE = 20 * 1024 * 1024
+MAX_TOKENS = 4096
+
+options = {
+  prompt: "What's in this image?",
+  capture: false,
+  detail: "auto",
+}
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{__FILE__} [options] [<file>...]"
+  opts.on("-p", "--prompt=PROMPT", "Set a custom prompt text (default: #{options[:prompt]})")
+  opts.on("-c", "--capture", "Capture a region using macOS screencapture (default: #{options[:capture]})")
+  opts.on("-d", "--detail=DETAIL", "Set detail level: low, high, or auto (default: #{options[:detail]})")
+end.parse!(into: options)
+
+abort "missing OpenAI API key" if ENV["OPENAI_API_KEY"].nil?
+
+images = ARGV.flat_map do |file|
+  abort "File not found: #{file}" unless File.file?(file)
+  ext = File.extname(file).downcase
+  case ext
+  when ".pdf"
+    Tempfile.create(['pdf_page', '.png']) do |temp_file|
+      system("magick -density 300 -quality 100 #{file} #{temp_file.path}-%03d.png")
+      Dir.glob("#{temp_file.path}-*.png").sort.map do |page_file|
+        image_data = if File.size(page_file) > MAX_IMAGE_SIZE
+          output = `magick identify -format "%w %h" #{page_file}`
+          width, height = output.split.map(&:to_i)
+          scale = Math.sqrt(MAX_IMAGE_SIZE.to_f / File.size(page_file))
+          new_width, new_height = (width * scale).to_i, (height * scale).to_i
+          Tempfile.create(['resized', '.png']) do |resize_file|
+            system("magick #{page_file} -resize #{new_width}x#{new_height} PNG:#{resize_file.path}")
+            File.read(resize_file.path)
+          end
+        else
+          File.read(page_file)
+        end
+        File.delete(page_file)
+        image_data
+      end
+    end
+  when ".png", ".jpg", ".jpeg", ".gif", ".webp"
+    [File.read(file)]
+  else
+    abort "Unsupported file format: #{file}"
+  end
+end
+
+if options[:capture]
+  Tempfile.create(["captured", ".png"]) do |tempfile|
+    `screencapture -i -s -t png #{tempfile.path}`
+    images << File.read(tempfile.path)
+  end
+elsif !$stdin.tty?
+  images << $stdin.read
+end
+
+abort "Please provide at least one valid file as a positional argument, use the -c option to capture a region, or pipe the image data to stdin." if images.empty?
+
+total_tokens = options[:prompt].split.size
+image_contents = []
+
+images.each do |image_data|
+  image_tokens = Tempfile.create(['temp_image', '.png']) do |temp_file|
+    File.write(temp_file.path, image_data)
+    output = `magick identify -format "%w %h" #{temp_file.path}`
+    width, height = output.split.map(&:to_i)
+
+    case options[:detail]
+    when "low" then 85
+    when "high"
+      tiles = ((width.to_f / 512).ceil * (height.to_f / 512).ceil).to_i
+      85 + (tiles * 170)
+    else 85
+    end
+  end
+
+  if image_contents.empty? || total_tokens + image_tokens <= MAX_TOKENS
+    total_tokens += image_tokens
+    image_contents << {
+      type: "image_url",
+      image_url: {
+        url: "data:image/png;base64,#{Base64.strict_encode64(image_data)}",
+        detail: options[:detail]
+      }
+    }
+  else
+    break
+  end
+end
+
+client = OpenAI::Client.new(access_token: ENV["OPENAI_API_KEY"])
+
+response = client.chat(
+  parameters: {
+    model: "gpt-4-vision-preview",
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: options[:prompt] },
+          *image_contents
+        ]
+      }
+    ],
+    max_tokens: 300
+  }
+)
+
+puts response.dig("choices", 0, "message", "content")

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+yt-dlp -j --flat-playlist "$1" | while read -r line; do
+  echo "$line" | jq -r .url 2>/dev/null
+done

@@ -1,0 +1,37 @@
+#!/usr/bin/env pip-run yt_dlp
+
+import yt_dlp
+import os
+from datetime import datetime
+import shutil
+import sys
+import subprocess
+import tempfile
+
+url = sys.argv[1]
+
+with yt_dlp.YoutubeDL() as ydl:
+    metadata = ydl.extract_info(url, download=False)
+
+upload_date = datetime.strptime(metadata["upload_date"], "%Y%m%d").date()
+filename = (
+    f"{metadata['title']} [{metadata['id']}] ({upload_date.strftime('%Y-%m-%d')}).mkv"
+)
+
+tempdir = tempfile.mkdtemp()
+filepath = os.path.join(tempdir, filename)
+
+with yt_dlp.YoutubeDL(
+    {
+        "format": "bestvideo[height<=480]+bestaudio/best",
+        "merge_output_format": "mkv",
+        "outtmpl": filepath,
+    }
+) as ydl:
+    ydl.download([url])
+
+subprocess.run(
+    ["rclone", "copyto", filepath, f"gdrive:yt-archive/{filename}"], check=True
+)
+
+shutil.rmtree(tempdir)

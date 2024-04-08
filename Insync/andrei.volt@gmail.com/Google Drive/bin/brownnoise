@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+play -c 2 --null synth brownnoise reverb bass 12 treble -6
