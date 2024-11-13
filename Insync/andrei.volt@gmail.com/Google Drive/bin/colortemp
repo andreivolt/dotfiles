@@ -1,4 +1,7 @@
-#!/usr/bin/env lua
+#!/usr/bin/env cached-nix-shell
+--[[
+#! nix-shell -i lua -p lua
+]]
 
 local MAX_TEMP, MIN_TEMP, STEP = 6500, 1000, 100
 local TEMP_FILE = os.getenv("XDG_STATE_HOME") and (os.getenv("XDG_STATE_HOME") .. "/redshift_temp") or (os.getenv("HOME") .. "/.local/state/redshift_temp")

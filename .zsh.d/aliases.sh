@@ -6,7 +6,6 @@ alias lla="ll -a"
 alias ls="eza"
 
 alias cal="cal -m"
-alias diff="colordiff --nobanner"
 alias gc='git clone --depth 1'
 alias gist="gh gist"
 alias gron="fastgron"
