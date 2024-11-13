@@ -22,9 +22,5 @@ spoon.SpoonInstall:andUse("WinWin", {
   repo = "default" -- Repository where WinWin is located
 })
 
--- require("finder")
-
-require("terminal")
-
 local redshift = require('redshift')
 redshift.init()
