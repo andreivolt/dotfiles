@@ -34,7 +34,7 @@ vim.opt.cmdwinheight = 10
 vim.opt.completeopt = "menu,menuone,noselect"
 vim.opt.confirm = true
 vim.opt.fillchars = { eob = " " }
-vim.opt.guifont = "Iosevka Nerd Font Mono:h22:w-3:#h-none"
+vim.opt.guifont = "Iosevka Nerd Font Mono:h24:w-3:#h-none"
 vim.opt.ignorecase = true
 vim.opt.infercase = true
 vim.opt.laststatus = 0
@@ -120,3 +120,35 @@ vim.keymap.set('c', '<S-Tab>', function()
         return '<S-Tab>'
     end
 end, { expr = true })
+
+-- " command mode movement
+-- cnoremap <C-a> <Home>
+-- cnoremap <C-e> <End>
+-- cnoremap <C-p> <Up>
+-- cnoremap <C-n> <Down>
+-- cnoremap <C-b> <Left>
+-- cnoremap <C-f> <Right>
+-- cnoremap <M-b> <S-Left>
+-- cnoremap <M-f> <S-Right>
+--
+-- " lisp case movement
+-- set iskeyword+=-
+--
+-- set fillchars=stl:\ ,stlnc:\ ,vert:│
+--
+-- " hide messages after 1.5s
+-- set updatetime=1500 | autocmd CursorHold * :echo
+--
+-- " windows
+-- nmap <silent> <C-h> :wincmd h<CR> | nmap <silent> <C-j> :wincmd j<CR> | nmap <silent> <C-k> :wincmd k<CR> | nmap <silent> <C-l> :wincmd l<CR>
+-- " arglist
+-- nnoremap <leader>an :next<cr> | nnoremap <leader>ap :prev<cr>
+-- " quickfix
+-- nnoremap <leader>cn :cnext<cr> | nnoremap <leader>cp :cprev<cr>
+-- " select last inserted text
+-- nnoremap gV '[V']
+-- " toggle line numbers
+-- map <silent> <leader>tn :set number!<CR>
+-- " fuzzy find
+-- nnoremap <silent> <leader>b :FuzzyBuffer<CR>
+-- nnoremap <silent> <leader>f :FuzzyOpen<CR>

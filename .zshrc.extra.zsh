@@ -97,6 +97,7 @@ source ~/.zsh.d/global-aliases.zsh
 source ~/.zsh.d/prompt.zsh
 
 export DELTA_PAGER='less -R'
+export LESS='--RAW-CONTROL-CHARS --LONG-PROMPT --ignore-case --no-init --quit-if-one-screen'
 
 export GPG_TTY="$(tty)"
 
