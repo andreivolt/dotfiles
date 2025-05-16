@@ -1,0 +1,85 @@
+#!/usr/bin/env -S uv run -qs
+# /// script
+# dependencies = ["click", "firecrawl-py", "pydantic"]
+# ///
+import os
+import click
+import json
+from firecrawl import FirecrawlApp
+
+def output_result(result, json_output=False):
+    if json_output:
+        click.echo(json.dumps(result, indent=2))
+    elif isinstance(result, dict) and 'markdown' in result:
+        click.echo(result['markdown'])
+    else:
+        click.echo(str(result))
+
+@click.group()
+@click.pass_context
+@click.option('--json', 'json_output', is_flag=True, help="Output results as JSON")
+def cli(ctx, json_output):
+    api_key = os.environ.get('FIRECRAWL_API_KEY')
+    if not api_key:
+        click.echo(click.style("FIRECRAWL_API_KEY environment variable is not set", fg='red'))
+        ctx.exit(1)
+    ctx.obj = {
+        'app': FirecrawlApp(api_key=api_key),
+        'json_output': json_output
+    }
+
+@cli.command()
+@click.argument('url')
+@click.option('--format', multiple=True, type=click.Choice(['markdown', 'html']), help='Output format')
+@click.pass_obj
+def scrape(obj, url, format):
+    """Scrape a single URL"""
+    app = obj['app']
+    json_output = obj['json_output']
+    params = {'formats': list(format)} if format else None
+    try:
+        result = app.scrape_url(url, params=params)
+        output_result(result, json_output)
+    except Exception as e:
+        click.echo(click.style(f"Error: {str(e)}", fg='red'))
+
+@cli.command()
+@click.argument('url')
+@click.option('--limit', type=int, help='Maximum number of pages to crawl')
+@click.option('--format', multiple=True, type=click.Choice(['markdown', 'html']), default=['markdown'], help='Output format')
+@click.pass_obj
+def crawl(obj, url, limit, format):
+    """Crawl a website"""
+    app = obj['app']
+    json_output = obj['json_output']
+    params = {
+        'limit': limit,
+        'scrapeOptions': {'formats': list(format)}
+    }
+    try:
+        result = app.crawl_url(url, params=params)
+        output_result(result, json_output)
+    except Exception as e:
+        click.echo(click.style(f"Error: {str(e)}", fg='red'))
+
+@cli.command()
+@click.argument('url')
+@click.option('--exclude-subdomains', is_flag=True, help='Exclude subdomains')
+@click.option('--use-sitemap', is_flag=True, help='Use sitemap for mapping')
+@click.pass_obj
+def map(obj, url, exclude_subdomains, use_sitemap):
+    """Map a website"""
+    app = obj['app']
+    json_output = obj['json_output']
+    params = {
+        'excludeSubdomains': exclude_subdomains,
+        'useSitemap': use_sitemap
+    }
+    try:
+        result = app.map_url(url, params=params)
+        output_result(result, json_output)
+    except Exception as e:
+        click.echo(click.style(f"Error: {str(e)}", fg='red'))
+
+if __name__ == '__main__':
+    cli()

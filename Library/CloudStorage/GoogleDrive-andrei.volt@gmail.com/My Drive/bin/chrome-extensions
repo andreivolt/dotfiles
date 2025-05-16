@@ -1,0 +1,46 @@
+#!/usr/bin/env ruby
+
+require 'bundler/inline'
+
+gemfile(quiet: true) do
+  source :rubygems
+  gem 'nokogiri'
+  gem 'parallel'
+end
+
+require 'open-uri'
+
+excluded_extensions = [
+  'aapocclcgogkmnckokdopfmhonfmgoek', # Slides
+  'aohghmighlieiainnegkcijnfilokake', # Docs
+  'apdfllckaahabafndbhieahigkjlhalf', # Google Drive
+  'blpcfgokakmgnkcojhhkbfbldkacnbeo', # YouTube
+  'felcaaldnbdncclmgdcncolpebgiejap', # Sheets
+  'ghbmnnjooekpmoecnnnilnnbdlolhkhi', # Google Docs Offline
+  'hmjkmjkepdijhoojdojkdfohbdgmmhki', # Google Keep - Notes and Lists
+  'pjkljhegncpnkpknbcohdijeoejaedia', # Gmail
+  'jeogkiiogjbmhklcnbgkdcjoioegiknm', # Slack
+]
+
+profile_path = File.join(ENV['HOME'], {
+  'linux' => '.config/google-chrome/Default',
+  'darwin' => 'Library/Application Support/Google/Chrome/Default'
+}[Gem::Platform.local.os])
+
+def get_extension_info(extension_id)
+  url = "https://chrome.google.com/webstore/detail/#{extension_id}?hl=en"
+  doc = Nokogiri::HTML(URI.open(url))
+  name = doc.title.strip.gsub(/ - Chrome Web Store/, '')
+  [extension_id, name]
+rescue OpenURI::HTTPError
+  nil
+end
+
+extension_ids = Dir.entries(File.join(profile_path, 'Extensions'))
+                   .reject { |id| excluded_extensions.include?(id) }
+
+extension_info = Parallel.map(extension_ids) do |id|
+  get_extension_info(id)
+end.compact.sort_by(&:last)
+
+puts extension_info.map { |line| line.join("\t") }

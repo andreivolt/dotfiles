@@ -13,6 +13,7 @@ vim.filetype.add({
           ["pipx%s+run"] = "python",
           ["racket"] = "racket",
           ["rust%-script"] = "rust",
+          ["uv%s+run"] = "python",
         }
         local interpreter_to_filetype = {
           ["bash"] = "bash",

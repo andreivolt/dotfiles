@@ -1,0 +1,409 @@
+#!/usr/bin/env -S uv run -qs
+# /// script
+# dependencies = ["lifxlan", "click"]
+# ///
+
+import os
+import sys
+import json
+from pathlib import Path
+from lifxlan import LifxLAN, Light, BLUE, GREEN, RED, YELLOW, ORANGE, PURPLE, CYAN, WHITE
+import click
+
+PREDEFINED_COLORS = {
+    "Red": RED,
+    "Green": GREEN,
+    "Blue": BLUE,
+    "Yellow": YELLOW,
+    "Orange": ORANGE,
+    "Purple": PURPLE,
+    "Cyan": CYAN,
+    "White": WHITE,
+}
+
+CACHE_FILE_NAME = "lifx.json"
+
+def get_cache_file_path():
+    xdg_state_home = os.environ.get('XDG_STATE_HOME', Path.home() / '.local' / 'state')
+    cache_dir = Path(xdg_state_home)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / CACHE_FILE_NAME
+    return cache_file
+
+def load_cache(cache_file):
+    try:
+        with open(cache_file, 'r') as f:
+            cached_lights = json.load(f)
+        return cached_lights
+    except:
+        return None
+
+def save_cache(cache_file, lights):
+    try:
+        with open(cache_file, 'w') as f:
+            json.dump([{
+                'label': light.get_label(),
+                'ip_addr': light.get_ip_addr(),
+                'mac_addr': light.get_mac_addr(),
+                'power': light.get_power(),
+                'color': light.get_color(),
+            } for light in lights], f, indent=4)
+    except:
+        pass
+
+def hex_to_hsbk(hex_color):
+    hex_color = hex_color.lstrip('#')
+    if len(hex_color) != 6:
+        return None
+    try:
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        max_val = max(r, g, b)
+        min_val = min(r, g, b)
+        delta = max_val - min_val
+        brightness = max_val / 255 * 65535
+        saturation = (delta / max_val) * 65535 if max_val != 0 else 0
+        if delta == 0:
+            hue = 0
+        elif max_val == r:
+            hue = (60 * ((g - b) / delta) + 360) % 360
+        elif max_val == g:
+            hue = (60 * ((b - r) / delta) + 120) % 360
+        elif max_val == b:
+            hue = (60 * ((r - g) / delta) + 240) % 360
+        hue = int(hue / 360 * 65535)
+        kelvin = 3500
+        return [hue, int(saturation), int(brightness), kelvin]
+    except:
+        return None
+
+def hsv_to_hsbk(hsv_color):
+    """Convert HSV string (e.g., '180,50,75') to HSBK format."""
+    try:
+        h, s, v = map(float, hsv_color.split(','))
+        if not (0 <= h <= 360 and 0 <= s <= 100 and 0 <= v <= 100):
+            return None
+
+        # Convert to LIFX HSBK format
+        hue = int(h / 360 * 65535)
+        saturation = int(s / 100 * 65535)
+        brightness = int(v / 100 * 65535)
+        kelvin = 3500  # Default color temperature
+
+        return [hue, saturation, brightness, kelvin]
+    except:
+        return None
+
+def kelvin_to_hsbk(kelvin):
+    try:
+        kelvin = int(kelvin[:-1])
+    except:
+        return None
+    if kelvin < 1500:
+        kelvin = 1500
+    elif kelvin > 9000:
+        kelvin = 9000
+    hue = 0
+    saturation = 0
+    brightness = 65535
+    return [hue, saturation, brightness, kelvin]
+
+def add_duration_option(f):
+    return click.option(
+        '--duration', '-d',
+        type=float,
+        default=0.0,
+        show_default=True,
+        help='Set transition duration in seconds (default: 0).'
+    )(f)
+
+def add_target_options(f):
+    f = click.option(
+        '--all', '-a',
+        'all_lights',
+        is_flag=True,
+        default=False,
+        help='Apply actions to all discovered lights.'
+    )(f)
+    f = click.option(
+        '--group', '-g',
+        type=str,
+        help='Specify a group name to apply actions.'
+    )(f)
+    f = click.option(
+        '--name', '-n',
+        multiple=True,
+        help='Specify the name(s) of the light(s) to control.'
+    )(f)
+    return f
+
+@click.group()
+@add_target_options
+@click.pass_context
+def cli(ctx, all_lights, group, name):
+    ctx.ensure_object(dict)
+    ctx.obj['all_lights'] = all_lights
+    ctx.obj['group'] = group
+    ctx.obj['name'] = name
+
+@cli.command(name='list', short_help='List all discovered LIFX lights.')
+@click.option('--rescan', '-r',
+              is_flag=True,
+              default=False,
+              help='Invalidate cache and rescan for devices.')
+@click.option('--json', '-j',
+              'json_output',
+              is_flag=True,
+              default=False,
+              help='Output in JSON format.')
+def list_lights(rescan, json_output):
+    lifx = LifxLAN()
+    cache_file = get_cache_file_path()
+    if rescan or not cache_file.exists():
+        if not json_output:
+            print("Scanning for LIFX devices on the network...")
+        lights = lifx.get_lights()
+        if not json_output:
+            print(f"Discovered {len(lights)} light(s).\n")
+        save_cache(cache_file, lights)
+    else:
+        cached_lights = load_cache(cache_file)
+        if cached_lights:
+            lights = []
+            for light_data in cached_lights:
+                try:
+                    light = Light(light_data['mac_addr'], light_data['ip_addr'])
+                    lights.append(light)
+                except:
+                    pass
+            if not lights:
+                if not json_output:
+                    print("Cache is empty or corrupted. Rescanning...")
+                lights = lifx.get_lights()
+                save_cache(cache_file, lights)
+                if not json_output:
+                    print(f"Discovered {len(lights)} light(s).\n")
+
+    if not lights:
+        if json_output:
+            click.echo(json.dumps({"lights": []}))
+        else:
+            print("No LIFX lights found on the network.")
+        return
+
+    if json_output:
+        light_list = []
+        for light in lights:
+            try:
+                color = light.get_color()
+                light_data = {
+                    "label": light.get_label(),
+                    "ip_address": light.get_ip_addr(),
+                    "mac_address": light.get_mac_addr(),
+                    "power": "On" if light.get_power() > 0 else "Off",
+                    "color": {
+                        "hue": round(color[0]/65535*360, 1),
+                        "saturation": round(color[1]/65535*100, 1),
+                        "brightness": round(color[2]/65535*100, 1),
+                        "kelvin": color[3]
+                    } if color else None,
+                    "brightness": round(color[2]/65535*100 if color else 0, 1)
+                }
+                light_list.append(light_data)
+            except:
+                pass
+        click.echo(json.dumps(light_list, indent=2))
+        return
+
+    print(f"Found {len(lights)} LIFX light(s):\n")
+    for idx, light in enumerate(lights, start=1):
+        try:
+            label = light.get_label()
+            ip_addr = light.get_ip_addr()
+            mac_addr = light.get_mac_addr()
+            power = "On" if light.get_power() > 0 else "Off"
+            color = light.get_color()
+            brightness = color[2] / 65535 if color else 0.0
+            if color:
+                color_formatted = (
+                    f"Hue: {color[0]/65535*360:.1f}°, "
+                    f"Saturation: {color[1]/65535*100:.1f}%, "
+                    f"Brightness: {color[2]/65535*100:.1f}%, "
+                    f"Kelvin: {color[3]}"
+                )
+            else:
+                color_formatted = "N/A"
+            print(f"Light {idx}:")
+            print(f"  Label      : {label}")
+            print(f"  IP Address : {ip_addr}")
+            print(f"  MAC Address: {mac_addr}")
+            print(f"  Power      : {power}")
+            print(f"  Color      : {color_formatted}")
+            print(f"  Brightness : {brightness * 100:.1f}%\n")
+        except:
+            print(f"  Could not retrieve information for light {idx}.\n")
+
+cli.add_command(list_lights, name='l')
+
+@cli.command(name='power', short_help='Set power state of LIFX lights.')
+@add_target_options
+@add_duration_option
+@click.argument('state', type=click.Choice(['on', 'off']))
+@click.pass_context
+def power(ctx, all_lights, group, name, duration, state):
+    all_lights = all_lights or ctx.obj.get('all_lights')
+    group = group or ctx.obj.get('group')
+    name = name or ctx.obj.get('name')
+    lifx, lights = get_lights(all_lights, group, name)
+    duration_ms = int(duration * 1000)  # Convert seconds to milliseconds
+    try:
+        for light in lights:
+            light.set_power(state, duration=duration_ms)
+            print(f"Set power of '{light.get_label()}' to '{state}'.")
+    except:
+        print("Failed to set power.")
+    print("\nAll specified actions have been executed.")
+
+cli.add_command(power, name='p')
+
+@cli.command(name='color', short_help='Set color of LIFX lights.')
+@add_target_options
+@add_duration_option
+@click.argument('color_arg', type=str)
+@click.pass_context
+def color(ctx, all_lights, group, name, duration, color_arg):
+    all_lights = all_lights or ctx.obj.get('all_lights')
+    group = group or ctx.obj.get('group')
+    name = name or ctx.obj.get('name')
+    lifx, lights = get_lights(all_lights, group, name)
+    if color_arg.startswith('#'):
+        color_value = hex_to_hsbk(color_arg)
+        if not color_value:
+            print(f"Invalid hex color format: '{color_arg}'. Use '#RRGGBB'.")
+            sys.exit(1)
+    elif color_arg.endswith('k'):
+        color_value = kelvin_to_hsbk(color_arg)
+        if not color_value:
+            print(f"Invalid kelvin format: '{color_arg}'. Use format like '3500k'.")
+            sys.exit(1)
+    elif color_arg in PREDEFINED_COLORS:
+        color_value = PREDEFINED_COLORS[color_arg]
+    elif ',' in color_arg and len(color_arg.split(',')) == 3:
+        color_value = hsv_to_hsbk(color_arg)
+        if not color_value:
+            print(f"Invalid HSV format: '{color_arg}'. Use 'hue,saturation,value' (e.g., '180,50,75').")
+            print("Hue: 0-360, Saturation: 0-100, Value: 0-100")
+            sys.exit(1)
+    else:
+        try:
+            h, s, b, k = map(int, color_arg.split(','))
+            if not (0 <= h <= 65535 and 0 <= s <= 65535 and 0 <= b <= 65535 and 1500 <= k <= 9000):
+                print("HSBK values out of range.")
+                sys.exit(1)
+            color_value = [h, s, b, k]
+        except:
+            print(f"Invalid color format: '{color_arg}'. Use one of:")
+            print("- Predefined color name (Red, Green, Blue, etc.)")
+            print("- Hex color '#RRGGBB'")
+            print("- Color temperature 'Nk' (e.g., '3500k')")
+            print("- HSV values 'hue,saturation,value' (e.g., '180,50,75')")
+            print("- HSBK values 'hue,saturation,brightness,kelvin'")
+            sys.exit(1)
+    duration_ms = int(duration * 1000)  # Convert seconds to milliseconds
+    try:
+        for light in lights:
+            light.set_color(color_value, duration=duration_ms)
+            print(f"Set color of '{light.get_label()}' to '{color_arg}'.")
+    except:
+        print("Failed to set color.")
+    print("\nAll specified actions have been executed.")
+
+cli.add_command(color, name='c')
+
+@cli.command(name='brightness', short_help='Set brightness of LIFX lights.')
+@add_target_options
+@add_duration_option
+@click.argument('level', type=click.IntRange(0, 100))
+@click.pass_context
+def brightness(ctx, all_lights, group, name, duration, level):
+    all_lights = all_lights or ctx.obj.get('all_lights')
+    group = group or ctx.obj.get('group')
+    name = name or ctx.obj.get('name')
+    lifx, lights = get_lights(all_lights, group, name)
+    duration_ms = int(duration * 1000)  # Convert seconds to milliseconds
+    try:
+        for light in lights:
+            current_color = light.get_color()
+            if current_color:
+                new_brightness = int(level / 100 * 65535)
+                new_color = [current_color[0], current_color[1], new_brightness, current_color[3]]
+                light.set_color(new_color, duration=duration_ms)
+                print(f"Set brightness of '{light.get_label()}' to {level}%.")
+            else:
+                print(f"Cannot set brightness for '{light.get_label()}' as color information is unavailable.")
+    except:
+        print("Failed to set brightness.")
+    print("\nAll specified actions have been executed.")
+
+cli.add_command(brightness, name='b')
+
+def get_lights(all_lights, group, name):
+    cache_file = get_cache_file_path()
+    if cache_file.exists():
+        cached_lights = load_cache(cache_file)
+    else:
+        cached_lights = None
+    lifx = LifxLAN()
+    if cached_lights:
+        lights = []
+        for light_data in cached_lights:
+            try:
+                light = Light(light_data['mac_addr'], light_data['ip_addr'])
+                lights.append(light)
+            except:
+                pass
+        if not lights:
+            print("Cache is empty or corrupted. Scanning for devices...")
+            lights = lifx.get_lights()
+            save_cache(cache_file, lights)
+            print(f"Discovered {len(lights)} light(s).\n")
+            save_cache(cache_file, lights)
+    else:
+        lights = lifx.get_lights()
+        print("Scanning for LIFX devices on the network...")
+        print(f"Discovered {len(lights)} light(s).\n")
+        save_cache(cache_file, lights)
+    target_lights = []
+    if all_lights:
+        target_lights = lights
+    elif group:
+        # Since lifxlan doesn't provide get_devices_by_group(), we need to filter lights manually
+        group_lights = []
+        for light in lights:
+            try:
+                if light.get_group_label() == group:
+                    group_lights.append(light)
+            except:
+                pass
+        if not group_lights:
+            print(f"No group found with name '{group}'.")
+            sys.exit(1)
+        target_lights = group_lights
+    elif name:
+        for n in name:
+            matched = [light for light in lights if light.get_label() == n]
+            if not matched:
+                print(f"Warning: No light found with name '{n}'.")
+            else:
+                target_lights.extend(matched)
+        if not target_lights:
+            print("Error: No matching lights found for the specified name(s).")
+            sys.exit(1)
+    else:
+        print("Error: No target specified. Use --all, --group, or --name.")
+        sys.exit(1)
+    return lifx, target_lights
+
+if __name__ == "__main__":
+    cli()

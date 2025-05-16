@@ -15,7 +15,6 @@ setopt auto_pushd
 setopt extended_glob
 setopt hash_list_all
 setopt interactive_comments
-setopt magic_equal_subst
 setopt no_sh_word_split
 setopt notify
 setopt null_glob
@@ -215,11 +214,8 @@ source ~/.zsh.d/autopair.zsh
 source ~/.zsh.d/autosuggestions.zsh
 source ~/.zsh.d/direnv.zsh
 source ~/.zsh.d/fzf.zsh
-source ~/.zsh.d/grc.sh
-source ~/.zsh.d/grep.sh
 source ~/.zsh.d/history-substring-search.zsh
-source ~/.zsh.d/keep.zsh
-source ~/.zsh.d/tmux.zsh
+source ~/.zsh.d/tmux-term-title.zsh
 
 # history expansion
 bindkey ' ' magic-space

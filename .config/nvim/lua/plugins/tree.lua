@@ -15,6 +15,13 @@ return {
       highlight_git = true,
       highlight_opened_files = "all",
       root_folder_label = false,
+      icons = {
+        show = {
+          file = false,
+          folder = false,
+          git = false,
+        }
+      }
     },
     view = {
       cursorline = false,

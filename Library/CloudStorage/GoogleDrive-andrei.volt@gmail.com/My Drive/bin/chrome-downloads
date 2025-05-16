@@ -1,0 +1,133 @@
+#!/usr/bin/env ruby
+
+require 'bundler/inline'
+
+gemfile(quiet: true) do
+  source 'https://rubygems.org'
+  gem 'csv'
+  gem 'sqlite3'
+end
+
+require 'optparse'
+require 'json'
+require 'csv'
+require 'fileutils'
+require 'tmpdir'
+require 'sqlite3'
+
+def get_default_history_path
+  case RbConfig::CONFIG['host_os']
+  when /mswin|mingw|cygwin/
+    user_profile = ENV['LOCALAPPDATA'] || ENV['USERPROFILE']
+    File.join(user_profile, 'Google', 'Chrome', 'User Data', 'Default', 'History')
+  when /darwin/
+    File.expand_path('~/Library/Application Support/Google/Chrome/Default/History')
+  when /linux/
+    File.expand_path('~/.config/google-chrome/Default/History')
+  else
+    abort "Unsupported platform: #{RbConfig::CONFIG['host_os']}"
+  end
+end
+
+def copy_history_db(original_path)
+  temp_path = File.join(Dir.tmpdir, "History_copy_#{Time.now.to_i}_#{rand(1000)}")
+  FileUtils.cp(original_path, temp_path)
+  temp_path
+end
+
+def chrome_time_to_datetime(chrome_time)
+  return '' if chrome_time.nil? || chrome_time == 0
+  Time.at((chrome_time / 1_000_000.0) - 11644473600).utc.strftime('%Y-%m-%d %H:%M:%S') rescue ''
+end
+
+def get_downloads_data(db_path)
+  db = SQLite3::Database.new(db_path)
+  db.results_as_hash = true
+  query = <<-SQL
+    SELECT d.target_path,
+           d.start_time,
+           duc.url
+    FROM downloads d
+    LEFT JOIN (
+        SELECT duc1.id, duc1.url
+        FROM downloads_url_chains duc1
+        INNER JOIN (
+            SELECT id, MAX(chain_index) as max_chain_index
+            FROM downloads_url_chains
+            GROUP BY id
+        ) duc2 ON duc1.id = duc2.id AND duc1.chain_index = duc2.max_chain_index
+        WHERE duc1.url LIKE 'http%'
+    ) duc ON d.id = duc.id
+    ORDER BY d.start_time DESC
+  SQL
+  data = db.execute(query)
+  db.close
+  data
+rescue SQLite3::Exception => e
+  abort "SQLite3 Exception: #{e.message}"
+end
+
+def output_data(data, format)
+  results = data.filter_map do |row|
+    target_path, start_time, url = row.values_at('target_path', 'start_time', 'url')
+    next if url.nil? || url.empty?
+    {
+      'filename' => File.basename(target_path),
+      'start_time' => chrome_time_to_datetime(start_time),
+      'url' => url
+    }
+  end
+
+  case format
+  when 'json'
+    puts JSON.pretty_generate(results)
+  when 'tsv'
+    csv = CSV.new($stdout, col_sep: "\t")
+    results.each { |item| csv << [item['filename'], item['start_time'], item['url']] }
+  else
+    abort "Unsupported format: #{format}"
+  end
+end
+
+options = { format: 'tsv', profile_path: nil }
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{File.basename(__FILE__)} [options]"
+
+  opts.on("--profile-path PATH", "Path to the Chrome profile directory") do |path|
+    options[:profile_path] = path
+  end
+
+  opts.on("--format FORMAT", "Output format: tsv (default) or json") do |format|
+    if %w[tsv json].include?(format.downcase)
+      options[:format] = format.downcase
+    else
+      abort "Invalid format: #{format}. Supported formats are 'tsv' and 'json'."
+    end
+  end
+
+  opts.on("-h", "--help", "Displays Help") do
+    puts opts
+    exit
+  end
+end.parse!
+
+history_path =
+  if options[:profile_path]
+    File.join(options[:profile_path], 'History')
+  else
+    get_default_history_path
+  end
+
+abort "History file not found at: #{history_path}" unless File.exist?(history_path)
+
+temp_history_path = copy_history_db(history_path)
+
+begin
+  data = get_downloads_data(temp_history_path)
+  output_data(data, options[:format])
+rescue => e
+  STDERR.puts "Error: #{e.message}"
+  exit 1
+ensure
+  File.delete(temp_history_path) if File.exist?(temp_history_path)
+end
