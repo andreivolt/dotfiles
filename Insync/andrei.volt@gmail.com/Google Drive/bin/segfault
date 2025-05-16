@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-
-exec sshpass -p segfault ssh root@segfault.net

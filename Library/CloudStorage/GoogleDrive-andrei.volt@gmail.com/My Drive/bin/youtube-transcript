@@ -1,0 +1,32 @@
+#!/usr/bin/env -S uv run --quiet --script --with youtube_transcript_api
+import sys
+import re
+from urllib.parse import urlparse, parse_qs
+from youtube_transcript_api import YouTubeTranscriptApi
+
+def get_video_id(url_or_id):
+    if re.match(r'[a-zA-Z0-9_-]{11}$', url_or_id):
+        return url_or_id
+    else:
+        parsed_url = urlparse(url_or_id)
+        query_params = parse_qs(parsed_url.query)
+        return query_params.get('v', [])[0]
+
+def main():
+    if len(sys.argv) < 2:
+        print("Error: No YouTube URL or video ID provided.")
+        sys.exit(1)
+    try:
+        video_id = get_video_id(sys.argv[1])
+
+        # Get the transcript directly
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+
+        text = ' '.join([entry['text'] for entry in transcript])
+        print(text)
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()

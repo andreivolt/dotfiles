@@ -152,3 +152,12 @@ end, { expr = true })
 -- " fuzzy find
 -- nnoremap <silent> <leader>b :FuzzyBuffer<CR>
 -- nnoremap <silent> <leader>f :FuzzyOpen<CR>
+vim.o.updatetime = 500
+
+vim.api.nvim_create_autocmd("CursorHold", {
+  callback = function()
+    vim.defer_fn(function()
+      vim.cmd('echo ""') -- Clear the message
+    end, 1000) -- Delay in milliseconds (2 seconds)
+  end,
+})
