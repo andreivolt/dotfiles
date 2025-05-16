@@ -3,7 +3,7 @@ vim.api.nvim_create_autocmd("ColorScheme", {
   callback = function()
     vim.api.nvim_set_hl(0, "Comment", { fg = "#777777", italic = true })
     vim.api.nvim_set_hl(0, "Folded", { fg = "#aaaaaa" })
-    vim.api.nvim_set_hl(0, "Normal", { bg = "black" })
+    vim.api.nvim_set_hl(0, "Normal", { bg = "NONE" })
     vim.api.nvim_set_hl(0, "NvimTreeIndentMarker", { fg = "#333333" })
     vim.api.nvim_set_hl(0, "Pmenu", { bg = "#111111" })
     vim.api.nvim_set_hl(0, "Question", { fg = "#444444" })

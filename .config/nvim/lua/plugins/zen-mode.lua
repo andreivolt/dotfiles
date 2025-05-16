@@ -3,6 +3,10 @@ return {
   keys = {
     { "<leader>z", "<cmd>ZenMode<cr>" },
   },
+  config = function(_, opts)
+    vim.api.nvim_set_hl(0, 'ZenBg', { bg = 'NONE' })
+    require("zen-mode").setup(opts)
+  end,
   opts = {
     window = {
       width = 80,
