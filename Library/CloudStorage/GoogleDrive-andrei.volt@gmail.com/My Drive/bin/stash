@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+tmpfile="/tmp/${0##*/}.tmp"
+
+if [ ! -t 0 ]; then
+  cat > "$tmpfile"
+  exit 0
+fi
+
+cat "$tmpfile"

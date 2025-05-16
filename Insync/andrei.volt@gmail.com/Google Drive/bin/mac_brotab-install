@@ -1,4 +1,0 @@
-  ! [ -e ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/brotab_mediator.json ] && {
-    bt install &&
-    mv ~/.config/google-chrome/NativeMessagingHosts/brotab_mediator.json ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts
-  }

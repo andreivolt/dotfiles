@@ -1,0 +1,77 @@
+#!/usr/bin/env ruby
+
+require 'bundler/inline'
+
+gemfile(false) do
+  source 'https://rubygems.org'
+  gem 'nokogiri'
+end
+
+require 'open-uri'
+require 'nokogiri'
+require 'json'
+
+if ARGV.empty?
+  puts "Usage: #{$0} ITEM_ID|ITEM_URL"
+  exit
+end
+
+input = ARGV[0]
+
+if input =~ /^\d+$/
+  base_url = 'https://news.ycombinator.com/'
+  url = "#{base_url}item?id=#{input}"
+elsif input =~ /^https?:\/\//
+  url = input
+else
+  puts "Invalid input. Provide a numeric item ID or a full URL."
+  exit
+end
+
+comments = []
+stack = []
+
+while url
+  html = URI.open(url).read
+  doc = Nokogiri::HTML(html)
+
+  doc.css('tr.comtr').each do |comment|
+    comment_id = comment['id']
+    author = comment.at_css('a.hnuser')&.text || '[deleted]'
+    time = comment.at_css('span.age')&.text || ''
+    text = comment.at_css('div.comment > span.commtext, div.comment > div.commtext')&.inner_html || '[deleted]'
+
+    ind_img = comment.at_css('td.ind img')
+    indentation = ind_img ? ind_img['width'].to_i / 40 : 0
+
+    comment_hash = {
+      id: comment_id,
+      author: author,
+      time: time,
+      text: text,
+      children: []
+    }
+
+    while stack.length > indentation
+      stack.pop
+    end
+
+    if stack.empty?
+      comments << comment_hash
+    else
+      stack.last[:children] << comment_hash
+    end
+
+    stack << comment_hash
+  end
+
+  more_link = doc.at_css('a.morelink')
+  if more_link
+    next_url = more_link['href']
+    url = URI.join('https://news.ycombinator.com/', next_url).to_s
+  else
+    url = nil
+  end
+end
+
+puts JSON.pretty_generate(comments)

@@ -1,0 +1,77 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# dependencies = [
+#    "yt-dlp>=2023.11.14",
+#    "certifi>=2023.7.22",
+#    "platformdirs>=3.0.0",
+# ]
+# ///
+import sys
+import os
+import argparse
+import shutil
+from yt_dlp import YoutubeDL
+from platformdirs import user_cache_dir
+
+parser = argparse.ArgumentParser(description='Download audio from YouTube using yt-dlp')
+parser.add_argument('url_or_id', nargs='?', help='YouTube URL or ID')
+parser.add_argument('--clear-cache', action='store_true', help='Clear the cache')
+args = parser.parse_args()
+
+my_cache_dir = user_cache_dir(appname="yt_audio_cache", appauthor=False)
+
+if args.clear_cache:
+    if os.path.exists(my_cache_dir):
+        shutil.rmtree(my_cache_dir)
+        print('Cache cleared.')
+    else:
+        print('Cache directory does not exist.')
+    sys.exit(0)
+
+if not args.url_or_id:
+    parser.print_help()
+    sys.exit(1)
+
+is_piped = not sys.stdout.isatty()
+
+if not os.path.exists(my_cache_dir):
+    os.makedirs(my_cache_dir)
+
+# Configure yt-dlp to extract audio only, keeping original codec
+ydl_opts = {
+    'format': '(bestaudio[ext=m4a]/bestaudio[ext=mp4]/best[ext=mp4])',
+    'outtmpl': os.path.join(my_cache_dir, '%(id)s.%(ext)s'),
+    'quiet': True,
+    'postprocessors': [{
+        'key': 'FFmpegExtractAudio',
+        'nopostoverwrites': False,
+    }],
+}
+
+try:
+    ydl = YoutubeDL(ydl_opts)
+    info = ydl.extract_info(args.url_or_id, download=True)
+    video_id = info.get('id')
+
+    # Get the actual extension after extraction
+    # This could be aac, m4a, opus, etc. depending on the source
+    files = [f for f in os.listdir(my_cache_dir) if f.startswith(video_id + '.')]
+    if not files:
+        print("Error: Couldn't find downloaded file", file=sys.stderr)
+        sys.exit(1)
+
+    # Use the first matching file (should be only one)
+    cached_filename = files[0]
+    cached_file = os.path.join(my_cache_dir, cached_filename)
+
+    if is_piped:
+        with open(cached_file, 'rb') as f:
+            shutil.copyfileobj(f, sys.stdout.buffer)
+    else:
+        output_filename = f'{video_id}.m4a'
+        shutil.copyfile(cached_file, output_filename)
+        print(f'Downloaded audio to {output_filename}')
+
+except Exception as e:
+    print(f"Error: {e}", file=sys.stderr)
+    sys.exit(1)

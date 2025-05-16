@@ -1,0 +1,81 @@
+#!/usr/bin/env ruby
+
+require 'bundler/inline'
+
+gemfile(quiet: true) do
+  source 'https://rubygems.org'
+  gem 'json'
+  gem 'tty-tree'
+end
+
+require 'json'
+require 'optparse'
+require 'tty-tree'
+require 'time'
+
+options = { indent: 4, as: :dir }
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{$PROGRAM_NAME} [-p] [-i INDENT] [-n] [file]"
+  opts.on("-p", "--pretty", "Output as pretty tree") { options[:pretty] = true }
+  opts.on("-i", "--indent INDENT", Integer, "Indentation for tree (default: 4)") { |i| options[:indent] = i }
+  opts.on("-n", "--number", "Use number rendering instead of directory style") { options[:as] = :number }
+end.parse!
+
+input = ARGF.read
+posts = input.lines.map { |line| JSON.parse(line) }
+
+post_hash = posts.each_with_object({}) do |post, hash|
+  post['replies'] = []
+  hash[post['id_str']] = post
+end
+
+root_posts = post_hash.values.select do |post|
+  parent_id = post['inReplyToTweetIdStr']
+  if parent_id && post_hash[parent_id]
+    post_hash[parent_id]['replies'] << post
+    false
+  else
+    true
+  end
+end.sort_by { |post| post['date'] }.reverse
+
+def format_post(post)
+  t = Time.parse(post['date']) rescue nil
+  timestamp = t ? t.strftime('%Y-%m-%d %H:%M:%S') : post['date']
+  # Build a small multiline text (title line + rawContent) to see how TTY::Tree handles it
+  "[#{post['id_str']}] #{post['user']['username']} (#{timestamp})\n#{post['rawContent']}"
+end
+
+if options[:pretty]
+  # Recursively build the nested hash structure for TTY::Tree
+  def build_tree(post)
+    display_text = format_post(post).strip
+    return nil if display_text.empty?
+
+    node = { display_text => {} }
+    unless post['replies'].empty?
+      replies = post['replies'].map { |reply| build_tree(reply) }.compact
+      node[display_text] = replies.reduce({}, :merge) unless replies.empty?
+    end
+    node
+  end
+
+  # Merge all top-level posts into one tree hash
+  tree = root_posts
+           .map { |post| build_tree(post) }
+           .compact
+           .reduce({}, :merge)
+
+  if tree.empty?
+    puts "No valid posts to display."
+  else
+    # The important fix: specify `multiline: false` so TTY::Tree
+    # does NOT continue drawing vertical lines for each line
+    # in a multiline node.
+    puts TTY::Tree.new(tree, multiline: false)
+                  .render(as: options[:as],
+                          indent: options[:indent])
+  end
+else
+  puts JSON.pretty_generate(root_posts)
+end

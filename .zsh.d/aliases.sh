@@ -1,4 +1,4 @@
-alias eza="eza --icons auto"
+alias eza="eza --icons never"
 alias l="ls -1"
 alias la="ls -a"
 alias ll="ls -l --classify=auto --git"
