@@ -1,11 +1,14 @@
 #!/usr/bin/env ruby
 
+$VERBOSE = nil
 require 'bundler/inline'
 
-gemfile(false) do
+gemfile(true, quiet: true) do
   source 'https://rubygems.org'
   gem 'nokogiri'
 end
+
+$VERBOSE = false
 
 require 'open-uri'
 require 'nokogiri'

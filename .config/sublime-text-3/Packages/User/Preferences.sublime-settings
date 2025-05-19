@@ -10,9 +10,11 @@
 	"theme": "Adaptive.sublime-theme",
 	"vintageous_use_ctrl_keys": true,
 	"vintageous_use_super_keys": false,
-	"index_files": true,
+	"index_files": false,
 	"ignored_packages":
 	[
+		"Package Control",
 		"Vintage",
 	],
+	"update_check": false,
 }
