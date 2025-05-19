@@ -11,9 +11,6 @@ export XDG_STATE_HOME=~/.local/state
 
 export DENO_NO_UPDATE_CHECK=1
 
-source ~/.zsh.d/homebrew.sh
-
-source ~/.config/env
 
 path=(
   ~/bin(N)
@@ -25,4 +22,6 @@ path=(
   $path
 )
 
+source ~/.zsh.d/homebrew.sh
+source ~/.config/env
 source ~/.orbstack/shell/init.zsh
