@@ -4,6 +4,7 @@ export FZF_DEFAULT_OPTS="\
 --border \
 --cycle \
 --multi \
+--wrap \
 --ansi \
 --color fg+:blue \
 --color bg:0 --color gutter:0 \

@@ -2,7 +2,9 @@
 
 require 'bundler/inline'
 
-gemfile(quiet: true) do
+$VERBOSE = nil
+
+gemfile(false, quiet: true) do
   source 'https://rubygems.org'
   gem 'aws-sdk-s3', '~> 1.114'
   gem 'mimemagic', '~> 0.3.10'
@@ -10,6 +12,8 @@ gemfile(quiet: true) do
   gem 'nokogiri'
   gem 'base64'
 end
+
+$VERBOSE = false
 
 require 'aws-sdk-s3'
 require 'securerandom'
@@ -32,26 +36,34 @@ if ARGV[0]
   file_path = ARGV[0]
   file_name = File.basename(file_path)
   content = File.read(file_path)
-  content_type = MimeMagic.by_path(file_path).type
+  
+  # Try to get mime type by path first
+  mime = MimeMagic.by_path(file_path)
+  
+  # If that fails, try by content
+  mime ||= MimeMagic.by_magic(content)
+  
+  content_type = mime.type
 else
   content = STDIN.read
-  content_type = MimeMagic.by_magic(content).type
-  extension = MimeMagic.by_magic(content).extensions.first || 'bin'
+  mime = MimeMagic.by_magic(content)
+  content_type = mime.type
+  extension = mime.extensions.first
   file_name = "#{SecureRandom.hex(8)}.#{extension}"
 end
 
-response = s3.put_object({
+response = s3.put_object(
   bucket: bucket,
   key: file_name,
   body: content,
   content_type: content_type,
   metadata: { "Content-Type" => content_type }
-})
+)
 
-head_response = s3.head_object({
+head_response = s3.head_object(
   bucket: bucket,
   key: file_name
-})
+)
 
 cid = head_response.metadata['cid']
 ipfs_url = "https://ipfs.filebase.io/ipfs/#{cid}"

@@ -107,15 +107,15 @@ export MANPAGER='nvim +Man!' MANWIDTH=100
 export READNULLCMD=$PAGER
 
 autoload -Uz compinit
-[[ -f ~/.cache/zsh/zcompdump(#qN.mh+24) ]] && compinit -d ~/.cache/zsh/zcompdump || compinit -C -d ~/.cache/zsh/zcompdump
+[[ -f ~/.cache/zsh/zcompdump(#qN.mh+24) ]] && {
+  compinit -d ~/.cache/zsh/zcompdump
+  zcompile ~/.cache/zsh/zcompdump
+} || compinit -C -d ~/.cache/zsh/zcompdump
 
 (( ${+commands[brew]} )) && fpath=(/opt/homebrew/share/zsh/site-functions $fpath)
 # eval "$(register-python-argcomplete pipx)"
 # eval "$(register-python-argcomplete textract)"
 # complete -C aws_completer aws
-
-bindkey '^n' expand-or-complete
-bindkey '^p' reverse-menu-complete
 
 _comp_options+=(globdots)
 
@@ -135,9 +135,8 @@ zstyle ':completion:*' auto-description 'specify: %d' # format of informational 
 zstyle ':completion:*' completer _complete _approximate # auto correct misspellings
 # zstyle ':completion:*' file-sort date
 zstyle ':completion:*' format 'Completing %d'
-zstyle ':completion:*' matcher-list '' 'm:{a-zA-Z}={A-Za-z}' # match case-sensitive only if there are no case-sensitive matches
-zstyle ':completion:*' matcher-list '' 'm:{a-z}={A-Z}' 'm:{a-zA-Z}={A-Za-z}' 'r:|[._-]=* r:|=* l:|=*' # ignore case
-zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}' # match lowercase to uppercase
+# Maps lowercase characters to their uppercase equivalents for completion
+# Example: typing 'doc' will match 'Documents' but typing 'DOC' won't match 'documents'
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
 zstyle ':completion:*' menu select
 zstyle ':completion:*' menu yes=long select
