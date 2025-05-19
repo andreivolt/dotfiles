@@ -31,7 +31,7 @@ end
 chrome_options = [
   "--auto-open-devtools-for-tabs",
   "--no-first-run",
-  "--remote-debugging-port=#{options[:remote_debugging_port] || 9999}",
+  "--remote-debugging-port=#{options[:remote_debugging_port] || 9222}",
   "--start-maximized",
   "--user-data-dir=#{tmpdir}",
   *ARGV

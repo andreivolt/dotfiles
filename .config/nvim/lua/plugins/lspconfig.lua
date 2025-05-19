@@ -59,13 +59,13 @@ return {
         'solargraph',
         'ts_ls',
         -- 'gopls',
+      },
+      handlers = {
+        -- Default handler for all servers
+        function(server_name)
+          require('lspconfig')[server_name].setup({ capabilities = capabilities })
+        end,
       }
-    })
-
-    require('mason-lspconfig').setup_handlers({
-      function(server)
-        require('lspconfig')[server].setup({ capabilities = capabilities })
-      end,
     })
   end,
   event = "VeryLazy"
