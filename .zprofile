@@ -21,6 +21,7 @@ path=(
   ~/.cargo/bin(N)
   ~/.local/bin(N)
   ~/.local/gem/ruby/*/bin(N)
+  ~/.npm/bin(N)
   $path
 )
 

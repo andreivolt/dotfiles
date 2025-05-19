@@ -7,6 +7,7 @@ spoon.SpoonInstall:updateAllRepos()
 local screen = require("hs.screen")
 local application = require("hs.application")
 
+local toggleApp = require('toggle_app')
 require('hotkeys')
 
 spoon.SpoonInstall:andUse("ReloadConfiguration", {
@@ -24,3 +25,21 @@ spoon.SpoonInstall:andUse("WinWin", {
 
 local redshift = require('redshift')
 redshift.init()
+
+-- CLI command handlers
+hs.ipc.cliInstall()  -- Ensure CLI is installed
+
+-- Register CLI commands
+if hs.ipc then
+  hs.ipc.handler = function(str)
+    if str == "toggle-terminal" then
+      toggleApp.toggleAppVisibility()
+      return "Toggled terminal visibility"
+    elseif str == "toggle-monitor" then
+      toggleApp.toggleAppMonitor()
+      return "Moved terminal to other monitor"
+    else
+      return "Unknown command: " .. str
+    end
+  end
+end

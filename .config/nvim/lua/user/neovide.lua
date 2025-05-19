@@ -8,7 +8,7 @@ vim.g.neovide_hide_mouse_when_typing = true
 -- vim.g.neovide_input_macos_alt_is_meta = true -- TODO {
 vim.g.neovide_remember_window_size = false
 vim.g.neovide_scroll_animation_length = 0.07
-vim.g.neovide_transparency = 0.7
+vim.g.neovide_opacity = 0.7
 vim.g.neovide_window_blurred = true
 vim.opt.linespace = -2
 
