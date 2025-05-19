@@ -113,9 +113,6 @@ autoload -Uz compinit
 } || compinit -C -d ~/.cache/zsh/zcompdump
 
 (( ${+commands[brew]} )) && fpath=(/opt/homebrew/share/zsh/site-functions $fpath)
-# eval "$(register-python-argcomplete pipx)"
-# eval "$(register-python-argcomplete textract)"
-# complete -C aws_completer aws
 
 _comp_options+=(globdots)
 
