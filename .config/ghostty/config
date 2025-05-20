@@ -1,0 +1,51 @@
+font-family = "IosevkaTerm NFM Light"
+font-family-italic = "IosevkaTerm NFM Light Italic"
+font-family-bold = "IosevkaTerm NFM"
+font-family-bold-italic = "IosevkaTerm NFM Italic"
+
+adjust-cell-height = -8
+adjust-font-baseline = 2
+adjust-cell-width = -12%
+
+# font-family = "Pragmata Pro Mono"
+# font-feature = -calt
+# font-feature = -liga
+# font-feature = -dlig
+#
+# adjust-cell-height = -8
+# adjust-cell-width = -16%
+
+font-size = 20
+
+background-opacity = 0.85
+background-blur-radius = 16
+background = #000000
+
+window-vsync = false
+
+macos-non-native-fullscreen = true
+macos-window-shadow = false
+window-decoration = false
+
+mouse-hide-while-typing = true
+
+window-save-state = always
+
+confirm-close-surface = false
+
+cursor-style = bar
+cursor-style-blink = true
+
+# macos-titlebar-style = hidden
+
+window-padding-x = 0
+window-padding-y = 0
+
+window-colorspace = display-p3
+
+keybind = cmd+left=csi:\x1b[1;5D
+keybind = cmd+right=csi:\x1b[1;5C
+
+theme = ir-black
+
+auto-update = off
