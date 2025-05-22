@@ -22,3 +22,5 @@ export FZF_DEFAULT_COMMAND="\
 rg -uu \
 --files \
 -H"
+
+export FZF_CTRL_R_OPTS="--nth=2.."
