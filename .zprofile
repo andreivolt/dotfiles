@@ -1,5 +1,3 @@
-umask u=rwx,g=,o=
-
 export EDITOR=nvim
 export PAGER=nvimpager
 
@@ -11,14 +9,16 @@ export XDG_STATE_HOME=~/.local/state
 
 export DENO_NO_UPDATE_CHECK=1
 
-
 path=(
   ~/bin(N)
-  ~/go/bin(N)
-  ~/.cargo/bin(N)
   ~/.local/bin(N)
+
+  ~/.cache/.bun/bin(N)
+  ~/.cargo/bin(N)
   ~/.local/gem/ruby/*/bin(N)
   ~/.npm/bin(N)
+  ~/go/bin(N)
+
   $path
 )
 
