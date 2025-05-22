@@ -1,9 +1,0 @@
-#!/usr/bin/env nix-shell
-#!nix-shell -i expect -p expect
-
-spawn -noecho rlwrap -a nix repl {*}$argv
-expect "nix-repl> " {
-  send ":a builtins\n"
-  send "pkgs = import <nixpkgs> {}\n"
-  interact
-}

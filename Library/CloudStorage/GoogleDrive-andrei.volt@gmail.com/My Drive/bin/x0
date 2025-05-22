@@ -1,0 +1,68 @@
+#!/usr/bin/env ruby
+require 'optparse'
+require 'net/http'
+require 'uri'
+
+def upload_to_x0at(content, filename)
+  uri = URI.parse("https://x0.at")
+
+  Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
+    request = Net::HTTP::Post.new(uri)
+    body = [
+      "--boundary",
+      "Content-Disposition: form-data; name=\"file\"; filename=\"#{filename}\"",
+      "Content-Type: application/octet-stream",
+      "",
+      content,
+      "--boundary--"
+    ].join("\r\n")
+
+    request.body = body
+    request["Content-Type"] = "multipart/form-data; boundary=boundary"
+
+    response = http.request(request)
+
+    if response.is_a?(Net::HTTPSuccess)
+      puts response.body
+    else
+      puts "Error: #{response.code} #{response.message}"
+      puts response.body
+      exit 1
+    end
+  end
+end
+
+options = {}
+custom_name = nil
+
+opt_parser = OptionParser.new do |opts|
+  opts.on("-n", "--name NAME", "Specify a custom filename for the upload") do |name|
+    custom_name = name
+  end
+
+  opts.on("-h", "--help", "Show this help message") do
+    puts opts
+    exit
+  end
+
+  opts.separator ""
+  opts.separator "If no file is specified, the script will read from stdin."
+end
+
+opt_parser.parse!
+
+file = ARGV.shift
+
+if file
+  unless File.exist?(file)
+    puts "Error: File '#{file}' not found."
+    exit 1
+  end
+  content = File.read(file)
+  filename = custom_name || File.basename(file)
+else
+  content = $stdin.read
+  filename = custom_name || "stdin"
+end
+
+upload_to_x0at(content, filename)
