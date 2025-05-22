@@ -2,10 +2,12 @@
 
 require 'bundler/inline'
 
-gemfile(quiet: true) do
+$VERBOSE = nil
+gemfile(false, quiet: true) do
   source :rubygems
   gem 'tty-prompt'
 end
+$VERBOSE = false
 
 displayplacer_output = `displayplacer list`
 

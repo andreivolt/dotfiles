@@ -2,11 +2,13 @@
 
 require 'bundler/inline'
 
-gemfile(quiet: true) do
+$VERBOSE = nil
+gemfile(false, quiet: true) do
   source 'https://rubygems.org'
   gem 'csv'
   gem 'sqlite3'
 end
+$VERBOSE = false
 
 require 'optparse'
 require 'json'
