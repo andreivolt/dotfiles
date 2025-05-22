@@ -1,0 +1,108 @@
+#!/usr/bin/env ruby
+
+require 'fileutils'
+
+DRY_RUN = false
+SPACE_CHAR = '-'
+SEPAR_CHAR = '_'
+SAFE_CHARS = "-_a-zA-Z0-9"
+
+def error(message)
+  warn "[ERROR]: #{message}"
+end
+
+def slugify(text)
+  return text if text.empty?
+
+  result = text.dup
+  
+  # Apply specific replacements
+  replacements = {
+    '&' => '-and-',
+    ' -and- ' => '-and-',
+    ', ' => ' ',
+    ',' => SPACE_CHAR,
+    '\'' => '',
+    'C++' => 'CPP',
+    'C#' => 'CSharp',
+    '@' => '-AT-',
+    ' -AT- ' => '-AT-'
+  }
+  
+  replacements.each do |from, to|
+    result.gsub!(from, to)
+  end
+  
+  # Replace unsafe characters with SPACE_CHAR
+  result.gsub!(/[^#{SAFE_CHARS}]/, SPACE_CHAR)
+  
+  # Replace multiple dashes/underscores with single ones
+  result.gsub!(/-{2,}/, '_')
+  result.gsub!(/_{2,}/, '_')
+  
+  # Clean up mixed separators
+  ['-_-', '-_', '_-'].each do |pattern|
+    result.gsub!(pattern, SEPAR_CHAR)
+  end
+  
+  # Trim leading/trailing dashes and underscores
+  result.gsub!(/^[_-]+|[_-]+$/, '')
+  
+  # Final cleanup of multiple separators
+  result.gsub!(/-{2,}/, '_')
+  result.gsub!(/_{2,}/, '_')
+  
+  result
+end
+
+def process_file(file_path)
+  full_name = File.basename(file_path)
+  dir_path = File.dirname(file_path)
+  
+  # Handle extensions properly
+  if full_name.include?('.') && !full_name.start_with?('.')
+    extension = File.extname(full_name).delete_prefix('.')
+    name = File.basename(full_name, ".#{extension}")
+    
+    # Process separately
+    slugged_name = slugify(name)
+    slugged_ext = slugify(extension)
+    
+    # Handle special cases
+    if slugged_name.empty?
+      return # Skip empty names
+    elsif slugged_ext == slugged_name
+      # Extension matches name, remove extension
+      new_name = slugged_name
+    else
+      new_name = "#{slugged_name}.#{slugged_ext}"
+    end
+  else
+    # No extension or hidden file
+    new_name = slugify(full_name)
+    return if new_name.empty?
+  end
+  
+  new_path = File.join(dir_path, new_name)
+  
+  # Only rename if the name would actually change
+  return if file_path == new_path
+  
+  if DRY_RUN
+    puts new_name
+  else
+    FileUtils.mv(file_path, new_path)
+  end
+end
+
+# Main program
+if ARGV.empty?
+  error('Positional arguments missing! At least one is required.')
+  exit 1
+end
+
+ARGV.each do |path|
+  process_file(path)
+end
+
+exit 0

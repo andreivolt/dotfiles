@@ -1,0 +1,75 @@
+#!/usr/bin/env ruby
+
+require 'optparse'
+require 'tempfile'
+require 'shellwords'
+
+options = {}
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: #{File.basename($PROGRAM_NAME)} [options] [file1 file2...]"
+
+  opts.on("-o", "--output FILE", "Output file (for stdin mode)") do |o|
+    options[:output] = o
+  end
+
+  opts.on("-q", "--quiet", "Quiet mode") do
+    options[:quiet] = true
+  end
+
+  opts.on("-h", "--help", "Show this help") do
+    puts opts
+    exit
+  end
+end
+parser.parse!
+
+def log(msg, options)
+  STDERR.puts msg unless options[:quiet]
+end
+
+unless STDIN.tty?
+  Tempfile.create(['any2pdf', '.tmp']) do |temp|
+    IO.copy_stream(STDIN, temp.path)
+    temp.close
+
+    system("unoconv -f pdf #{temp.path.shellescape}")
+    pdf_file = "#{temp.path}.pdf"
+
+    if File.exist?(pdf_file)
+      if options[:output]
+        require 'fileutils'
+        FileUtils.cp(pdf_file, options[:output])
+        log("Created '#{options[:output]}'", options)
+      else
+        IO.copy_stream(pdf_file, STDOUT)
+      end
+      File.unlink(pdf_file)
+    else
+      log("Error: Conversion failed", options)
+      exit 1
+    end
+  end
+  exit
+end
+
+if ARGV.empty?
+  puts parser
+  exit 1
+end
+
+ARGV.each do |file|
+  unless File.exist?(file)
+    log("Error: '#{file}' not found", options)
+    next
+  end
+
+  log("Converting '#{file}'", options)
+  system("unoconv -f pdf #{file.shellescape}")
+  output = "#{file.sub(/\.[^.]+$/, '')}.pdf"
+
+  if File.exist?(output)
+    log("Created '#{output}'", options)
+  else
+    log("Error: Failed to convert '#{file}'", options)
+  end
+end

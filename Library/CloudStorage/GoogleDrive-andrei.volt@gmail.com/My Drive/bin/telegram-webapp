@@ -1,0 +1,595 @@
+#!/usr/bin/env uv run -qs --with telethon,platformdirs
+"""
+Telegram Webapp - A simple web interface to browse Telegram conversations
+
+Environment variables:
+- TELEGRAM_API_ID: Your Telegram API ID
+- TELEGRAM_API_HASH: Your Telegram API Hash
+"""
+
+import os
+import sys
+import json
+import sqlite3
+import webbrowser
+import argparse
+import asyncio
+import platform
+import threading
+import traceback
+from datetime import datetime
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
+import signal
+import socket
+from pathlib import Path
+from telethon import TelegramClient, events
+from telethon.tl.types import User, Channel, Chat
+
+# Determine the appropriate state directory
+def get_state_dir():
+    if platform.system() == "Windows":
+        base_dir = os.environ.get("LOCALAPPDATA")
+        if not base_dir:
+            base_dir = os.path.expanduser("~\\.local\\state")
+    elif platform.system() == "Darwin":
+        base_dir = os.path.expanduser("~/Library/Application Support")
+    else:  # Linux and others
+        base_dir = os.environ.get("XDG_STATE_HOME")
+        if not base_dir:
+            base_dir = os.path.expanduser("~/.local/state")
+    
+    app_dir = os.path.join(base_dir, "telegram-webapp")
+    os.makedirs(app_dir, exist_ok=True)
+    return app_dir
+
+STATE_DIR = get_state_dir()
+DB_PATH = os.path.join(STATE_DIR, "telegram.db")
+SESSION_PATH = os.path.join(STATE_DIR, "telethon")
+
+class TelegramSyncServer:
+    def __init__(self, api_id, api_hash, port=8000):
+        self.api_id = api_id
+        self.api_hash = api_hash
+        self.port = self._find_free_port(port)
+        self.client = None
+        self.db_conn = None
+        self.server = None
+        self.is_syncing = False
+        self.setup_database()
+    
+    def _find_free_port(self, start_port):
+        port = start_port
+        while True:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('localhost', port))
+                    return port
+            except OSError:
+                port += 1
+    
+    def setup_database(self):
+        self.db_conn = sqlite3.connect(DB_PATH)
+        cursor = self.db_conn.cursor()
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS dialogs (
+            id INTEGER PRIMARY KEY,
+            name TEXT,
+            type TEXT,
+            username TEXT,
+            last_message_date TIMESTAMP,
+            unread_count INTEGER,
+            last_updated TIMESTAMP
+        )
+        ''')
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER,
+            dialog_id INTEGER,
+            date TIMESTAMP,
+            sender_id INTEGER,
+            sender_name TEXT,
+            text TEXT,
+            PRIMARY KEY (id, dialog_id),
+            FOREIGN KEY (dialog_id) REFERENCES dialogs(id)
+        )
+        ''')
+        self.db_conn.commit()
+    
+    async def start_client(self):
+        self.client = TelegramClient(SESSION_PATH, self.api_id, self.api_hash)
+        await self.client.start()
+        return self.client.is_connected()
+    
+    async def sync_dialogs(self):
+        if self.is_syncing:
+            return {"status": "already_syncing"}
+        
+        self.is_syncing = True
+        try:
+            dialogs = await self.client.get_dialogs()
+            cursor = self.db_conn.cursor()
+            
+            now = datetime.now().isoformat()
+            for dialog in dialogs:
+                entity = dialog.entity
+                
+                # Determine entity type and name
+                if isinstance(entity, User):
+                    type_name = "user"
+                    name = f"{entity.first_name or ''} {entity.last_name or ''}".strip()
+                    username = entity.username or ""
+                elif isinstance(entity, Channel):
+                    type_name = "channel" if entity.broadcast else "supergroup"
+                    name = entity.title
+                    username = entity.username or ""
+                elif isinstance(entity, Chat):
+                    type_name = "group"
+                    name = entity.title
+                    username = ""
+                else:
+                    type_name = "unknown"
+                    name = str(entity)
+                    username = ""
+                
+                last_message_date = dialog.date.isoformat() if dialog.date else None
+                
+                # Insert or update dialog
+                cursor.execute('''
+                INSERT OR REPLACE INTO dialogs 
+                (id, name, type, username, last_message_date, unread_count, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (entity.id, name, type_name, username, last_message_date, dialog.unread_count, now))
+            
+            self.db_conn.commit()
+            return {"status": "success", "count": len(dialogs)}
+        
+        except Exception as e:
+            traceback.print_exc()
+            return {"status": "error", "message": str(e)}
+        
+        finally:
+            self.is_syncing = False
+    
+    async def get_dialogs(self):
+        cursor = self.db_conn.cursor()
+        cursor.execute('''
+        SELECT id, name, type, username, last_message_date, unread_count, last_updated
+        FROM dialogs
+        ORDER BY last_message_date DESC
+        ''')
+        
+        dialogs = []
+        for row in cursor.fetchall():
+            dialogs.append({
+                "id": row[0],
+                "name": row[1],
+                "type": row[2],
+                "username": row[3],
+                "last_message_date": row[4],
+                "unread_count": row[5],
+                "last_updated": row[6]
+            })
+        
+        return dialogs
+    
+    async def get_messages(self, dialog_id, limit=100):
+        # First, check if we already have messages
+        cursor = self.db_conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM messages WHERE dialog_id = ?', (dialog_id,))
+        count = cursor.fetchone()[0]
+        
+        # If no messages or requested sync, fetch from Telegram
+        if count == 0:
+            try:
+                messages = await self.client.get_messages(dialog_id, limit=limit)
+                
+                for message in messages:
+                    if not message.text:
+                        continue
+                        
+                    sender = message.sender
+                    if sender:
+                        if hasattr(sender, 'username') and sender.username:
+                            sender_name = f"@{sender.username}"
+                        else:
+                            sender_name = f"{getattr(sender, 'first_name', '') or ''} {getattr(sender, 'last_name', '') or ''}".strip()
+                        sender_id = sender.id
+                    else:
+                        sender_name = "Unknown"
+                        sender_id = 0
+                    
+                    cursor.execute('''
+                    INSERT OR REPLACE INTO messages
+                    (id, dialog_id, date, sender_id, sender_name, text)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (message.id, dialog_id, message.date.isoformat(), sender_id, sender_name, message.text))
+                
+                self.db_conn.commit()
+            except Exception as e:
+                traceback.print_exc()
+                return {"status": "error", "message": str(e)}
+        
+        # Get messages from database
+        cursor.execute('''
+        SELECT id, date, sender_id, sender_name, text
+        FROM messages
+        WHERE dialog_id = ?
+        ORDER BY date DESC
+        LIMIT ?
+        ''', (dialog_id, limit))
+        
+        messages = []
+        for row in cursor.fetchall():
+            messages.append({
+                "id": row[0],
+                "date": row[1],
+                "sender_id": row[2],
+                "sender_name": row[3],
+                "text": row[4]
+            })
+        
+        return {"status": "success", "messages": messages}
+    
+    def start_server(self):
+        class CustomHandler(SimpleHTTPRequestHandler):
+            server_instance = self
+            
+            def do_GET(self):
+                parsed_path = urlparse(self.path)
+                
+                if parsed_path.path == '/':
+                    self.send_response(200)
+                    self.send_header('Content-type', 'text/html')
+                    self.end_headers()
+                    self.wfile.write(self.get_html().encode())
+                
+                elif parsed_path.path == '/api/dialogs':
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    dialogs = loop.run_until_complete(self.server_instance.get_dialogs())
+                    loop.close()
+                    
+                    self.wfile.write(json.dumps(dialogs).encode())
+                
+                elif parsed_path.path == '/api/sync':
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    result = loop.run_until_complete(self.server_instance.sync_dialogs())
+                    loop.close()
+                    
+                    self.wfile.write(json.dumps(result).encode())
+                
+                elif parsed_path.path == '/api/messages':
+                    params = parse_qs(parsed_path.query)
+                    dialog_id = int(params.get('dialog_id', [0])[0])
+                    
+                    if dialog_id == 0:
+                        self.send_response(400)
+                        self.send_header('Content-type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"error": "Missing dialog_id"}).encode())
+                        return
+                    
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    messages = loop.run_until_complete(self.server_instance.get_messages(dialog_id))
+                    loop.close()
+                    
+                    self.wfile.write(json.dumps(messages).encode())
+                
+                else:
+                    self.send_response(404)
+                    self.send_header('Content-type', 'text/plain')
+                    self.end_headers()
+                    self.wfile.write(b'Not Found')
+            
+            def log_message(self, format, *args):
+                # Suppress log messages
+                return
+            
+            def get_html(self):
+                return '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Conversations</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .loading { display: inline-block; width: 20px; height: 20px; border: 3px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .message-bubble { max-width: 80%; word-break: break-word; }
+        .message-bubble.sent { background-color: #e5f7ff; margin-left: auto; }
+        .message-bubble.received { background-color: #f1f1f1; margin-right: auto; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto p-4">
+        <header class="bg-blue-600 text-white p-4 rounded-t-lg flex justify-between items-center">
+            <h1 class="text-xl font-bold">Telegram Conversations</h1>
+            <button id="syncButton" class="bg-white text-blue-600 px-4 py-2 rounded hover:bg-blue-100 transition">
+                <span id="syncText">Sync</span>
+                <span id="syncLoading" class="loading hidden"></span>
+            </button>
+        </header>
+        
+        <div class="flex flex-col md:flex-row bg-white rounded-b-lg shadow">
+            <!-- Conversations list -->
+            <div id="dialogsList" class="w-full md:w-1/3 border-r overflow-y-auto" style="height: calc(100vh - 150px);">
+                <div id="dialogsLoading" class="p-4 text-center">
+                    <div class="loading mx-auto" style="border-color: rgba(37,99,235,.3); border-top-color: #2563eb;"></div>
+                    <p class="mt-2 text-gray-500">Loading conversations...</p>
+                </div>
+                <ul id="dialogs" class="hidden"></ul>
+            </div>
+            
+            <!-- Messages view -->
+            <div id="messagesContainer" class="w-full md:w-2/3 flex flex-col" style="height: calc(100vh - 150px);">
+                <div id="initialMessage" class="flex items-center justify-center h-full">
+                    <p class="text-gray-500">Select a conversation to view messages</p>
+                </div>
+                
+                <div id="messagesView" class="hidden flex flex-col h-full">
+                    <div id="dialogHeader" class="p-4 border-b bg-gray-50 flex items-center">
+                        <div>
+                            <h2 id="dialogTitle" class="font-bold"></h2>
+                            <p id="dialogInfo" class="text-sm text-gray-500"></p>
+                        </div>
+                    </div>
+                    
+                    <div id="messagesLoading" class="p-4 text-center hidden">
+                        <div class="loading mx-auto" style="border-color: rgba(37,99,235,.3); border-top-color: #2563eb;"></div>
+                        <p class="mt-2 text-gray-500">Loading messages...</p>
+                    </div>
+                    
+                    <div id="messagesList" class="flex-1 overflow-y-auto p-4 space-y-4"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentDialogId = null;
+
+        async function fetchDialogs() {
+            try {
+                document.getElementById('dialogsLoading').classList.remove('hidden');
+                document.getElementById('dialogs').classList.add('hidden');
+                
+                const response = await fetch('/api/dialogs');
+                const dialogs = await response.json();
+                
+                const dialogsList = document.getElementById('dialogs');
+                dialogsList.innerHTML = '';
+                
+                if (dialogs.length === 0) {
+                    const emptyEl = document.createElement('li');
+                    emptyEl.className = 'p-4 text-center text-gray-500';
+                    emptyEl.textContent = 'No conversations found. Click Sync to fetch.';
+                    dialogsList.appendChild(emptyEl);
+                } else {
+                    dialogs.forEach(dialog => {
+                        const li = document.createElement('li');
+                        li.className = 'border-b hover:bg-gray-50 cursor-pointer transition';
+                        li.onclick = () => loadMessages(dialog);
+                        
+                        const date = dialog.last_message_date ? new Date(dialog.last_message_date).toLocaleString() : 'No messages';
+                        
+                        let typeIcon = '👤';
+                        if (dialog.type === 'channel') typeIcon = '📢';
+                        if (dialog.type === 'group' || dialog.type === 'supergroup') typeIcon = '👥';
+                        
+                        li.innerHTML = `
+                            <div class="p-4">
+                                <div class="flex justify-between">
+                                    <h3 class="font-medium">${typeIcon} ${escapeHtml(dialog.name)}</h3>
+                                    ${dialog.unread_count ? `<span class="bg-blue-600 text-white text-xs px-2 py-1 rounded-full">${dialog.unread_count}</span>` : ''}
+                                </div>
+                                <p class="text-sm text-gray-500">${date}</p>
+                            </div>
+                        `;
+                        
+                        dialogsList.appendChild(li);
+                    });
+                }
+                
+                document.getElementById('dialogsLoading').classList.add('hidden');
+                document.getElementById('dialogs').classList.remove('hidden');
+            } catch (error) {
+                console.error('Error fetching dialogs:', error);
+                alert('Failed to load conversations. See console for details.');
+            }
+        }
+        
+        async function syncDialogs() {
+            try {
+                document.getElementById('syncText').classList.add('hidden');
+                document.getElementById('syncLoading').classList.remove('hidden');
+                
+                const response = await fetch('/api/sync');
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    await fetchDialogs();
+                } else if (result.status === 'already_syncing') {
+                    alert('Sync already in progress.');
+                } else {
+                    alert(`Sync error: ${result.message}`);
+                }
+                
+                document.getElementById('syncText').classList.remove('hidden');
+                document.getElementById('syncLoading').classList.add('hidden');
+            } catch (error) {
+                console.error('Error syncing:', error);
+                alert('Failed to sync. See console for details.');
+                document.getElementById('syncText').classList.remove('hidden');
+                document.getElementById('syncLoading').classList.add('hidden');
+            }
+        }
+        
+        async function loadMessages(dialog) {
+            currentDialogId = dialog.id;
+            
+            document.getElementById('initialMessage').classList.add('hidden');
+            document.getElementById('messagesView').classList.remove('hidden');
+            document.getElementById('messagesLoading').classList.remove('hidden');
+            document.getElementById('messagesList').innerHTML = '';
+            
+            document.getElementById('dialogTitle').textContent = dialog.name;
+            let infoText = dialog.type.charAt(0).toUpperCase() + dialog.type.slice(1);
+            if (dialog.username) infoText += ` • @${dialog.username}`;
+            document.getElementById('dialogInfo').textContent = infoText;
+            
+            try {
+                const response = await fetch(`/api/messages?dialog_id=${dialog.id}`);
+                const result = await response.json();
+                
+                const messagesList = document.getElementById('messagesList');
+                messagesList.innerHTML = '';
+                
+                if (result.status === 'error') {
+                    messagesList.innerHTML = `<div class="p-4 text-center text-red-500">${result.message}</div>`;
+                    document.getElementById('messagesLoading').classList.add('hidden');
+                    return;
+                }
+                
+                if (result.messages.length === 0) {
+                    messagesList.innerHTML = '<div class="p-4 text-center text-gray-500">No messages found</div>';
+                } else {
+                    result.messages.forEach(message => {
+                        const messageDate = new Date(message.date).toLocaleString();
+                        const messageEl = document.createElement('div');
+                        messageEl.className = 'flex flex-col';
+                        
+                        messageEl.innerHTML = `
+                            <div class="flex items-baseline gap-2 mb-1">
+                                <span class="font-semibold">${escapeHtml(message.sender_name)}</span>
+                                <span class="text-xs text-gray-500">${messageDate}</span>
+                            </div>
+                            <div class="message-bubble p-3 rounded-lg">
+                                ${formatMessageText(message.text)}
+                            </div>
+                        `;
+                        
+                        messagesList.appendChild(messageEl);
+                    });
+                    
+                    // Scroll to the most recent message
+                    setTimeout(() => {
+                        messagesList.scrollTop = 0;
+                    }, 100);
+                }
+                
+                document.getElementById('messagesLoading').classList.add('hidden');
+            } catch (error) {
+                console.error('Error loading messages:', error);
+                document.getElementById('messagesLoading').classList.add('hidden');
+                document.getElementById('messagesList').innerHTML = 
+                    '<div class="p-4 text-center text-red-500">Failed to load messages</div>';
+            }
+        }
+        
+        function formatMessageText(text) {
+            // Convert URLs to links
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            return escapeHtml(text).replace(urlRegex, url => 
+                `<a href="${url}" target="_blank" class="text-blue-600 hover:underline">${url}</a>`
+            ).replace(/\n/g, '<br>');
+        }
+        
+        function escapeHtml(unsafe) {
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+        
+        document.getElementById('syncButton').addEventListener('click', syncDialogs);
+        
+        // Initial load
+        fetchDialogs();
+    </script>
+</body>
+</html>'''
+        
+        self.server = ThreadingHTTPServer(('localhost', self.port), CustomHandler)
+        print(f"Starting server at http://localhost:{self.port}")
+        webbrowser.open(f"http://localhost:{self.port}")
+        self.server.serve_forever()
+    
+    def stop_server(self):
+        if self.server:
+            self.server.shutdown()
+        if self.db_conn:
+            self.db_conn.close()
+        if self.client:
+            self.client.disconnect()
+    
+    async def start_async(self):
+        connected = await self.start_client()
+        if not connected:
+            print("Failed to connect to Telegram. Check your credentials.")
+            return False
+        
+        # Initial sync
+        result = await self.sync_dialogs()
+        if result["status"] != "success":
+            print(f"Warning: Initial sync failed - {result.get('message', 'unknown error')}")
+            
+        return True
+
+def main():
+    parser = argparse.ArgumentParser(description="Telegram Conversation Webapp")
+    args = parser.parse_args()
+    
+    API_ID = os.getenv('TELEGRAM_API_ID')
+    API_HASH = os.getenv('TELEGRAM_API_HASH')
+    
+    if not API_ID or not API_HASH:
+        print("Error: Set TELEGRAM_API_ID and TELEGRAM_API_HASH environment variables.")
+        return 1
+    
+    server = TelegramSyncServer(API_ID, API_HASH)
+    
+    # Start Telegram client
+    loop = asyncio.get_event_loop()
+    success = loop.run_until_complete(server.start_async())
+    
+    if not success:
+        return 1
+    
+    # Handle graceful shutdown
+    def signal_handler(sig, frame):
+        print("\nShutting down...")
+        server.stop_server()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    # Start web server in main thread
+    try:
+        server.start_server()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.stop_server()
+    
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())

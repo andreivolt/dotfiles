@@ -15,7 +15,7 @@ adjust-cell-width = -12%
 # adjust-cell-height = -8
 # adjust-cell-width = -16%
 
-font-size = 20
+font-size = 18
 
 background-opacity = 0.85
 background-blur-radius = 16

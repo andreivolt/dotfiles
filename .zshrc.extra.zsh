@@ -14,7 +14,7 @@ setopt auto_cd
 setopt auto_pushd
 setopt extended_glob
 setopt hash_list_all
-setopt interactive_comments
+# setopt interactive_comments
 setopt no_sh_word_split
 setopt notify
 setopt null_glob
