@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import sys
+import argparse
 
 import dbus
 
@@ -15,21 +15,15 @@ def set_keyboard_brightness(delta):
     return 100 * new_brightness / max_brightness
 
 def main():
-    if len(sys.argv) != 2:
-        print("""Usage: keyboard_brightness.py <command>
-Commands:
-  +, --up   Increment keyboard brightness
-  -, --down Decrement keyboard brightness""")
-        sys.exit(1)
-
-    command = sys.argv[1]
-    if command in ("+", "--up"):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('command', choices=['+', '-'])
+    
+    args = parser.parse_args()
+    
+    if args.command == '+':
         print(f"Keyboard brightness: {set_keyboard_brightness(1)}%")
-    elif command in ("-", "--down"):
+    elif args.command == '-':
         print(f"Keyboard brightness: {set_keyboard_brightness(-1)}%")
-    else:
-        print(f"Unknown command: {command}")
-        sys.exit(1)
 
 if __name__ == "__main__":
     main()
