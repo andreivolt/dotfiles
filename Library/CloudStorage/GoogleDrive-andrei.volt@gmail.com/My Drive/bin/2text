@@ -1,16 +1,22 @@
 #!/usr/bin/env cached-nix-shell
 #!nix-shell -i bash -p antiword coreutils python3Packages.docx2txt file ghostscript html2text jq odt2txt poppler_utils ripmime sox tesseract unrtf libxml2
 
-input_file="$1"
-
-if [ ! -f "$input_file" ]; then
-  echo "File not found: $input_file" >&2
+if [ $# -eq 0 ]; then
+  echo "Usage: any2text <file> [file2] [file3] ..." >&2
   exit 1
 fi
 
-mime_type=$(file --mime-type -b "$input_file")
+convert_file() {
+  local input_file="$1"
+  
+  if [ ! -f "$input_file" ]; then
+    echo "File not found: $input_file" >&2
+    return 1
+  fi
 
-case "$mime_type" in
+  local mime_type=$(file --mime-type -b "$input_file")
+
+  case "$mime_type" in
   text/*)
     cat "$input_file"
     ;;
@@ -64,6 +70,17 @@ case "$mime_type" in
     ;;
   *)
     echo "Unsupported MIME type: $mime_type" >&2
-    exit 1
+    return 1
     ;;
-esac
+  esac
+}
+
+if [ $# -eq 1 ]; then
+  convert_file "$1"
+else
+  for file in "$@"; do
+    output_file="${file%.*}.txt"
+    echo "Converting $file to $output_file..." >&2
+    convert_file "$file" > "$output_file"
+  done
+fi
