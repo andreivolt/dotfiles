@@ -34,13 +34,13 @@
     # =========================[ Line #1 ]=========================
     # os_icon               # os identifier
     dir                     # current directory
-    vcs                     # git status
+    docker_context          # docker context (when not default)
     # =========================[ Line #2 ]=========================
     newline                 # \n
     prompt_char             # prompt symbol
     background_jobs         # presence of background jobs
     direnv                  # direnv status (https://direnv.net/)
-    nix_shell               # nix shell (https://nixos.org/nixos/nix-pills/developing-with-nix-shell.html)
+    nix_shell_custom        # nix shell with package list
   )
 
   # The list of segments shown on the right. Fill it with less important segments.
@@ -48,6 +48,7 @@
   # automatically hidden when the input line reaches it. Right prompt above the
   # last prompt line gets hidden if it would overlap with left prompt.
   typeset -g POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(
+    vcs                     # git status
   )
 
   # Defines character set used by powerlevel10k. It's best to let `p10k configure` set it for you.
@@ -367,6 +368,8 @@
   typeset -g POWERLEVEL9K_VCS_VISUAL_IDENTIFIER_EXPANSION=
   # Custom prefix.
   # typeset -g POWERLEVEL9K_VCS_PREFIX='%fon '
+  typeset -g POWERLEVEL9K_VCS_PREFIX='['
+  typeset -g POWERLEVEL9K_VCS_SUFFIX=']'
 
   # Show status of repositories of these types. You can add svn and/or hg if you are
   # using them. If you do, your prompt may become slow even when your current directory
@@ -431,11 +434,13 @@
 
   #######################[ background_jobs: presence of background jobs ]#######################
   # Don't show the number of background jobs.
-  typeset -g POWERLEVEL9K_BACKGROUND_JOBS_VERBOSE=false
+  typeset -g POWERLEVEL9K_BACKGROUND_JOBS_VERBOSE=true
   # Background jobs color.
   typeset -g POWERLEVEL9K_BACKGROUND_JOBS_FOREGROUND=70
   # Custom icon.
   # typeset -g POWERLEVEL9K_BACKGROUND_JOBS_VISUAL_IDENTIFIER_EXPANSION='⭐'
+  typeset -g POWERLEVEL9K_BACKGROUND_JOBS_PREFIX='['
+  typeset -g POWERLEVEL9K_BACKGROUND_JOBS_SUFFIX=']'
 
   #######################[ direnv: direnv status (https://direnv.net/) ]########################
   # Direnv color.
@@ -1378,6 +1383,27 @@
     p10k segment -f 208 -i '⭐' -t 'hello, %n'
   }
 
+  # Docker context prompt segment
+  function prompt_docker_context() {
+    if [[ -n "$DOCKER_HOST" ]]; then
+      local docker_context
+      docker_context=$(docker context show 2>/dev/null)
+      if [[ -n "$docker_context" && "$docker_context" != "orbstack" ]]; then
+        # Show the DOCKER_HOST value without ssh:// prefix
+        local host_display="${DOCKER_HOST#ssh://}"
+        p10k segment -t "$host_display"
+      fi
+    fi
+  }
+
+  # Custom nix_shell segment that shows packages
+  function prompt_nix_shell_custom() {
+    if [[ -n "$IN_NIX_SHELL" ]]; then
+      local packages="${NIX_SHELL_PACKAGES:-shell}"
+      p10k segment -t "$packages"
+    fi
+  }
+
   # User-defined prompt segments may optionally provide an instant_prompt_* function. Its job
   # is to generate the prompt segment for display in instant prompt. See
   # https://github.com/romkatv/powerlevel10k/blob/master/README.md#instant-prompt.
@@ -1400,6 +1426,18 @@
   # User-defined prompt segments can be customized the same way as built-in segments.
   # typeset -g POWERLEVEL9K_EXAMPLE_FOREGROUND=208
   # typeset -g POWERLEVEL9K_EXAMPLE_VISUAL_IDENTIFIER_EXPANSION='⭐'
+
+  # Docker context segment configuration
+  typeset -g POWERLEVEL9K_DOCKER_CONTEXT_FOREGROUND=033
+  typeset -g POWERLEVEL9K_DOCKER_CONTEXT_VISUAL_IDENTIFIER_EXPANSION='🐳'
+  typeset -g POWERLEVEL9K_DOCKER_CONTEXT_PREFIX='['
+  typeset -g POWERLEVEL9K_DOCKER_CONTEXT_SUFFIX=']'
+
+  # Custom nix_shell segment configuration
+  typeset -g POWERLEVEL9K_NIX_SHELL_CUSTOM_FOREGROUND=074
+  typeset -g POWERLEVEL9K_NIX_SHELL_CUSTOM_VISUAL_IDENTIFIER_EXPANSION='❄️'
+  typeset -g POWERLEVEL9K_NIX_SHELL_CUSTOM_PREFIX='['
+  typeset -g POWERLEVEL9K_NIX_SHELL_CUSTOM_SUFFIX=']'
 
   # Transient prompt works similarly to the builtin transient_rprompt option. It trims down prompt
   # when accepting a command line. Supported values:
