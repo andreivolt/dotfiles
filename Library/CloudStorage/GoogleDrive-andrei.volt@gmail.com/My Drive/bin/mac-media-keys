@@ -1,0 +1,332 @@
+#!/usr/bin/env -S uv run -qs
+
+# /// script
+# dependencies = [
+#    "pyobjc-framework-Quartz>=9.0.1",
+#    "flask>=2.3.0",
+#    "netifaces>=0.11.0",
+#    "dominate>=2.8.0"
+# ]
+# ///
+
+import Quartz
+import sys
+import argparse
+import dominate
+from dominate.tags import button, div, meta, script, style, span
+from dominate.util import raw
+from flask import Flask, render_template_string, request
+
+# NSEvent.h
+NSSystemDefined = 14
+
+# hidsystem/ev_keymap.h
+NX_KEYTYPE_SOUND_UP = 0
+NX_KEYTYPE_SOUND_DOWN = 1
+NX_KEYTYPE_PLAY = 16
+NX_KEYTYPE_NEXT = 17
+NX_KEYTYPE_PREVIOUS = 18
+
+supportedcmds = {
+    'playpause': NX_KEYTYPE_PLAY,
+    'next': NX_KEYTYPE_NEXT,
+    'prev': NX_KEYTYPE_PREVIOUS,
+    'volup': NX_KEYTYPE_SOUND_UP,
+    'voldown': NX_KEYTYPE_SOUND_DOWN
+}
+
+def HIDPostAuxKey(key):
+    def doKey(down):
+        ev = Quartz.NSEvent.otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2_(
+            NSSystemDefined,  # type
+            (0, 0),  # location
+            0xa00 if down else 0xb00,  # flags
+            0,  # timestamp
+            0,  # window
+            0,  # ctx
+            8,  # subtype
+            (key << 16) | ((0xa if down else 0xb) << 8),  # data1
+            -1  # data2
+            )
+        cev = ev.CGEvent()
+        Quartz.CGEventPost(0, cev)
+    doKey(True)
+    doKey(False)
+
+# Create components using Dominate library
+# Heroicons CDN URLs (using unpkg.com)
+HEROICON_CDN = "https://unpkg.com/heroicons@2.0.18/24/outline"
+
+# Mapping of commands to Heroicon filenames
+HEROICONS = {
+    'prev': "backward.svg",
+    'playpause': "play-circle.svg",
+    'next': "forward.svg",
+    'voldown': "speaker-wave.svg",
+    'volup': "speaker-wave.svg",  # We'll use the same icon but can style differently
+    'mute': "speaker-x-mark.svg"
+}
+
+def media_button(command, icon, is_primary=False, is_disabled=False):
+    """Create a media button component"""
+    # Base classes for all buttons
+    base_classes = "w-full h-full select-none focus:outline-none transition-colors flex items-center justify-center"
+
+    # Classes for regular button type with active state
+    if is_primary:
+        type_classes = "bg-primary/90 text-white hover:bg-primary active:bg-primary-dark backdrop-blur-sm dark:bg-blue-700/90 dark:hover:bg-blue-700 dark:active:bg-blue-800"
+    else:
+        type_classes = "bg-white/80 text-gray-800 hover:bg-white/90 active:bg-gray-200 backdrop-blur-sm dark:bg-gray-600/80 dark:text-gray-200 dark:hover:bg-gray-600/90 dark:active:bg-gray-700"
+
+    # Classes for disabled state
+    disabled_classes = "opacity-40 cursor-not-allowed" if is_disabled else ""
+
+    # Combine all classes
+    all_classes = f"{base_classes} {type_classes} {disabled_classes}"
+
+    # Create button with SVG icon inside
+    btn = button(
+        **{
+            'hx-post': '/control',
+            'hx-vals': f'{{"command": "{command}"}}',
+            'hx-swap': 'none',
+            'class': all_classes,
+            'disabled': is_disabled
+        }
+    )
+
+    # Add SVG icon from Heroicons CDN
+    icon_url = f"{HEROICON_CDN}/{HEROICONS[command]}"
+    icon_container = span(cls="w-16 h-16 md:w-20 md:h-20 relative")
+
+    # Create img tag with SVG as src
+    img_tag = f'<img src="{icon_url}" class="w-full h-full transition-all duration-200" alt="{command}" loading="eager">'
+    icon_container.add(raw(img_tag))
+    btn.add(icon_container)
+
+    return btn
+
+def create_media_grid():
+    """Create the grid of media buttons"""
+    with div(cls="grid grid-cols-3 grid-rows-2 h-screen w-screen gap-0.5 bg-gray-200 dark:bg-gray-700") as grid:
+        media_button("prev", "", is_primary=False)
+        media_button("playpause", "", is_primary=True)
+        media_button("next", "", is_primary=False)
+        media_button("voldown", "", is_primary=False)
+        media_button("mute", "", is_disabled=True)
+        media_button("volup", "", is_primary=False)
+    return grid
+
+def create_layout():
+    """Create the full page layout"""
+    doc = dominate.document(title="Media Controls")
+
+    with doc.head:
+        meta(charset="UTF-8")
+        meta(name="viewport", content="width=device-width, initial-scale=1.0")
+        meta(name="color-scheme", content="light dark")
+
+        # Tailwind CSS from CDN
+        script(src="https://cdn.tailwindcss.com")
+
+        # HTMX for interactions
+        script(src="https://unpkg.com/htmx.org@1.9.6")
+
+        # Tailwind configuration
+        with script():
+            raw("""
+            // Extend Tailwind configuration
+            tailwind.config = {
+                darkMode: 'media',
+                theme: {
+                    extend: {
+                        colors: {
+                            primary: '#2D5BFF',
+                            'primary-dark': '#2456EB'
+                        }
+                    }
+                },
+                // Make sure variants like 'active' work
+                variants: {
+                    extend: {
+                        backgroundColor: ['active', 'dark'],
+                        textColor: ['active', 'dark'],
+                        borderColor: ['active', 'dark']
+                    }
+                }
+            }
+            """)
+
+        # Styles
+        with style():
+            raw(r"""
+            * {
+                -webkit-tap-highlight-color: transparent;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            }
+
+            /* SVG icon styling */
+            img {
+                width: 100%;
+                height: 100%;
+                transition: filter 0.2s ease;
+            }
+
+            /* Dark buttons get dark SVGs, light buttons get light SVGs */
+            button.text-white img,
+            button.dark\:text-gray-200 img {
+                filter: invert(1) brightness(1.5);
+            }
+
+            button.text-gray-800 img {
+                filter: brightness(0.2);
+            }
+
+
+            /* Hover states */
+            button:hover img {
+                transform: scale(1.05);
+                transition: transform 0.2s ease;
+            }
+
+            /* Active states */
+            button:active img {
+                transform: scale(0.95);
+                transition: transform 0.1s ease;
+            }
+
+            /* Dark mode adjustments for SVG */
+            @media (prefers-color-scheme: dark) {
+                /* Dark mode, dark background buttons */
+                button.dark\:bg-gray-600\/80 img {
+                    filter: invert(1) brightness(1.5);
+                }
+
+                /* Dark mode, primary button */
+                button.dark\:bg-blue-700\/90 img {
+                    filter: invert(1) brightness(1.8);
+                }
+            }
+            """)
+
+    # Add the body content
+    doc.body.add(create_media_grid())
+
+    # Set body attributes after creation
+    doc.body['class'] = "m-0 p-0 h-screen overflow-hidden select-none bg-gradient-to-br from-gray-100 to-gray-300 dark:from-gray-800 dark:to-gray-900"
+
+    return doc
+
+# Generate the HTML template using dominate
+html_template = str(create_layout())
+
+# Create Flask app
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return render_template_string(html_template)
+
+@app.route('/control', methods=['POST'])
+def control():
+    # Get command from form data
+    command = request.form.get('command')
+
+    if command in supportedcmds:
+        HIDPostAuxKey(supportedcmds[command])
+        return ""
+    else:
+        # Command not supported (includes "mute")
+        return "", 400
+
+def find_tailscale_ip():
+    """Try to find the Tailscale IP address"""
+    try:
+        import socket
+        import subprocess
+
+        # Try to detect Tailscale interface
+        try:
+            # macOS/Linux
+            output = subprocess.check_output(['tailscale', 'ip', '-4'], stderr=subprocess.STDOUT, text=True).strip()
+            if output:
+                return output
+        except (subprocess.SubprocessError, FileNotFoundError):
+            pass
+
+        # Check for tailscale in interface list
+        try:
+            # Try common interface names
+            interfaces = ['tailscale0', 'ts0', 'utun']
+            import netifaces
+            for interface in netifaces.interfaces():
+                if any(ts_name in interface.lower() for ts_name in interfaces):
+                    addrs = netifaces.ifaddresses(interface)
+                    if netifaces.AF_INET in addrs:
+                        return addrs[netifaces.AF_INET][0]['addr']
+        except (ImportError, KeyError, IndexError):
+            pass
+    except Exception:
+        pass
+
+    # Return None if we couldn't find Tailscale IP
+    return None
+
+def run_server(args):
+    """Run the web server"""
+    host = '0.0.0.0'  # Default to all interfaces
+
+    # Try to find Tailscale IP if requested
+    if args.use_tailscale:
+        tailscale_ip = find_tailscale_ip()
+        if tailscale_ip:
+            host = tailscale_ip
+            print(f"Starting web server on Tailscale IP: http://{host}:{args.port}")
+        else:
+            print(f"Tailscale IP not found. Starting web server on all interfaces: http://{host}:{args.port}")
+    else:
+        print(f"Starting web server on: http://{host}:{args.port}")
+
+    app.run(host=host, port=args.port, debug=args.debug)
+
+def send_media_command(args):
+    """Send a media key command"""
+    if args.command in supportedcmds:
+        HIDPostAuxKey(supportedcmds[args.command])
+    else:
+        print(f"Error: Unsupported command: {args.command}")
+        print(f"Supported commands: {', '.join(supportedcmds.keys())}")
+        sys.exit(1)
+
+def parse_args():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description="Control macOS media keys and provide a web interface"
+    )
+
+    # Create subparsers for different commands
+    subparsers = parser.add_subparsers(dest="action", help="Action to perform")
+
+    # Server command
+    server_parser = subparsers.add_parser("server", help="Start the web server")
+    server_parser.add_argument("-p", "--port", type=int, default=8080, help="Port to listen on (default: 8080)")
+    server_parser.add_argument("-t", "--use-tailscale", action="store_true", help="Bind to Tailscale IP if available")
+    server_parser.add_argument("-d", "--debug", action="store_true", help="Run server in debug mode")
+    server_parser.set_defaults(func=run_server)
+
+    # Media key commands
+    for cmd in supportedcmds.keys():
+        cmd_parser = subparsers.add_parser(cmd, help=f"Send {cmd} media command")
+        cmd_parser.set_defaults(func=send_media_command, command=cmd)
+
+    return parser.parse_args()
+
+if __name__ == "__main__":
+    args = parse_args()
+
+    if hasattr(args, 'func'):
+        args.func(args)
+    else:
+        # No command specified, show help
+        parse_args(['--help'])
+        sys.exit(1)

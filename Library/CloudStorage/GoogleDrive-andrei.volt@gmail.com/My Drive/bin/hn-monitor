@@ -1,0 +1,382 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.9"
+# dependencies = [
+#   "requests",
+#   "beautifulsoup4",
+#   "platformdirs",
+#   "pyyaml",
+# ]
+# ///
+
+import os
+import sys
+import yaml
+import time
+import getpass
+import subprocess
+import requests
+from pathlib import Path
+from datetime import datetime
+from bs4 import BeautifulSoup
+from platformdirs import user_config_dir, user_state_dir
+
+def send_notification(title, message, url):
+    """Send a notification using terminal-notifier and pushover-cli with the given parameters."""
+    # Send terminal notification
+    subprocess.run([
+        'terminal-notifier',
+        '-title', title,
+        '-message', message,
+        '-open', url
+    ])
+    
+    # Send pushover notification
+    subprocess.run([
+        'pushover-cli', 'push',
+        '-t', title, 
+        f"{message}\n{url}"
+    ])
+
+# Setup paths using platformdirs
+CONFIG_DIR = Path(user_config_dir("hn-monitor"))
+STATE_DIR = Path(user_state_dir("hn-monitor"))
+CONFIG_FILE = CONFIG_DIR / "config.yml"
+CACHE_FILE = STATE_DIR / "cache.yml"
+
+CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Load or create config
+if CONFIG_FILE.exists():
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            config = yaml.safe_load(f)
+
+        # Validate config has required keys
+        if not config or not isinstance(config, dict):
+            raise ValueError("Invalid config format")
+
+        # Ensure all required keys exist
+        for key in ['username', 'password', 'interval']:
+            if key not in config:
+                raise ValueError(f"Missing '{key}' in config")
+    except Exception as e:
+        username = input("Enter HN username: ")
+        password = getpass.getpass("Enter HN password: ")
+
+        config = {
+            "username": username,
+            "password": password,
+            "interval": 30
+        }
+
+        with open(CONFIG_FILE, 'w') as f:
+            yaml.dump(config, f)
+
+        CONFIG_FILE.chmod(0o600)
+else:
+    username = input("Enter HN username: ")
+    password = getpass.getpass("Enter HN password: ")
+
+    config = {
+        "username": username,
+        "password": password,
+        "interval": 30
+    }
+
+    with open(CONFIG_FILE, 'w') as f:
+        yaml.dump(config, f)
+
+    CONFIG_FILE.chmod(0o600)
+
+# Load cache
+if CACHE_FILE.exists():
+    try:
+        with open(CACHE_FILE, 'r') as f:
+            cache = yaml.safe_load(f) or {}
+    except Exception:
+        cache = {}
+else:
+    cache = {}
+
+# Login to HN
+login_resp = requests.post(
+    'https://news.ycombinator.com/login',
+    data={
+        'goto': 'threads',
+        'acct': config['username'],
+        'pw': config['password'],
+        'submit': 'login'
+    },
+    allow_redirects=False
+)
+
+cookies = login_resp.cookies
+if not cookies:
+    raise Exception("Login failed")
+
+def check_hn():
+    """Check HN for updates and send notifications for changes."""
+    global cache  # Use the global cache to persist between function calls
+
+    # Parse threads page
+    threads_url = f"https://news.ycombinator.com/threads?id={config['username']}"
+    threads_page = requests.get(
+        threads_url,
+        cookies=cookies
+    )
+
+    soup = BeautifulSoup(threads_page.text, 'html.parser')
+
+    # Parse into data structure
+    current_state = {}
+
+    # Process all table rows
+    rows = soup.find_all('tr')
+    for i, row in enumerate(rows):
+        row_id = row.get('id')
+        row_class = row.get('class')
+
+        if not (row_id and row_class):
+            continue
+
+        if 'comtr' in row_class:
+            # This is a comment - check if it's by the user
+            author_elem = row.select_one('.hnuser')
+            if not author_elem:
+                continue
+
+            author = author_elem.text
+
+            if author == config['username']:
+                item_id = row_id
+                comment_elem = row.select_one('.comment')
+                comment_text = comment_elem.text.strip() if comment_elem else ''
+
+                # Get parent thread info from "on:" link
+                parent_link = row.select_one('.onstory a')
+                parent_title = parent_link.text if parent_link else 'Unknown thread'
+
+                # Get score from the score span
+                score_elem = row.select_one('.score')
+                score = 1  # Default
+                if score_elem:
+                    score_match = score_elem.text.strip()
+                    score = int(score_match.split()[0]) if score_match and score_match[0].isdigit() else 1
+
+                # Count direct replies by looking at subsequent rows with higher indentation
+                reply_count = 0
+                reply_texts = []
+
+                # Find current indentation level
+                indent_img = row.select_one('.ind img')
+                current_indent = int(indent_img['width']) if indent_img and 'width' in indent_img.attrs else 0
+
+                # Check subsequent rows for replies
+                j = i + 1
+                while j < len(rows):
+                    next_row = rows[j]
+                    if not next_row.get('class') or 'comtr' not in next_row.get('class', []):
+                        j += 1
+                        continue
+
+                    next_indent_img = next_row.select_one('.ind img')
+                    if not next_indent_img or 'width' not in next_indent_img.attrs:
+                        j += 1
+                        continue
+
+                    next_indent = int(next_indent_img['width'])
+
+                    # Only count direct replies (one level deeper)
+                    if next_indent == current_indent + 40:
+                        reply_count += 1
+
+                        # Collect reply text
+                        reply_elem = next_row.select_one('.comment')
+                        reply_text = reply_elem.text.strip() if reply_elem else ''
+                        reply_author_elem = next_row.select_one('.hnuser')
+                        reply_author = reply_author_elem.text if reply_author_elem else 'Unknown'
+
+                        truncated_text = reply_text[:100] + ('...' if len(reply_text) > 100 else '')
+                        reply_texts.append({
+                            'author': reply_author,
+                            'text': truncated_text
+                        })
+
+                    elif next_indent <= current_indent:
+                        # Back to same level or higher - no longer in our thread
+                        break
+
+                    j += 1
+
+                current_state[item_id] = {
+                    'type': 'comment',
+                    'text': comment_text[:100] + ('...' if len(comment_text) > 100 else ''),
+                    'parent_title': parent_title,
+                    'url': f"https://news.ycombinator.com/item?id={item_id}",
+                    'score': score,
+                    'replies': reply_count,
+                    'reply_texts': reply_texts
+                }
+
+
+        elif 'athing' in row_class and 'comtr' not in row_class:
+            # This is a submission - check if it's by the user
+            item_id = row_id
+
+            # Get author from the next row (metadata row)
+            if i + 1 < len(rows):
+                meta_row = rows[i + 1]
+                author_elem = meta_row.select_one('.hnuser')
+                if author_elem and author_elem.text == config['username']:
+                    title_elem = row.select_one('.titleline > a')
+                    title = title_elem.text if title_elem else ''
+
+                    score_elem = meta_row.select_one('.score')
+                    score = 0
+                    if score_elem:
+                        score_text = score_elem.text
+                        score = int(score_text.split()[0]) if score_text.split()[0].isdigit() else 0
+
+                    comment_links = [a for a in meta_row.select('a') if a.text and 'comment' in a.text]
+                    comments_count = 0
+                    if comment_links:
+                        comment_text = comment_links[0].text
+                        if comment_text:
+                            import re
+                            match = re.search(r'(\d+)\s+comment', comment_text)
+                            if match:
+                                comments_count = int(match.group(1))
+
+                    current_state[item_id] = {
+                        'type': 'thread',
+                        'title': title,
+                        'url': f"https://news.ycombinator.com/item?id={item_id}",
+                        'score': score,
+                        'comments': comments_count
+                    }
+
+
+    # Check for changes
+    first_run = not cache or len(cache) == 0 or all(item_id not in cache for item_id in current_state)
+    if first_run:
+        # Just update cache without any notifications for all current items
+        for item_id, data in current_state.items():
+            cache[item_id] = data
+    else:
+        for item_id, data in current_state.items():
+            if item_id in cache:
+                old_data = cache[item_id]
+
+                # Initialize missing fields in old_data with defaults
+                if not isinstance(old_data, dict):
+                    continue
+
+                # Ensure old_data has the type key
+                if 'type' not in old_data:
+                    if 'comments' in old_data:
+                        old_data['type'] = 'thread'
+                    else:
+                        old_data['type'] = 'comment'
+
+                # Set defaults for missing keys based on type
+                if old_data['type'] == 'comment':
+                    if 'score' not in old_data:
+                        old_data['score'] = data['score']
+                    if 'replies' not in old_data:
+                        old_data['replies'] = 0
+                    if 'reply_texts' not in old_data:
+                        old_data['reply_texts'] = []
+                elif old_data['type'] == 'thread':
+                    if 'score' not in old_data:
+                        old_data['score'] = data['score']
+                    if 'comments' not in old_data:
+                        old_data['comments'] = 0
+
+                # Now proceed with comparison
+                if data['type'] == 'comment':
+                    # Comment score changed
+                    if data['score'] != old_data['score']:
+                        delta = data['score'] - old_data['score']
+                        emoji = "⬆️" if delta > 0 else "⬇️"
+                        delta_str = f"+{delta}" if delta > 0 else f"{delta}"
+
+                        truncated_text = data['text'][:60] + ('...' if len(data['text']) > 60 else '')
+                        message = f"{truncated_text}\nin: {data['parent_title']}\n{emoji} {delta_str} ({data['score']} total)"
+                        title = f"{emoji} Score {delta_str}"
+
+                        send_notification(title, message, data['url'])
+
+                    # New replies to comment
+                    if data['replies'] > old_data['replies']:
+                        new_count = data['replies'] - old_data['replies']
+
+                        # Find new replies by comparing with old reply texts
+                        old_reply_count = old_data['replies']
+                        new_reply_texts = data['reply_texts'][old_reply_count:] if len(data['reply_texts']) > old_reply_count else []
+
+                        if new_reply_texts:
+                            # Show the first new reply in the notification
+                            first_new_reply = new_reply_texts[0]
+                            truncated_reply = first_new_reply['text'][:60] + ('...' if len(first_new_reply['text']) > 60 else '')
+                            parent_title_short = data['parent_title'][:50] + ('...' if len(data['parent_title']) > 50 else '')
+                            message = f"{first_new_reply['author']}: {truncated_reply}\nin: {parent_title_short}"
+
+                            if new_count > 1:
+                                message += f"\n+{new_count - 1} more"
+                        else:
+                            # Fallback to old behavior if we can't get reply text
+                            truncated_text = data['text'][:60] + ('...' if len(data['text']) > 60 else '')
+                            message = f"{truncated_text}\nin: {data['parent_title']}\n+{new_count} new"
+
+                        title = f"💬 New Reply (+{new_count})"
+                        send_notification(title, message, data['url'])
+
+                elif data['type'] == 'thread':
+                    # Thread score changed
+                    if data['score'] != old_data['score']:
+                        delta = data['score'] - old_data['score']
+                        emoji = "⬆️" if delta > 0 else "⬇️"
+                        delta_str = f"+{delta}" if delta > 0 else f"{delta}"
+
+                        truncated_title = data['title'][:60] + ('...' if len(data['title']) > 60 else '')
+                        message = f"{truncated_title}\n{emoji} {delta_str} ({data['score']} total)"
+                        title = f"{emoji} Score {delta_str}"
+
+                        send_notification(title, message, data['url'])
+
+                    # New comments on thread
+                    if data['comments'] > old_data['comments']:
+                        new_count = data['comments'] - old_data['comments']
+
+                        truncated_title = data['title'][:60] + ('...' if len(data['title']) > 60 else '')
+                        message = f"{truncated_title}\n+{new_count} new"
+                        title = f"💬 New Comments (+{new_count})"
+
+                        send_notification(title, message, data['url'])
+            else:
+                # New item - should not be reached if first_run was handled correctly
+                # Add to cache without notification
+                cache[item_id] = data
+
+    # Save state
+    with open(CACHE_FILE, 'w') as f:
+        yaml.dump(current_state, f)
+
+    # Update cache for next run
+    cache = current_state
+
+    return current_state
+
+# Run the first check
+check_hn()
+
+# Run in daemon mode (always)
+print(f"Monitoring HN every {config['interval']} seconds...")
+
+while True:
+    time.sleep(config['interval'])
+
+    # Run the check function
+    check_hn()
