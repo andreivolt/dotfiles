@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def get_jumpcut_data():
+    """Read and parse Jumpcut data file"""
+    jumpcut_file = Path.home() / "Library/Application Support/Jumpcut/JCEngine.save"
+    
+    if not jumpcut_file.exists():
+        print("Jumpcut data file not found", file=sys.stderr)
+        sys.exit(1)
+    
+    try:
+        result = subprocess.run(
+            ["plist2json"], 
+            input=jumpcut_file.read_bytes(),
+            capture_output=True,
+            check=True
+        )
+        data = json.loads(result.stdout)
+        return [item.get("Contents", "") for item in data.get("jcList", [])]
+    except (subprocess.CalledProcessError, json.JSONDecodeError, FileNotFoundError) as e:
+        print(f"Error reading Jumpcut data: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def filter_items(items, search=None, number=None, reverse=False, unique=True):
+    """Filter and process clipboard items"""
+    if unique:
+        seen = set()
+        unique_items = []
+        for item in items:
+            if item not in seen:
+                seen.add(item)
+                unique_items.append(item)
+        items = unique_items
+    
+    if search:
+        items = [item for item in items if search.lower() in item.lower()]
+    
+    if reverse:
+        items = list(reversed(items))
+    
+    if number:
+        items = items[:number]
+    
+    return items
+
+
+def run_fzf(items, copy_mode=False):
+    """Run fzf with items and keybindings"""
+    if not items:
+        print("No items found", file=sys.stderr)
+        sys.exit(1)
+    
+    # Encode multi-line items as single lines for fzf
+    encoded_items = []
+    for item in items:
+        encoded = item.replace('\n', '\\n').replace('\t', '\\t')
+        encoded_items.append(encoded)
+    
+    keybinds = [
+        "ctrl-y:execute-silent(echo -n {} | sed 's/\\\\n/\\n/g; s/\\\\t/\\t/g' | pbcopy)+abort",
+        "ctrl-e:execute(echo -n {} | sed 's/\\\\n/\\n/g; s/\\\\t/\\t/g' | pbcopy && osascript -e 'tell app \"System Events\" to keystroke \"v\" using command down')+abort",
+        "ctrl-d:execute-silent(echo 'Delete not implemented yet')+abort"
+    ]
+    
+    fzf_cmd = [
+        "fzf", 
+        "--preview", "echo {} | sed 's/\\\\n/\\n/g; s/\\\\t/\\t/g' | fold -s -w 80",
+        "--preview-window", "wrap",
+        "--bind", ",".join(keybinds)
+    ]
+    
+    try:
+        result = subprocess.run(
+            fzf_cmd,
+            input="\n".join(encoded_items),
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        # Decode the result back to original format
+        encoded_result = result.stdout.strip()
+        return encoded_result.replace('\\n', '\n').replace('\\t', '\t')
+    except subprocess.CalledProcessError:
+        sys.exit(1)
+
+
+def output_result(selection, format_type, copy_mode):
+    """Output the selected item in the specified format"""
+    if not selection:
+        return
+    
+    if copy_mode:
+        subprocess.run(["pbcopy"], input=selection.encode())
+        try:
+            subprocess.run([
+                "hs", "-c", 
+                f"hs.alert.show('Copied ' .. [[{selection}]])"
+            ], check=False)
+        except FileNotFoundError:
+            pass
+    else:
+        if format_type == "json":
+            print(json.dumps({"content": selection}))
+        elif format_type == "csv":
+            print(f'"{selection.replace('"', '""')}"')
+        else:
+            print(selection)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Browse and manage Jumpcut clipboard history with interactive selection"
+    )
+    
+    action_group = parser.add_mutually_exclusive_group()
+    action_group.add_argument("-c", "--copy", action="store_true", 
+                             help="copy selected item to clipboard")
+    action_group.add_argument("-e", "--echo", action="store_true", 
+                             help="echo selected item to stdout (default)")
+    
+    parser.add_argument("-f", "--format", choices=["plain", "json", "csv"], 
+                       default="plain", help="output format (default: plain)")
+    parser.add_argument("-n", "--number", type=int, 
+                       help="limit number of items shown")
+    parser.add_argument("-s", "--search", 
+                       help="pre-filter items containing search term")
+    parser.add_argument("--reverse", action="store_true", 
+                       help="show items in reverse chronological order")
+    parser.add_argument("--no-unique", action="store_true", 
+                       help="allow duplicate items")
+    
+    args = parser.parse_args()
+    
+    items = get_jumpcut_data()
+    filtered_items = filter_items(
+        items, 
+        search=args.search, 
+        number=args.number, 
+        reverse=args.reverse,
+        unique=not args.no_unique
+    )
+    
+    selection = run_fzf(filtered_items, copy_mode=args.copy)
+    output_result(selection, args.format, args.copy)
+
+
+if __name__ == "__main__":
+    main()
