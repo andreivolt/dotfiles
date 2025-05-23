@@ -1,0 +1,1 @@
+exec npx --yes quicktype --lang schema

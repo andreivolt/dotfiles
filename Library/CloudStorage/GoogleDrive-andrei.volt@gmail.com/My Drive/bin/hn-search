@@ -1,91 +1,223 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env python3
 
-require 'bundler/inline'
+import argparse
+import json
+import sys
+import time
+from datetime import datetime, timedelta
+from urllib.parse import urlencode
+from urllib.request import urlopen, HTTPError
 
-gemfile(quiet: true) do
-  source :rubygems
-  gem 'docopt'
-  gem 'httparty'
-  gem 'activesupport', require: 'active_support/all'
-end
 
-doc = <<~DOCOPT
-  Usage:
-    #{__FILE__} <query> [--sort=<sort>] [--tags=<tags>] [--page=<page>] [--hits-per-page=<hits>] [--before=<before>] [--after=<after>] [--time-range=<range>] [--points=<points>] [--num-comments=<comments>]
-    #{__FILE__} (-h | --help)
-    #{__FILE__} --version
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='Search Hacker News using Algolia API',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  %(prog)s "python machine learning" --tags=story --points=50
+  %(prog)s "react" --sort=date --time-range=week
+  %(prog)s "startup" --tags=story --num-comments=20 --page=2
+  %(prog)s "Show HN" --author=dang --sort=date
+  %(prog)s "" --author=pg --points=100
+        '''
+    )
+    
+    parser.add_argument('query', nargs='?', default='', help='Search query (optional if using filters)')
+    parser.add_argument('--sort', choices=['relevance', 'date'], default='relevance',
+                        help='Sort results by relevance or date (default: relevance)')
+    parser.add_argument('--tags', help='Filter by tags (story, comment, show_hn, ask_hn, poll)')
+    parser.add_argument('--author', help='Filter by author username')
+    parser.add_argument('--page', type=int, default=0, help='Page number (default: 0)')
+    parser.add_argument('--hits-per-page', type=int, default=20, 
+                        help='Results per page (default: 20, max: 1000)')
+    parser.add_argument('--points', type=int, help='Minimum points filter')
+    parser.add_argument('--num-comments', type=int, help='Minimum comments filter')
+    parser.add_argument('--before', help='Filter before date (YYYY-MM-DD)')
+    parser.add_argument('--after', help='Filter after date (YYYY-MM-DD)')
+    parser.add_argument('--time-range', choices=['24h', 'week', 'month', 'year'],
+                        help='Time range shortcut')
+    parser.add_argument('--raw', action='store_true', help='Output raw JSON response')
+    parser.add_argument('--pretty', action='store_true', help='Formatted output')
+    
+    return parser.parse_args()
 
-  Options:
-    -h --help                   Show this screen.
-    --version                   Show version.
-    --sort=<sort>               Sort results by 'relevance', 'points', 'num_comments', or 'date'. Default is 'relevance'.
-    --tags=<tags>               Filter results by tags (e.g., 'story', 'comment'). Use comma for AND, parentheses for OR conditions.
-    --page=<page>               Page number for results pagination [default: 0].
-    --hits-per-page=<hits>      Number of results to return per page [default: 20].
-    --before=<before>           Filter results to before this date (YYYY-MM-DD).
-    --after=<after>             Filter results to after this date (YYYY-MM-DD).
-    --time-range=<range>        Shortcut for time ranges: '24h', 'week', 'month', 'year'.
-    --points=<points>           Filter results by minimum points.
-    --num-comments=<comments>   Filter results by minimum number of comments.
-DOCOPT
 
-def construct_query(args)
-  query_params = {
-    query: args['<query>'],
-    page: args['--page'],
-    hitsPerPage: args['--hits-per-page']
-  }
+def date_to_timestamp(date_str):
+    """Convert YYYY-MM-DD string to Unix timestamp"""
+    try:
+        dt = datetime.strptime(date_str, '%Y-%m-%d')
+        return int(dt.timestamp())
+    except ValueError:
+        print(f"Error: Invalid date format '{date_str}'. Use YYYY-MM-DD", file=sys.stderr)
+        sys.exit(1)
 
-  if args['--tags']
-    query_params[:tags] = args['--tags']
-  end
 
-  numeric_filters = []
-  if args['--points']
-    numeric_filters << "points>=#{args['--points']}"
-  end
+def build_numeric_filters(args):
+    """Build numeric filters string for API"""
+    filters = []
+    
+    if args.points:
+        filters.append(f"points>={args.points}")
+    
+    if args.num_comments:
+        filters.append(f"num_comments>={args.num_comments}")
+    
+    # Handle time filtering
+    if args.before or args.after:
+        if args.before:
+            before_ts = date_to_timestamp(args.before)
+            filters.append(f"created_at_i<{before_ts}")
+        if args.after:
+            after_ts = date_to_timestamp(args.after)
+            filters.append(f"created_at_i>{after_ts}")
+    elif args.time_range:
+        now = int(time.time())
+        if args.time_range == '24h':
+            cutoff = now - 86400
+        elif args.time_range == 'week':
+            cutoff = now - 604800
+        elif args.time_range == 'month':
+            cutoff = now - 2592000
+        elif args.time_range == 'year':
+            cutoff = now - 31536000
+        filters.append(f"created_at_i>{cutoff}")
+    
+    return ','.join(filters) if filters else None
 
-  if args['--num-comments']
-    numeric_filters << "num_comments>=#{args['--num-comments']}"
-  end
 
-  unless numeric_filters.empty?
-    query_params[:numericFilters] = numeric_filters.join(',')
-  end
+def build_tags(args):
+    """Build tags parameter including author filter"""
+    tags = []
+    
+    if args.tags:
+        tags.extend(args.tags.split(','))
+    
+    if args.author:
+        tags.append(f"author_{args.author}")
+    
+    return ','.join(tags) if tags else None
 
-  query_params
-end
 
-def calculate_time_filters(args)
-  if args['--before'] || args['--after']
-    before = args['--before'] ? Date.parse(args['--before']).to_time.to_i : nil
-    after = args['--after'] ? Date.parse(args['--after']).to_time.to_i : Time.now.to_i
-    return "created_at_i<#{before},created_at_i>#{after}" if before
-    "created_at_i>#{after}"
-  elsif args['--time-range']
-    case args['--time-range']
-    when '24h'
-      "created_at_i>#{24.hours.ago.to_i}"
-    when 'week'
-      "created_at_i>#{1.week.ago.to_i}"
-    when 'month'
-      "created_at_i>#{1.month.ago.to_i}"
-    when 'year'
-      "created_at_i>#{1.year.ago.to_i}"
-    end
-  end
-end
+def build_query_params(args):
+    """Build query parameters for API request"""
+    params = {
+        'query': args.query,
+        'page': args.page,
+        'hitsPerPage': min(args.hits_per_page, 1000)
+    }
+    
+    tags = build_tags(args)
+    if tags:
+        params['tags'] = tags
+    
+    numeric_filters = build_numeric_filters(args)
+    if numeric_filters:
+        params['numericFilters'] = numeric_filters
+    
+    return params
 
-begin
-  args = Docopt::docopt(doc, version: '1.0.0')
-  query_params = construct_query(args)
-  time_filter = calculate_time_filters(args)
-  query_params[:numericFilters] = "#{query_params[:numericFilters]},#{time_filter}" if time_filter
 
-  base_url = args['--sort'] == 'date' ? 'http://hn.algolia.com/api/v1/search_by_date' : 'http://hn.algolia.com/api/v1/search'
+def format_hit(hit, pretty=False):
+    """Format a single search result for display"""
+    hit_type = 'story' if 'story_text' in hit or 'title' in hit else 'comment'
+    hn_url = f"https://news.ycombinator.com/item?id={hit.get('objectID', '')}"
+    
+    if hit_type == 'story':
+        title = hit.get('title', 'No title')
+        url = hit.get('url', '')
+        author = hit.get('author', 'unknown')
+        points = hit.get('points', 0)
+        comments = hit.get('num_comments', 0)
+        created = hit.get('created_at', '')
+        
+        if pretty:
+            result = f"📰 {title}"
+            if url:
+                result += f"\n   🔗 {url}"
+            result += f"\n   💬 {hn_url}"
+            result += f"\n   👤 {author} | ⭐ {points} | 💬 {comments} | 📅 {created}"
+        else:
+            # Greppable format: one line per result
+            result = f"[STORY] {title} | {author} | {points}pts | {comments}cmt | {created} | {hn_url}"
+            if url:
+                result += f" | {url}"
+        
+    else:  # comment
+        author = hit.get('author', 'unknown')
+        story_title = hit.get('story_title', 'Unknown story')
+        comment_text = hit.get('comment_text', '').replace('\n', ' ')[:200]
+        if len(hit.get('comment_text', '')) > 200:
+            comment_text += '...'
+        created = hit.get('created_at', '')
+        
+        if pretty:
+            result = f"💬 Comment by {author} on: {story_title}"
+            if comment_text:
+                result += f"\n   {comment_text}"
+            result += f"\n   🔗 {hn_url}"
+            result += f"\n   📅 {created}"
+        else:
+            # Greppable format: one line per result
+            result = f"[COMMENT] {author} on \"{story_title}\" | {created} | {hn_url}"
+            if comment_text:
+                result += f" | {comment_text}"
+    
+    return result
 
-  response = HTTParty.get(base_url, query: query_params)
-  puts JSON.pretty_generate(JSON.parse(response.body))
-rescue Docopt::Exit => e
-  abort e.message
-end
+
+def search_hn(args):
+    """Perform the search and return results"""
+    base_url = 'https://hn.algolia.com/api/v1/search_by_date' if args.sort == 'date' else 'https://hn.algolia.com/api/v1/search'
+    params = build_query_params(args)
+    url = f"{base_url}?{urlencode(params)}"
+    
+    try:
+        with urlopen(url) as response:
+            data = json.loads(response.read().decode())
+            return data
+    except HTTPError as e:
+        print(f"API Error: {e.code} {e.reason}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def main():
+    args = parse_args()
+    
+    if args.hits_per_page > 1000:
+        print("Warning: hits-per-page capped at 1000", file=sys.stderr)
+    
+    results = search_hn(args)
+    
+    if args.raw:
+        print(json.dumps(results, indent=2))
+        return
+    
+    hits = results.get('hits', [])
+    nb_hits = results.get('nbHits', 0)
+    page = results.get('page', 0)
+    nb_pages = results.get('nbPages', 0)
+    
+    if args.pretty:
+        print(f"Found {nb_hits} results (page {page + 1}/{nb_pages})")
+        print("=" * 80)
+    
+    if not hits:
+        print("No results found.")
+        return
+    
+    if args.pretty:
+        for i, hit in enumerate(hits, 1):
+            print(f"{i}. {format_hit(hit, pretty=True)}")
+            print()
+    else:
+        # Greppable format: one result per line
+        for hit in hits:
+            print(format_hit(hit, pretty=False))
+
+
+if __name__ == '__main__':
+    main()
