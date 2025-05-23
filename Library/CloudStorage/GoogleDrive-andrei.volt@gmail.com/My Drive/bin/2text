@@ -1,5 +1,5 @@
 #!/usr/bin/env cached-nix-shell
-#!nix-shell -i bash -p antiword coreutils python3Packages.docx2txt file ghostscript html2text jq odt2txt poppler_utils ripmime sox tesseract unrtf libxml2
+#!nix-shell -i bash -p antiword coreutils python3Packages.docx2txt file ghostscript html2text jq odt2txt poppler_utils ripmime sox tesseract unrtf libxml2 pandoc
 
 if [ $# -eq 0 ]; then
   echo "Usage: any2text <file> [file2] [file3] ..." >&2
@@ -21,52 +21,69 @@ convert_file() {
     cat "$input_file"
     ;;
   application/pdf)
-    pdftotext "$input_file" -
+    pandoc "$input_file" -t markdown
     ;;
   application/msword)
-    antiword "$input_file"
+    pandoc "$input_file" -t markdown
     ;;
   application/vnd.openxmlformats-officedocument.wordprocessingml.document)
-    docx2txt "$input_file"
+    pandoc "$input_file" -t markdown
     ;;
   application/vnd.ms-excel|application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
-    unoconv -f csv --stdout "$input_file"
+    pandoc "$input_file" -t markdown || echo "Unsupported Excel format"
     ;;
   application/vnd.ms-powerpoint|application/vnd.openxmlformats-officedocument.presentationml.presentation)
-    unoconv -f txt --stdout "$input_file"
+    pandoc "$input_file" -t markdown || echo "Unsupported PowerPoint format"
     ;;
   text/csv)
-    cat "$input_file"
+    pandoc "$input_file" -t markdown
     ;;
   text/html)
-    html2text "$input_file"
+    pandoc "$input_file" -t markdown
+    ;;
+  text/markdown)
+    cat "$input_file"
     ;;
   application/epub+zip)
-    ebook-convert "$input_file" - | cat
+    pandoc "$input_file" -t markdown
     ;;
   image/*)
+    echo "# OCR Output from $(basename "$input_file")"
+    echo
     tesseract "$input_file" stdout
     ;;
   message/rfc822)
+    echo "# Email Content"
+    echo
     ripmime --name-by-type --textname stdout.txt -i "$input_file" && cat stdout.txt && rm stdout.txt
     ;;
   application/vnd.oasis.opendocument.text)
-    odt2txt "$input_file"
+    pandoc "$input_file" -t markdown
     ;;
   application/rtf)
-    unrtf --text "$input_file"
+    pandoc "$input_file" -t markdown
     ;;
   application/postscript)
     ps2ascii "$input_file"
     ;;
   application/json)
+    echo "# JSON Content"
+    echo
+    echo '```json'
     jq '.' "$input_file"
+    echo '```'
     ;;
   application/xml)
+    echo "# XML Content"
+    echo
+    echo '```xml'
     xmllint --format "$input_file"
+    echo '```'
     ;;
   audio/*)
-    sox "$input_file" -r 16000 -b 16 -c 1 -t wav - | pocketsphinx_continuous -infile /dev/stdin
+    echo "# Audio Transcription"
+    echo
+    deepgram --detect-language "$input_file"
     ;;
   *)
     echo "Unsupported MIME type: $mime_type" >&2
