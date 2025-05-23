@@ -1,5 +1,6 @@
 export EDITOR=nvim
 export PAGER=nvimpager
+export BROWSER=google-chrome-stable
 
 export XDG_CACHE_HOME=~/.cache
 export XDG_CONFIG_HOME=~/.config
