@@ -1,0 +1,310 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#   "python-dateutil",
+# ]
+# ///
+
+import sqlite3
+import zipfile
+import re
+import os
+import hashlib
+import argparse
+from datetime import datetime
+from pathlib import Path
+from dateutil import parser
+
+class WhatsAppToSQLite:
+    def __init__(self, archive_path, db_path):
+        self.archive_path = archive_path
+        self.db_path = db_path
+        self.chat_name = Path(archive_path).stem.replace("WhatsApp Chat - ", "")
+        
+    def create_schema(self, conn):
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS chats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                sender TEXT NOT NULL,
+                timestamp TIMESTAMP NOT NULL,
+                content TEXT,
+                message_type TEXT DEFAULT 'text',
+                attachment_filename TEXT,
+                is_deleted BOOLEAN DEFAULT 0,
+                hash TEXT UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (chat_id) REFERENCES chats(id)
+            );
+            
+            CREATE TABLE IF NOT EXISTS attachments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                file_type TEXT,
+                file_data BLOB NOT NULL,
+                file_size INTEGER,
+                file_hash TEXT UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (message_id) REFERENCES messages(id)
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender);
+            CREATE INDEX IF NOT EXISTS idx_messages_hash ON messages(hash);
+            CREATE INDEX IF NOT EXISTS idx_attachments_hash ON attachments(file_hash);
+        """)
+        
+    def get_or_create_chat(self, conn):
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM chats WHERE name = ?", (self.chat_name,))
+        result = cursor.fetchone()
+        
+        if result:
+            chat_id = result[0]
+            cursor.execute("UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (chat_id,))
+        else:
+            cursor.execute("INSERT INTO chats (name) VALUES (?)", (self.chat_name,))
+            chat_id = cursor.lastrowid
+            
+        return chat_id
+        
+    def parse_timestamp(self, timestamp_str):
+        # WhatsApp format: [DD/MM/YYYY, HH:MM:SS]
+        timestamp_str = timestamp_str.strip('[]')
+        try:
+            return datetime.strptime(timestamp_str, "%d/%m/%Y, %H:%M:%S")
+        except:
+            # Fallback to dateutil parser
+            return parser.parse(timestamp_str)
+    
+    def calculate_message_hash(self, sender, timestamp, content, attachment_filename=None):
+        hash_input = f"{sender}|{timestamp}|{content or ''}|{attachment_filename or ''}"
+        return hashlib.sha256(hash_input.encode()).hexdigest()
+        
+    def calculate_file_hash(self, data):
+        return hashlib.sha256(data).hexdigest()
+        
+    def parse_message_line(self, line):
+        # Pattern for messages: [timestamp] sender: content
+        # Handle potential Unicode characters
+        line = line.strip()
+        pattern = r'^[‎]?\[(.*?)\]\s+(.*?):\s*[‎]?(.*?)$'
+        match = re.match(pattern, line)
+        
+        if match:
+            timestamp_str, sender, content = match.groups()
+            timestamp = self.parse_timestamp(timestamp_str)
+            
+            # Check for attachments - handle Unicode characters
+            attachment_match = re.match(r'<attached:\s*(.*?)>', content)
+            if attachment_match:
+                attachment_filename = attachment_match.group(1)
+                return {
+                    'sender': sender,
+                    'timestamp': timestamp,
+                    'content': None,
+                    'attachment_filename': attachment_filename,
+                    'message_type': 'attachment'
+                }
+            
+            # Check for deleted messages
+            if 'You deleted this message' in content:
+                return {
+                    'sender': sender,
+                    'timestamp': timestamp,
+                    'content': content,
+                    'is_deleted': True,
+                    'message_type': 'text'
+                }
+                
+            return {
+                'sender': sender,
+                'timestamp': timestamp,
+                'content': content,
+                'message_type': 'text'
+            }
+        
+        return None
+        
+    def process_archive(self, conn):
+        chat_id = self.get_or_create_chat(conn)
+        
+        with zipfile.ZipFile(self.archive_path, 'r') as archive:
+            # Find and read the chat text file
+            chat_file = None
+            for name in archive.namelist():
+                if name.endswith('_chat.txt'):
+                    chat_file = name
+                    break
+                    
+            if not chat_file:
+                raise ValueError("No chat text file found in archive")
+                
+            # Read and parse messages
+            chat_content = archive.read(chat_file).decode('utf-8')
+            lines = chat_content.split('\n')
+            
+            current_message = None
+            files_to_process = {}
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                # Try to parse as new message
+                parsed = self.parse_message_line(line)
+                
+                if parsed:
+                    # Process previous message if exists
+                    if current_message:
+                        self.insert_message(conn, chat_id, current_message, files_to_process)
+                        
+                    current_message = parsed
+                elif current_message and not line.startswith('['):
+                    # Continuation of previous message
+                    if current_message.get('content'):
+                        current_message['content'] += '\n' + line
+                    else:
+                        current_message['content'] = line
+                        
+            # Process last message
+            if current_message:
+                self.insert_message(conn, chat_id, current_message, files_to_process)
+                
+            # Process attachments
+            for filename in archive.namelist():
+                if filename != chat_file and filename in files_to_process:
+                    file_data = archive.read(filename)
+                    self.insert_attachment(conn, files_to_process[filename], filename, file_data)
+                    
+    def insert_message(self, conn, chat_id, message_data, files_to_process):
+        cursor = conn.cursor()
+        
+        # Calculate message hash
+        message_hash = self.calculate_message_hash(
+            message_data['sender'],
+            message_data['timestamp'],
+            message_data.get('content'),
+            message_data.get('attachment_filename')
+        )
+        
+        # Check if message already exists
+        cursor.execute("SELECT id FROM messages WHERE hash = ?", (message_hash,))
+        existing = cursor.fetchone()
+        
+        if not existing:
+            cursor.execute("""
+                INSERT INTO messages (chat_id, sender, timestamp, content, message_type, 
+                                    attachment_filename, is_deleted, hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                chat_id,
+                message_data['sender'],
+                message_data['timestamp'],
+                message_data.get('content'),
+                message_data.get('message_type', 'text'),
+                message_data.get('attachment_filename'),
+                message_data.get('is_deleted', False),
+                message_hash
+            ))
+            
+            message_id = cursor.lastrowid
+            
+            # Track files that need to be processed
+            if message_data.get('attachment_filename'):
+                files_to_process[message_data['attachment_filename']] = message_id
+                
+    def insert_attachment(self, conn, message_id, filename, file_data):
+        cursor = conn.cursor()
+        
+        file_hash = self.calculate_file_hash(file_data)
+        
+        # Check if attachment already exists
+        cursor.execute("SELECT id FROM attachments WHERE file_hash = ?", (file_hash,))
+        existing = cursor.fetchone()
+        
+        if not existing:
+            # Determine file type
+            file_ext = Path(filename).suffix.lower()
+            if file_ext in ['.jpg', '.jpeg', '.png', '.gif']:
+                file_type = 'image'
+            elif file_ext in ['.mp4', '.avi', '.mov', '.mkv']:
+                file_type = 'video'
+            elif file_ext in ['.mp3', '.wav', '.aac', '.ogg']:
+                file_type = 'audio'
+            elif file_ext in ['.pdf', '.doc', '.docx', '.txt']:
+                file_type = 'document'
+            else:
+                file_type = 'other'
+                
+            cursor.execute("""
+                INSERT INTO attachments (message_id, filename, file_type, file_data, file_size, file_hash)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                message_id,
+                filename,
+                file_type,
+                file_data,
+                len(file_data),
+                file_hash
+            ))
+            
+    def convert(self):
+        conn = sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+        conn.row_factory = sqlite3.Row
+        
+        try:
+            self.create_schema(conn)
+            self.process_archive(conn)
+            conn.commit()
+            
+            # Print statistics
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM messages WHERE chat_id = (SELECT id FROM chats WHERE name = ?)", 
+                          (self.chat_name,))
+            message_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM attachments")
+            attachment_count = cursor.fetchone()[0]
+            
+            print(f"Successfully converted WhatsApp archive to SQLite database")
+            print(f"Chat: {self.chat_name}")
+            print(f"Messages: {message_count}")
+            print(f"Attachments: {attachment_count}")
+            print(f"Database: {self.db_path}")
+            
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
+def main():
+    parser = argparse.ArgumentParser(description='Convert WhatsApp chat export to SQLite database')
+    parser.add_argument('archive', help='Path to WhatsApp chat archive (zip file)')
+    parser.add_argument('-o', '--output', help='Output database path (default: chat_name.db)')
+    
+    args = parser.parse_args()
+    
+    # Determine output path
+    if args.output:
+        db_path = args.output
+    else:
+        archive_name = Path(args.archive).stem
+        db_path = archive_name + '.db'
+        
+    # Create converter and run
+    converter = WhatsAppToSQLite(args.archive, db_path)
+    converter.convert()
+
+if __name__ == '__main__':
+    main()

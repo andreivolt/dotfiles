@@ -21,19 +21,19 @@ convert_file() {
     cat "$input_file"
     ;;
   application/pdf)
-    pandoc "$input_file" -t markdown
+    unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown
     ;;
   application/msword)
-    pandoc "$input_file" -t markdown
+    unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown
     ;;
   application/vnd.openxmlformats-officedocument.wordprocessingml.document)
-    pandoc "$input_file" -t markdown
+    unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown
     ;;
   application/vnd.ms-excel|application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
-    pandoc "$input_file" -t markdown || echo "Unsupported Excel format"
+    unoconv -f csv --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown || echo "Unsupported Excel format"
     ;;
   application/vnd.ms-powerpoint|application/vnd.openxmlformats-officedocument.presentationml.presentation)
-    pandoc "$input_file" -t markdown || echo "Unsupported PowerPoint format"
+    unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown || echo "Unsupported PowerPoint format"
     ;;
   text/csv)
     pandoc "$input_file" -t markdown
@@ -45,7 +45,7 @@ convert_file() {
     cat "$input_file"
     ;;
   application/epub+zip)
-    pandoc "$input_file" -t markdown
+    unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown
     ;;
   image/*)
     echo "# OCR Output from $(basename "$input_file")"
@@ -58,10 +58,10 @@ convert_file() {
     ripmime --name-by-type --textname stdout.txt -i "$input_file" && cat stdout.txt && rm stdout.txt
     ;;
   application/vnd.oasis.opendocument.text)
-    pandoc "$input_file" -t markdown
+    unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown
     ;;
   application/rtf)
-    pandoc "$input_file" -t markdown
+    unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown
     ;;
   application/postscript)
     ps2ascii "$input_file"
