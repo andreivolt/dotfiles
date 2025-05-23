@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+name="BH-Monitor"
+out=$(bunx macos-audio-devices list --json)
+
+echo "$out" | jq -e --arg n "$name" 'any(.[]; .name==$n)' && exit 0
+
+main=$(echo "$out" | jq -r '[.[] | select(.transportType=="builtin" and .isOutput==true)][0].id')
+other=$(echo "$out" | jq -r '[.[] | select(.name=="BlackHole 2ch" and .isOutput==true)][0].id')
+
+bunx macos-audio-devices aggregate create --multi-output "$name" $main $other
