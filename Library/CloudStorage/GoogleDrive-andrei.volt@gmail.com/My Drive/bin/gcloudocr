@@ -2,15 +2,49 @@
 
 require 'json'
 require 'tempfile'
+require 'optparse'
 
 def detect_text(path)
-  result = JSON.parse `gcloud ml vision detect-text #{path}`
-  result['responses'][0]['fullTextAnnotation']['text']
+  cmd = "gcloud --project andreivolt ml vision detect-text '#{path}' --format=json"
+  output = `#{cmd}`
+
+  if $?.success?
+    result = JSON.parse(output)
+    response = result['responses'][0]
+
+    if response['fullTextAnnotation'] && response['fullTextAnnotation']['text']
+      response['fullTextAnnotation']['text']
+    elsif response['textAnnotations'] && response['textAnnotations'].length > 0
+      response['textAnnotations'].map { |annotation| annotation['description'] }.join(' ')
+    else
+      "No text detected"
+    end
+  else
+    $stderr.puts "Error: #{output}"
+    exit 1
+  end
 end
 
-puts detect_text(
-  ARGV[0] || Tempfile.open('input') do |f|
-    !$stdin.tty? ? f.write($stdin.read) : `screencapture -i -s #{f.path}`
-    f.path
+options = {}
+OptionParser.new do |opts|
+  opts.banner = "Usage: gcloudocr [options] [file]"
+
+  opts.on("-s", "--screenshot", "Take screenshot") do
+    options[:screenshot] = true
   end
-)
+end.parse!
+
+if options[:screenshot]
+  temp_file = Tempfile.new(['screenshot', '.png'])
+  temp_path = temp_file.path
+  temp_file.close
+  `screencapture -i -s '#{temp_path}'`
+  puts detect_text(temp_path)
+elsif ARGV[0]
+  puts detect_text(ARGV[0])
+else
+  Tempfile.open('input') do |f|
+    f.write($stdin.read)
+    puts detect_text(f.path)
+  end
+end
