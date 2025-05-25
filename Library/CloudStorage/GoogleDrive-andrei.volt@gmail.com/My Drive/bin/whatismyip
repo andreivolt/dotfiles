@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-
-exec curl -s https://api.ipify.org

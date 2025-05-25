@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-
-case "$OSTYPE" in
-  darwin*) exec open -a Preview.app -f ;;
-  linux*) exec display - ;;
-  *) exit 1 ;;
-esac

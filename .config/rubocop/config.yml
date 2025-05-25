@@ -20,5 +20,7 @@ Style/NumericLiterals:
   enabled: false
 Style/StringLiterals:
   Enabled: false
-Style/StringLiterals:
-  Enabled: false
+Layout/ArgumentAlignment:
+  EnforcedStyle: with_fixed_indentation
+Layout/FirstArgumentIndentation:
+  EnforcedStyle: consistent
