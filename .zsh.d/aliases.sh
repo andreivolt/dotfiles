@@ -15,5 +15,4 @@ alias rm="rm --verbose"
 alias vi="nvim"
 alias yt-dlp="yt-dlp --cookies-from-browser firefox"
 
-alias llm="uvx -q --with llm-anthropic,llm-gemini llm"
 alias tailscale="/Applications/Tailscale.localized/Tailscale.app/Contents/MacOS/Tailscale"

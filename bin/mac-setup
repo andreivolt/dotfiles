@@ -82,6 +82,26 @@ SETUP_SCRIPTS = {
       system('sudo /usr/bin/sed -i \'\' -e \'s/#PasswordAuthentication yes/PasswordAuthentication no/\' -e \'s/#KbdInteractiveAuthentication yes/KbdInteractiveAuthentication no/\' -e \'s/^PasswordAuthentication yes/PasswordAuthentication no/\' -e \'s/^KbdInteractiveAuthentication yes/KbdInteractiveAuthentication no/\' /etc/ssh/sshd_config')
       puts "SSH secured"
     end
+  },
+
+  'mkcert_setup' => -> {
+    puts "Setting up mkcert for local SSL certificates..."
+    
+    if system("command -v mkcert >/dev/null 2>&1")
+      puts "mkcert already installed"
+    else
+      puts "mkcert not found, install it with: brew install mkcert"
+      return
+    end
+
+    ca_root = `mkcert -CAROOT`.strip
+    if File.exist?("#{ca_root}/rootCA.pem")
+      puts "mkcert CA already installed"
+    else
+      puts "Installing mkcert CA (requires sudo)..."
+      system("mkcert -install")
+      puts "mkcert CA installed"
+    end
   }
 
   # 'keyboard_layout_install' => -> {
