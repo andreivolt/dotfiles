@@ -13,7 +13,7 @@ adjust-cell-width = -12%
 # font-feature = -dlig
 #
 # adjust-cell-height = -8
-# adjust-cell-width = -16%
+# adjust-cell-width = -12%
 
 font-size = 18
 
@@ -49,3 +49,4 @@ keybind = cmd+right=csi:\x1b[1;5C
 theme = ir-black
 
 auto-update = off
+keybind = shift+enter=text:\n
