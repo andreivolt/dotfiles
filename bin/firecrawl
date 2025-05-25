@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run -qs
+#!/usr/bin/env -S uv run --script --quiet
 # /// script
 # dependencies = ["click", "firecrawl-py", "pydantic"]
 # ///
@@ -36,9 +36,11 @@ def scrape(obj, url, format):
     """Scrape a single URL"""
     app = obj['app']
     json_output = obj['json_output']
-    params = {'formats': list(format)} if format else None
     try:
-        result = app.scrape_url(url, params=params)
+        if format:
+            result = app.scrape_url(url, formats=list(format))
+        else:
+            result = app.scrape_url(url)
         output_result(result, json_output)
     except Exception as e:
         click.echo(click.style(f"Error: {str(e)}", fg='red'))
@@ -52,12 +54,13 @@ def crawl(obj, url, limit, format):
     """Crawl a website"""
     app = obj['app']
     json_output = obj['json_output']
-    params = {
-        'limit': limit,
-        'scrapeOptions': {'formats': list(format)}
-    }
+    kwargs = {}
+    if limit:
+        kwargs['limit'] = limit
+    if format:
+        kwargs['scrapeOptions'] = {'formats': list(format)}
     try:
-        result = app.crawl_url(url, params=params)
+        result = app.crawl_url(url, **kwargs)
         output_result(result, json_output)
     except Exception as e:
         click.echo(click.style(f"Error: {str(e)}", fg='red'))
@@ -71,12 +74,13 @@ def map(obj, url, exclude_subdomains, use_sitemap):
     """Map a website"""
     app = obj['app']
     json_output = obj['json_output']
-    params = {
-        'excludeSubdomains': exclude_subdomains,
-        'useSitemap': use_sitemap
-    }
+    kwargs = {}
+    if exclude_subdomains:
+        kwargs['excludeSubdomains'] = exclude_subdomains
+    if use_sitemap:
+        kwargs['useSitemap'] = use_sitemap
     try:
-        result = app.map_url(url, params=params)
+        result = app.map_url(url, **kwargs)
         output_result(result, json_output)
     except Exception as e:
         click.echo(click.style(f"Error: {str(e)}", fg='red'))

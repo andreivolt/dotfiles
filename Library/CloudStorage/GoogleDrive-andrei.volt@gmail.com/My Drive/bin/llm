@@ -1,1 +1,0 @@
-exec uvx -q --with llm-anthropic,llm-gemini llm $@
