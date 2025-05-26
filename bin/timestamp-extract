@@ -1,0 +1,70 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = []
+# ///
+
+import sys
+import subprocess
+import json
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: timestamp-extract <prompt>", file=sys.stderr)
+        print("Reads timestamped content from stdin and extracts timestamp range for the given prompt", file=sys.stderr)
+        sys.exit(1)
+    
+    prompt = ' '.join(sys.argv[1:])
+    content = sys.stdin.read()
+    
+    llm_prompt = f"""Extract the timestamp range when: {prompt}
+
+Find where this topic is discussed and output a JSON object wrapped in a code block like:
+```json
+{{"start": "MM:SS", "end": "MM:SS"}}
+```
+
+Rules:
+- Start: when the topic begins
+- End: when the speaker finishes that specific explanation
+- Use the exact timestamp format from the content
+- If not found, output: {{"error": "No matching content found"}}
+
+Content:
+{content}"""
+    
+    # Run llm with --extract flag to extract first code block
+    result = subprocess.run(
+        ['sh', '-c', 'llm -x'],
+        input=llm_prompt,
+        capture_output=True,
+        text=True
+    )
+    
+    if result.returncode != 0:
+        print(f"Error running llm: {result.stderr}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Parse and validate the JSON response
+    try:
+        output = result.stdout.strip()
+        if not output:
+            print("Empty response from llm", file=sys.stderr)
+            sys.exit(1)
+        
+        data = json.loads(output)
+        if "error" in data:
+            print(data["error"], file=sys.stderr)
+            sys.exit(1)
+        elif "start" in data and "end" in data:
+            print(f"{data['start']} - {data['end']}")
+        else:
+            print("Invalid response format", file=sys.stderr)
+            print(f"Got: {output}", file=sys.stderr)
+            sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse JSON: {e}", file=sys.stderr)
+        print(f"Raw output: {result.stdout}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
