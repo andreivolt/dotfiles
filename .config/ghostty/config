@@ -8,9 +8,19 @@ font-family-italic = "IosevkaTerm NFM Italic"
 font-family-bold = "IosevkaTerm NFM Bold"
 font-family-bold-italic = "IosevkaTerm NFM Bold Italic"
 
+font-family = "CommitMono Nerd Font"
+font-family-italic = "CommitMono Nerd Font Italic"
+font-family-bold = "CommitMono Nerd Font Bold"
+font-family-bold-italic = "CommitMono Nerd Font Bold Italic"
+
+# font-family = "CommitMono Nerd Font Mono"
+# font-family-italic = "CommitMono Nerd Font Mono Italic"
+# font-family-bold = "CommitMono Nerd Font Mono Bold"
+# font-family-bold-italic = "CommitMono Nerd Font Mono Bold Italic"
+
 adjust-cell-height = -8
 adjust-font-baseline = 2
-adjust-cell-width = -10%
+adjust-cell-width = -11%
 
 # font-family = "Pragmata Pro Mono"
 # font-feature = -calt
@@ -21,7 +31,7 @@ adjust-cell-width = -10%
 # adjust-cell-width = -12%
 
 font-size = 18
-font-thicken = true
+# font-thicken = true
 
 background-opacity = 0.85
 background-blur-radius = 16
