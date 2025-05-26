@@ -3,9 +3,14 @@ font-family-italic = "IosevkaTerm NFM Light Italic"
 font-family-bold = "IosevkaTerm NFM"
 font-family-bold-italic = "IosevkaTerm NFM Italic"
 
+font-family = "IosevkaTerm NFM"
+font-family-italic = "IosevkaTerm NFM Italic"
+font-family-bold = "IosevkaTerm NFM Bold"
+font-family-bold-italic = "IosevkaTerm NFM Bold Italic"
+
 adjust-cell-height = -8
 adjust-font-baseline = 2
-adjust-cell-width = -12%
+adjust-cell-width = -10%
 
 # font-family = "Pragmata Pro Mono"
 # font-feature = -calt
@@ -16,6 +21,7 @@ adjust-cell-width = -12%
 # adjust-cell-width = -12%
 
 font-size = 18
+font-thicken = true
 
 background-opacity = 0.85
 background-blur-radius = 16
