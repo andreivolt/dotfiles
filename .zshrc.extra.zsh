@@ -24,6 +24,15 @@ fpath+=~/.local/share/zsh/site-functions
 mkdir -p ~/.local/share/zsh/site-functions
 autoload -Uz ~/.local/share/zsh/site-functions/*(.:t)
 
+# function expand-alias() {
+# 		zle _expand_alias
+# 		zle self-insert
+# }
+#
+# zle -N expand-alias
+#
+# bindkey -M main ' ' expand-alias
+
 bindkey ''${terminfo[kcbt]:-^\[\[Z} reverse-menu-complete
 
 bindkey '^n' expand-or-complete
@@ -51,7 +60,7 @@ source ~/.zsh.d/vi-mode.zsh
 
 source ~/.zsh.d/aliases.sh
 alias -- +x='chmod +x'
-source ~/.zsh.d/global-aliases.zsh
+source ~/.zsh.d/aliases-global.zsh
 
 source ~/.zsh.d/prompt.zsh
 
@@ -76,6 +85,6 @@ source ~/.local/share/zsh/plugins/history-substring-search/zsh-history-substring
 bindkey '^[[A' history-substring-search-up
 bindkey '^[[B' history-substring-search-down
 
-source ~/.zsh.d/tmux-term-title.zsh
+[[ -n "$TMUX" ]] && source ~/.zsh.d/tmux-term-title.zsh
 
 source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
