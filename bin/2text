@@ -21,7 +21,7 @@ convert_file() {
     cat "$input_file"
     ;;
   application/pdf)
-    unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown
+    unoconv -f txt --stdout "$input_file" 2>/dev/null || pdftotext "$input_file" -
     ;;
   application/msword)
     unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown
