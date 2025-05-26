@@ -1,0 +1,179 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = ["requests", "python-dateutil"]
+# ///
+
+import sqlite3
+import requests
+import json
+from datetime import datetime, timezone
+from dateutil import parser
+import time
+import os
+import sys
+
+# Last.fm API configuration
+API_KEY = os.environ['LASTFM_API_KEY']
+USERNAME = os.environ.get('LASTFM_USERNAME')
+
+def get_latest_timestamp(conn):
+    """Get the most recent Last.fm timestamp from database"""
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT MAX(played_at) 
+        FROM listens 
+        WHERE spotify_uri IS NULL
+    ''')
+    result = cursor.fetchone()
+    if result and result[0]:
+        # Parse the timestamp and convert to Unix timestamp
+        dt = parser.parse(result[0])
+        return int(dt.timestamp())
+    return None
+
+def fetch_recent_tracks(from_timestamp=None):
+    """Fetch recent tracks from Last.fm API"""
+    if not USERNAME:
+        print("Error: Set LASTFM_USERNAME environment variable")
+        sys.exit(1)
+    
+    url = "http://ws.audioscrobbler.com/2.0/"
+    all_tracks = []
+    page = 1
+    
+    while True:
+        params = {
+            'method': 'user.getrecenttracks',
+            'user': USERNAME,
+            'api_key': API_KEY,
+            'format': 'json',
+            'limit': 200,
+            'page': page
+        }
+        
+        if from_timestamp:
+            params['from'] = from_timestamp + 1  # Add 1 to avoid duplicates
+        
+        response = requests.get(url, params=params)
+        data = response.json()
+        
+        if 'error' in data:
+            print(f"API Error: {data['message']}")
+            break
+        
+        tracks = data['recenttracks']['track']
+        
+        # Remove currently playing track if present
+        if tracks and '@attr' in tracks[0] and tracks[0]['@attr'].get('nowplaying'):
+            tracks = tracks[1:]
+        
+        if not tracks:
+            break
+            
+        all_tracks.extend(tracks)
+        
+        # Check if we have more pages
+        total_pages = int(data['recenttracks']['@attr']['totalPages'])
+        if page >= total_pages:
+            break
+            
+        page += 1
+        time.sleep(0.2)  # Rate limiting
+    
+    return all_tracks
+
+def insert_tracks(conn, tracks):
+    """Insert tracks into database"""
+    cursor = conn.cursor()
+    imported = 0
+    skipped = 0
+    
+    for track in tracks:
+        # Skip if currently playing
+        if '@attr' in track and track['@attr'].get('nowplaying'):
+            continue
+            
+        artist = track['artist']['#text']
+        track_name = track['name']
+        album = track['album']['#text'] if track.get('album') else None
+        
+        # Parse timestamp
+        if 'date' in track:
+            timestamp = int(track['date']['uts'])
+            played_at = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        else:
+            continue
+        
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO listens 
+                (artist_name, track_name, album_name, played_at)
+                VALUES (?, ?, ?, ?)
+            ''', (artist, track_name, album, played_at))
+            
+            if cursor.rowcount > 0:
+                imported += 1
+            else:
+                skipped += 1
+        except Exception as e:
+            print(f"Error inserting track: {e}")
+            skipped += 1
+    
+    conn.commit()
+    return imported, skipped
+
+def main():
+    # Get database path from command line argument
+    if len(sys.argv) != 2:
+        print("Usage: lastfm-sync <database-path>")
+        sys.exit(1)
+    
+    db_path = sys.argv[1]
+    
+    # Connect to database
+    conn = sqlite3.connect(db_path)
+    
+    # Get latest timestamp
+    from_timestamp = get_latest_timestamp(conn)
+    
+    if from_timestamp:
+        from_date = datetime.fromtimestamp(from_timestamp)
+        print(f"Fetching tracks newer than {from_date}")
+    else:
+        print("No existing Last.fm data found, fetching all available tracks")
+    
+    # Fetch recent tracks
+    print("Fetching from Last.fm API...")
+    tracks = fetch_recent_tracks(from_timestamp)
+    
+    if not tracks:
+        print("No new tracks to import")
+        conn.close()
+        return
+    
+    print(f"Found {len(tracks)} tracks")
+    
+    # Insert into database
+    imported, skipped = insert_tracks(conn, tracks)
+    
+    print(f"Import complete: {imported} imported, {skipped} skipped (duplicates)")
+    
+    # Show latest tracks
+    if imported > 0:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT artist_name, track_name, played_at 
+            FROM listens 
+            WHERE spotify_uri IS NULL
+            ORDER BY played_at DESC 
+            LIMIT 5
+        ''')
+        
+        print("\nLatest tracks:")
+        for artist, track, played_at in cursor.fetchall():
+            print(f"  {played_at}: {artist} - {track}")
+    
+    conn.close()
+
+if __name__ == "__main__":
+    main()
