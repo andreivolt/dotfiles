@@ -1,5 +1,0 @@
-for dir in "$@"; do
-  if [[ ! ":$PATH:" == *":$dir:"* ]]; then
-    path=("$dir" $path)
-  fi
-done
