@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --quiet --script --with youtube_transcript_api
+#!/usr/bin/env -S uv run --quiet --script --with youtube_transcript_api --with lxml
 import sys
 import re
 from urllib.parse import urlparse, parse_qs
@@ -52,10 +52,20 @@ def main():
 
         if args.timestamps:
             for entry in transcript:
-                timestamp = format_timestamp(entry['start'])
-                print(f"[{timestamp}] {entry['text']}")
+                # Handle both dict and object access patterns
+                if hasattr(entry, 'start'):
+                    timestamp = format_timestamp(entry.start)
+                    text = entry.text
+                else:
+                    timestamp = format_timestamp(entry['start'])
+                    text = entry['text']
+                print(f"[{timestamp}] {text}")
         else:
-            text = ' '.join([entry['text'] for entry in transcript])
+            # Handle both dict and object access patterns
+            if transcript and hasattr(transcript[0], 'text'):
+                text = ' '.join([entry.text for entry in transcript])
+            else:
+                text = ' '.join([entry['text'] for entry in transcript])
             print(text)
     except Exception as e:
         print(f"Error: {str(e)}")

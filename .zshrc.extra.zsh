@@ -33,7 +33,7 @@ autoload -Uz ~/.local/share/zsh/site-functions/*(.:t)
 #
 # bindkey -M main ' ' expand-alias
 
-bindkey ''${terminfo[kcbt]:-^\[\[Z} reverse-menu-complete
+bindkey "${terminfo[kcbt]:-^[[Z}" reverse-menu-complete
 
 bindkey '^n' expand-or-complete
 bindkey '^p' reverse-menu-complete
