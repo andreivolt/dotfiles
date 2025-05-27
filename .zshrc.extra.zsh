@@ -21,7 +21,6 @@ setopt null_glob
 setopt numeric_glob_sort
 
 fpath+=~/.local/share/zsh/site-functions
-mkdir -p ~/.local/share/zsh/site-functions
 autoload -Uz ~/.local/share/zsh/site-functions/*(.:t)
 
 # function expand-alias() {
@@ -35,9 +34,6 @@ autoload -Uz ~/.local/share/zsh/site-functions/*(.:t)
 
 bindkey "${terminfo[kcbt]:-^[[Z}" reverse-menu-complete
 
-bindkey '^n' expand-or-complete
-bindkey '^p' reverse-menu-complete
-
 # history expansion
 bindkey ' ' magic-space
 
@@ -46,7 +42,8 @@ export LESS='--RAW-CONTROL-CHARS --LONG-PROMPT --ignore-case --no-init --quit-if
 
 export GPG_TTY="$(tty)"
 
-export LS_COLORS="di=1;34:ln=1;35:so=1;35:pi=1;33:ex=1;32:bd=1;33:cd=1;33:su=1;31:sg=1;31:tw=1;34:ow=1;33:"
+export EZA_COLORS="reset"
+export LS_COLORS="di=34:ln=35:so=1;35:pi=1;33:ex=32:bd=1;33:cd=1;33:su=1;31:sg=1;31:tw=1;34:ow=1;33:"
 
 export MANPAGER='nvim +Man!'
 export MANWIDTH=100
@@ -56,35 +53,23 @@ export READNULLCMD=$PAGER
 eval "$(direnv hook zsh)"
 export DIRENV_LOG_FORMAT=
 
-source ~/.zsh.d/vi-mode.zsh
+source ~/.local/share/zsh/plugins/zsh-defer/zsh-defer.plugin.zsh
 
+source ~/.zsh.d/vi-mode.zsh
+source ~/.zsh.d/prompt.zsh
 source ~/.zsh.d/aliases.sh
 alias -- +x='chmod +x'
 source ~/.zsh.d/aliases-global.zsh
+zsh-defer source ~/.zsh.d/completion.zsh
 
-source ~/.zsh.d/prompt.zsh
-
-source ~/.zsh.d/completion.zsh
-
-(( $+commands[orbctl] )) && source ~/.zsh.d/orbstack.zsh
+(( $+commands[orbctl] )) && zsh-defer source ~/.zsh.d/orbstack.zsh
 [[ $TERM == xterm-kitty ]] && source ~/.zsh.d/kitty.zsh
-
 source ~/.local/share/zsh/plugins/nix-shell/nix-shell.plugin.zsh
-
 source ~/.zsh.d/accept-line.zsh
-
-source ~/.local/share/zsh/plugins/autopair/autopair.zsh
-autopair-init
-
-export ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=244"
-source ~/.local/share/zsh/plugins/autosuggestions/zsh-autosuggestions.zsh
-
+zsh-defer source ~/.zsh.d/autopair.zsh
+zsh-defer source ~/.zsh.d/autosuggestions.zsh
 source ~/.zsh.d/fzf.zsh
-
-source ~/.local/share/zsh/plugins/history-substring-search/zsh-history-substring-search.zsh
-bindkey '^[[A' history-substring-search-up
-bindkey '^[[B' history-substring-search-down
-
+zsh-defer source ~/.zsh.d/history-substring-search.zsh
 [[ -n "$TMUX" ]] && source ~/.zsh.d/tmux-term-title.zsh
 
-source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
+zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
