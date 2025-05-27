@@ -21,6 +21,7 @@ use walkdir::WalkDir;
 
 /// Whitespace trimming tool that handles trailing whitespace and empty lines
 #[derive(Parser)]
+#[command(about = "Trim trailing whitespace and empty lines from files", long_about = None)]
 struct Args {
     /// Files or directories to process (reads from stdin if no paths provided)
     paths: Vec<String>,
@@ -30,7 +31,7 @@ struct Args {
     in_place: bool,
 
     /// Skip confirmation prompts
-    #[arg(short, long)]
+    #[arg(short = 'f', long)]
     force: bool,
 }
 
