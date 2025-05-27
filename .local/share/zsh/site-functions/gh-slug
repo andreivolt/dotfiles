@@ -1,2 +1,0 @@
-trurl --url $1 --get '{:path}' |
-  sed "s/^.//; s/.git$//; s/\/$//; s/\//_/g"

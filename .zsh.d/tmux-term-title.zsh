@@ -1,3 +1,14 @@
-set-tmux-title() printf "\033kzsh\033\\"
+# Set tmux window title to current command
+preexec() {
+  local cmd=${1%% *}
+  printf "\033k$cmd\033\\"
+}
 
-precmd_functions+=(set-tmux-title)
+# Reset tmux window title when command finishes
+precmd() {
+  printf "\033kzsh\033\\"
+}
+
+# Add to hook arrays
+preexec_functions+=(preexec)
+precmd_functions+=(precmd)
