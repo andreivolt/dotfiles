@@ -62,7 +62,7 @@ window-colorspace = display-p3
 keybind = cmd+left=csi:\x1b[1;5D
 keybind = cmd+right=csi:\x1b[1;5C
 
-theme = ir-black
+theme = aurora
 
 auto-update = off
 keybind = shift+enter=text:\n

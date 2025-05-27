@@ -6,9 +6,31 @@
 import os
 import sys
 import json
+import subprocess
+import colorsys
 from pathlib import Path
 from lifxlan import LifxLAN, Light, BLUE, GREEN, RED, YELLOW, ORANGE, PURPLE, CYAN, WHITE
 import click
+
+# LIFX App themed colors
+LIFX_THEMES = {
+    "sunset": "12,75,80,2500",
+    "candlelight": "35,100,25,1500",
+    "fireplace": "25,100,40,2000",
+    "dawn": "25,60,60,3000",
+    "reading": "0,0,80,4000",
+    "concentrate": "0,0,100,6500",
+    "energize": "200,100,100,5500",
+    "relax": "240,30,50,2700",
+    "sleep": "0,100,5,2000",
+    "romantic": "330,70,30,2200",
+    "party": "300,100,100,3500",
+    "movie": "240,100,20,2700",
+    "forest": "120,80,60,3500",
+    "ocean": "200,100,70,4000",
+    "spring": "90,70,80,4500",
+    "autumn": "30,90,70,2800",
+}
 
 PREDEFINED_COLORS = {
     "Red": RED,
@@ -21,7 +43,41 @@ PREDEFINED_COLORS = {
     "White": WHITE,
 }
 
+HSBK_COLOR_OPTIONS = [
+    ("Bright Red", "0,100,100,3500"),
+    ("Deep Red", "0,100,50,3500"),
+    ("Orange Red", "24,100,100,3500"),
+    ("Orange", "48,100,100,3500"),
+    ("Golden Yellow", "72,100,100,3500"),
+    ("Bright Yellow", "96,100,100,3500"),
+    ("Yellow Green", "120,100,100,3500"),
+    ("Lime Green", "144,100,100,3500"),
+    ("Bright Green", "120,100,100,3500"),
+    ("Forest Green", "120,100,50,3500"),
+    ("Cyan Green", "168,100,100,3500"),
+    ("Aqua Cyan", "180,100,100,3500"),
+    ("Sky Blue", "216,100,100,3500"),
+    ("Bright Blue", "240,100,100,3500"),
+    ("Deep Blue", "240,100,50,3500"),
+    ("Royal Blue", "264,100,100,3500"),
+    ("Purple Blue", "288,100,100,3500"),
+    ("Bright Purple", "300,100,100,3500"),
+    ("Deep Purple", "300,100,50,3500"),
+    ("Magenta", "324,100,100,3500"),
+    ("Pink", "336,50,100,3500"),
+    ("Hot Pink", "336,100,100,3500"),
+    ("Warm White", "0,0,100,2700"),
+    ("Soft White", "0,0,100,3200"),
+    ("Daylight White", "0,0,100,5500"),
+    ("Cool White", "0,0,100,6500"),
+    ("Dim Warm", "0,0,25,2700"),
+    ("Cozy Orange", "36,50,70,2700"),
+    ("Sunset", "12,75,80,2500"),
+    ("Lavender", "280,40,80,3500"),
+]
+
 CACHE_FILE_NAME = "lifx.json"
+LAST_USED_FILE_NAME = "lifx_last_used.json"
 
 def get_cache_file_path():
     xdg_state_home = os.environ.get('XDG_STATE_HOME', Path.home() / '.local' / 'state')
@@ -51,47 +107,38 @@ def save_cache(cache_file, lights):
     except:
         pass
 
-def hex_to_hsbk(hex_color):
-    hex_color = hex_color.lstrip('#')
-    if len(hex_color) != 6:
-        return None
+def get_last_used_file_path():
+    xdg_state_home = os.environ.get('XDG_STATE_HOME', Path.home() / '.local' / 'state')
+    cache_dir = Path(xdg_state_home)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    last_used_file = cache_dir / LAST_USED_FILE_NAME
+    return last_used_file
+
+def save_last_used_lights(lights):
     try:
-        r = int(hex_color[0:2], 16)
-        g = int(hex_color[2:4], 16)
-        b = int(hex_color[4:6], 16)
-        max_val = max(r, g, b)
-        min_val = min(r, g, b)
-        delta = max_val - min_val
-        brightness = max_val / 255 * 65535
-        saturation = (delta / max_val) * 65535 if max_val != 0 else 0
-        if delta == 0:
-            hue = 0
-        elif max_val == r:
-            hue = (60 * ((g - b) / delta) + 360) % 360
-        elif max_val == g:
-            hue = (60 * ((b - r) / delta) + 120) % 360
-        elif max_val == b:
-            hue = (60 * ((r - g) / delta) + 240) % 360
-        hue = int(hue / 360 * 65535)
-        kelvin = 3500
-        return [hue, int(saturation), int(brightness), kelvin]
+        last_used_file = get_last_used_file_path()
+        with open(last_used_file, 'w') as f:
+            json.dump([{
+                'label': light.get_label(),
+                'ip_addr': light.get_ip_addr(),
+                'mac_addr': light.get_mac_addr(),
+            } for light in lights], f, indent=4)
     except:
-        return None
+        pass
 
-def hsv_to_hsbk(hsv_color):
-    """Convert HSV string (e.g., '180,50,75') to HSBK format."""
+def load_last_used_lights():
     try:
-        h, s, v = map(float, hsv_color.split(','))
-        if not (0 <= h <= 360 and 0 <= s <= 100 and 0 <= v <= 100):
-            return None
-
-        # Convert to LIFX HSBK format
-        hue = int(h / 360 * 65535)
-        saturation = int(s / 100 * 65535)
-        brightness = int(v / 100 * 65535)
-        kelvin = 3500  # Default color temperature
-
-        return [hue, saturation, brightness, kelvin]
+        last_used_file = get_last_used_file_path()
+        with open(last_used_file, 'r') as f:
+            last_used_data = json.load(f)
+        lights = []
+        for light_data in last_used_data:
+            try:
+                light = Light(light_data['mac_addr'], light_data['ip_addr'])
+                lights.append(light)
+            except:
+                pass
+        return lights
     except:
         return None
 
@@ -106,8 +153,33 @@ def kelvin_to_hsbk(kelvin):
         kelvin = 9000
     hue = 0
     saturation = 0
-    brightness = 65535
+    brightness = 100
     return [hue, saturation, brightness, kelvin]
+
+def intuitive_to_lifx_hsbk(h, s, b, k):
+    """Convert intuitive HSBK (0-360, 0-100, 0-100, kelvin) to LIFX format (0-65535)"""
+    lifx_h = int(h / 360 * 65535)
+    lifx_s = int(s / 100 * 65535)
+    lifx_b = int(b / 100 * 65535)
+    return [lifx_h, lifx_s, lifx_b, k]
+
+def hsbk_to_rgb(h, s, b, k):
+    """Convert HSBK to RGB for color preview (ignores kelvin for now)"""
+    if s == 0:  # White light - approximate kelvin to RGB
+        if k <= 3000:
+            return (255, 180, 107)  # Warm white
+        elif k <= 4000:
+            return (255, 214, 170)  # Neutral white
+        else:
+            return (255, 244, 229)  # Cool white
+    else:
+        # Convert HSB to RGB
+        r, g, b_rgb = colorsys.hsv_to_rgb(h/360, s/100, b/100)
+        return (int(r*255), int(g*255), int(b_rgb*255))
+
+def rgb_to_ansi(r, g, b):
+    """Convert RGB to ANSI color code"""
+    return f"\033[38;2;{r};{g};{b}m██\033[0m"
 
 def add_duration_option(f):
     return click.option(
@@ -216,33 +288,37 @@ def list_lights(rescan, json_output):
         click.echo(json.dumps(light_list, indent=2))
         return
 
-    print(f"Found {len(lights)} LIFX light(s):\n")
-    for idx, light in enumerate(lights, start=1):
+    for light in lights:
         try:
             label = light.get_label()
-            ip_addr = light.get_ip_addr()
-            mac_addr = light.get_mac_addr()
             power = "On" if light.get_power() > 0 else "Off"
             color = light.get_color()
-            brightness = color[2] / 65535 if color else 0.0
-            if color:
-                color_formatted = (
-                    f"Hue: {color[0]/65535*360:.1f}°, "
-                    f"Saturation: {color[1]/65535*100:.1f}%, "
-                    f"Brightness: {color[2]/65535*100:.1f}%, "
-                    f"Kelvin: {color[3]}"
-                )
+            
+            if color and power == "On":
+                h = color[0]/65535*360
+                s = color[1]/65535*100
+                b = color[2]/65535*100
+                k = color[3]
+                
+                # Generate color preview
+                r, g, b_rgb = hsbk_to_rgb(h, s, b, k)
+                color_preview = rgb_to_ansi(r, g, b_rgb)
+                
+                # Format color info concisely
+                if s < 5:  # Essentially white
+                    color_info = f"{k}K white"
+                else:
+                    color_info = f"{h:.0f}°, {s:.0f}%, {k}K"
+                
+                brightness_str = f"{b:.0f}%"
             else:
-                color_formatted = "N/A"
-            print(f"Light {idx}:")
-            print(f"  Label      : {label}")
-            print(f"  IP Address : {ip_addr}")
-            print(f"  MAC Address: {mac_addr}")
-            print(f"  Power      : {power}")
-            print(f"  Color      : {color_formatted}")
-            print(f"  Brightness : {brightness * 100:.1f}%\n")
+                color_preview = "  "  # No color preview when off
+                color_info = "Off" if power == "Off" else "Unknown"
+                brightness_str = "0%" if power == "Off" else "?"
+            
+            print(f"{color_preview} {label:<20} {power:<3} {brightness_str:<4} {color_info}")
         except:
-            print(f"  Could not retrieve information for light {idx}.\n")
+            print(f"   {label:<20} ?   ?    Connection failed")
 
 cli.add_command(list_lights, name='l')
 
@@ -261,6 +337,7 @@ def power(ctx, all_lights, group, name, duration, state):
         for light in lights:
             light.set_power(state, duration=duration_ms)
             print(f"Set power of '{light.get_label()}' to '{state}'.")
+        save_last_used_lights(lights)
     except:
         print("Failed to set power.")
     print("\nAll specified actions have been executed.")
@@ -270,51 +347,82 @@ cli.add_command(power, name='p')
 @cli.command(name='color', short_help='Set color of LIFX lights.')
 @add_target_options
 @add_duration_option
-@click.argument('color_arg', type=str)
+@click.argument('color_arg', type=str, required=False)
 @click.pass_context
 def color(ctx, all_lights, group, name, duration, color_arg):
     all_lights = all_lights or ctx.obj.get('all_lights')
     group = group or ctx.obj.get('group')
     name = name or ctx.obj.get('name')
     lifx, lights = get_lights(all_lights, group, name)
-    if color_arg.startswith('#'):
-        color_value = hex_to_hsbk(color_arg)
-        if not color_value:
-            print(f"Invalid hex color format: '{color_arg}'. Use '#RRGGBB'.")
+    
+    if not color_arg:
+        # Use fzf to select from predefined HSBK colors
+        options = []
+        max_name_len = max(len(name) for name, _ in HSBK_COLOR_OPTIONS)
+        for name, hsbk in HSBK_COLOR_OPTIONS:
+            h, s, b, k = map(float, hsbk.split(','))
+            r, g, b_rgb = hsbk_to_rgb(h, s, b, k)
+            color_preview = rgb_to_ansi(r, g, b_rgb)
+            formatted_hsbk = f"{h:>3.0f},{s:>3.0f},{b:>3.0f},{k:>4.0f}"
+            options.append(f"{color_preview} {name:<{max_name_len}} - {formatted_hsbk}")
+        
+        try:
+            proc = subprocess.run(
+                ['fzf', '--prompt=Select color: ', '--height=20', '--ansi'],
+                input='\n'.join(options),
+                text=True,
+                capture_output=True
+            )
+            if proc.returncode != 0:
+                print("Color selection cancelled.")
+                sys.exit(0)
+            selected = proc.stdout.strip()
+            if selected:
+                # Extract HSBK values from selection (after the last ' - ')
+                color_arg = selected.split(' - ')[-1]
+            else:
+                print("No color selected.")
+                sys.exit(1)
+        except FileNotFoundError:
+            print("Error: fzf is required for interactive color selection.")
+            print("Install with: brew install fzf")
             sys.exit(1)
-    elif color_arg.endswith('k'):
+        except Exception as e:
+            print(f"Error during color selection: {e}")
+            sys.exit(1)
+    
+    if color_arg.endswith('k'):
         color_value = kelvin_to_hsbk(color_arg)
         if not color_value:
             print(f"Invalid kelvin format: '{color_arg}'. Use format like '3500k'.")
             sys.exit(1)
     elif color_arg in PREDEFINED_COLORS:
         color_value = PREDEFINED_COLORS[color_arg]
-    elif ',' in color_arg and len(color_arg.split(',')) == 3:
-        color_value = hsv_to_hsbk(color_arg)
-        if not color_value:
-            print(f"Invalid HSV format: '{color_arg}'. Use 'hue,saturation,value' (e.g., '180,50,75').")
-            print("Hue: 0-360, Saturation: 0-100, Value: 0-100")
-            sys.exit(1)
+    elif color_arg.lower() in LIFX_THEMES:
+        h, s, b, k = map(float, LIFX_THEMES[color_arg.lower()].split(','))
+        color_value = intuitive_to_lifx_hsbk(h, s, b, k)
     else:
         try:
-            h, s, b, k = map(int, color_arg.split(','))
-            if not (0 <= h <= 65535 and 0 <= s <= 65535 and 0 <= b <= 65535 and 1500 <= k <= 9000):
+            h, s, b, k = map(float, color_arg.split(','))
+            if not (0 <= h <= 360 and 0 <= s <= 100 and 0 <= b <= 100 and 1500 <= k <= 9000):
                 print("HSBK values out of range.")
+                print("Hue: 0-360°, Saturation: 0-100%, Brightness: 0-100%, Kelvin: 1500-9000")
                 sys.exit(1)
-            color_value = [h, s, b, k]
+            color_value = intuitive_to_lifx_hsbk(h, s, b, k)
         except:
             print(f"Invalid color format: '{color_arg}'. Use one of:")
             print("- Predefined color name (Red, Green, Blue, etc.)")
-            print("- Hex color '#RRGGBB'")
             print("- Color temperature 'Nk' (e.g., '3500k')")
-            print("- HSV values 'hue,saturation,value' (e.g., '180,50,75')")
-            print("- HSBK values 'hue,saturation,brightness,kelvin'")
+            print("- HSBK values 'hue,saturation,brightness,kelvin' (0-360°, 0-100%, 0-100%, 1500-9000K)")
+            print("- Theme names: sunset, candlelight, fireplace, reading, etc.")
+            print("- Run without argument for interactive selection")
             sys.exit(1)
     duration_ms = int(duration * 1000)  # Convert seconds to milliseconds
     try:
         for light in lights:
             light.set_color(color_value, duration=duration_ms)
             print(f"Set color of '{light.get_label()}' to '{color_arg}'.")
+        save_last_used_lights(lights)
     except:
         print("Failed to set color.")
     print("\nAll specified actions have been executed.")
@@ -342,11 +450,64 @@ def brightness(ctx, all_lights, group, name, duration, level):
                 print(f"Set brightness of '{light.get_label()}' to {level}%.")
             else:
                 print(f"Cannot set brightness for '{light.get_label()}' as color information is unavailable.")
+        save_last_used_lights(lights)
     except:
         print("Failed to set brightness.")
     print("\nAll specified actions have been executed.")
 
 cli.add_command(brightness, name='b')
+
+@cli.command(name='warmer', short_help='Make lights warmer (lower kelvin).')
+@add_target_options
+@add_duration_option
+@click.argument('amount', type=int, default=100)
+@click.pass_context
+def warmer(ctx, all_lights, group, name, duration, amount):
+    all_lights = all_lights or ctx.obj.get('all_lights')
+    group = group or ctx.obj.get('group')
+    name = name or ctx.obj.get('name')
+    lifx, lights = get_lights(all_lights, group, name)
+    duration_ms = int(duration * 1000)
+    try:
+        for light in lights:
+            current_color = light.get_color()
+            if current_color:
+                new_kelvin = max(1500, current_color[3] - amount)
+                new_color = [current_color[0], current_color[1], current_color[2], new_kelvin]
+                light.set_color(new_color, duration=duration_ms)
+                print(f"Made '{light.get_label()}' warmer ({new_kelvin}K).")
+            else:
+                print(f"Cannot adjust temperature for '{light.get_label()}' as color information is unavailable.")
+        save_last_used_lights(lights)
+    except:
+        print("Failed to adjust temperature.")
+    print("\nAll specified actions have been executed.")
+
+@cli.command(name='cooler', short_help='Make lights cooler (higher kelvin).')
+@add_target_options
+@add_duration_option
+@click.argument('amount', type=int, default=100)
+@click.pass_context
+def cooler(ctx, all_lights, group, name, duration, amount):
+    all_lights = all_lights or ctx.obj.get('all_lights')
+    group = group or ctx.obj.get('group')
+    name = name or ctx.obj.get('name')
+    lifx, lights = get_lights(all_lights, group, name)
+    duration_ms = int(duration * 1000)
+    try:
+        for light in lights:
+            current_color = light.get_color()
+            if current_color:
+                new_kelvin = min(9000, current_color[3] + amount)
+                new_color = [current_color[0], current_color[1], current_color[2], new_kelvin]
+                light.set_color(new_color, duration=duration_ms)
+                print(f"Made '{light.get_label()}' cooler ({new_kelvin}K).")
+            else:
+                print(f"Cannot adjust temperature for '{light.get_label()}' as color information is unavailable.")
+        save_last_used_lights(lights)
+    except:
+        print("Failed to adjust temperature.")
+    print("\nAll specified actions have been executed.")
 
 def get_lights(all_lights, group, name):
     cache_file = get_cache_file_path()
@@ -401,8 +562,15 @@ def get_lights(all_lights, group, name):
             print("Error: No matching lights found for the specified name(s).")
             sys.exit(1)
     else:
-        print("Error: No target specified. Use --all, --group, or --name.")
-        sys.exit(1)
+        # Try to use last used lights as default
+        last_used = load_last_used_lights()
+        if last_used:
+            target_lights = last_used
+            print(f"Using last used light(s): {', '.join([light.get_label() for light in target_lights])}")
+        else:
+            print("Error: No target specified and no last used lights found.")
+            print("Use --all, --group, or --name to specify target lights.")
+            sys.exit(1)
     return lifx, target_lights
 
 if __name__ == "__main__":
