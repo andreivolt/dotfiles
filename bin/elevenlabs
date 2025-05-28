@@ -1,9 +1,82 @@
-#!/usr/bin/env sh
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = ["elevenlabs"]
+# ///
 
-voice_id=GqzvpFS0pRUCKubI6ty9
-# voice_id=21m00Tcm4TlvDq8ikWAM
+import argparse
+import os
+import sys
+from elevenlabs import ElevenLabs, VoiceSettings, stream
 
-jo text=@- voice_settings=$(jo stability=0.3 similarity_boost=0.5) |
-  http -b --download --output - POST "https://api.elevenlabs.io/v1/text-to-speech/${voice_id}/stream" accept:'audio/mpeg' xi-api-key:$ELEVENLABS_API_KEY Content-Type:'application/json' |
-  ffmpeg -i - -filter:a "atempo=1.3" -f wav - |
-  mpv -
+parser = argparse.ArgumentParser(description='Convert text to speech using ElevenLabs API')
+parser.add_argument('text', nargs='*', help='Text to convert (reads from stdin if not provided)')
+parser.add_argument('-v', '--voice', default='GqzvpFS0pRUCKubI6ty9', help='Voice ID')
+parser.add_argument('-m', '--model', default='eleven_flash_v2_5', help='Model to use')
+parser.add_argument('-s', '--stability', type=float, default=0.3, help='Voice stability (0.0-1.0)')
+parser.add_argument('-b', '--similarity-boost', type=float, default=0.5, help='Similarity boost (0.0-1.0)')
+parser.add_argument('--list-voices', action='store_true', help='List available voices')
+
+args = parser.parse_args()
+
+api_key = os.environ.get('ELEVENLABS_API_KEY')
+if not api_key:
+    print("Error: ELEVENLABS_API_KEY environment variable not set", file=sys.stderr)
+    sys.exit(1)
+
+client = ElevenLabs(api_key=api_key)
+
+if args.list_voices:
+    voices = client.voices.get_all()
+    for voice in voices.voices:
+        desc = getattr(voice, 'description', '') or ''
+        if desc:
+            print(f"{voice.voice_id}: {voice.name} - {desc}")
+        else:
+            print(f"{voice.voice_id}: {voice.name}")
+    sys.exit(0)
+
+if args.text:
+    text = ' '.join(args.text)
+else:
+    text = sys.stdin.read().strip()
+
+if not text:
+    print("Error: No text provided", file=sys.stderr)
+    sys.exit(1)
+
+# Resolve voice name to voice_id if needed
+voice_id = args.voice
+if not voice_id.startswith(('21m', '9BW', 'EXA', 'FGY', 'IKn', 'JBF', 'TxG')):  # Common voice ID prefixes
+    voices = client.voices.get_all()
+    for voice in voices.voices:
+        if voice.name.lower() == args.voice.lower():
+            voice_id = voice.voice_id
+            break
+    else:
+        print(f"Error: Voice '{args.voice}' not found", file=sys.stderr)
+        sys.exit(1)
+
+voice_settings = VoiceSettings(
+    stability=args.stability,
+    similarity_boost=args.similarity_boost
+)
+
+try:
+    audio_stream = client.text_to_speech.stream(
+        text=text,
+        voice_id=voice_id,
+        model_id=args.model,
+        voice_settings=voice_settings
+    )
+    
+    if sys.stdout.isatty():
+        stream(audio_stream)
+    else:
+        for chunk in audio_stream:
+            if isinstance(chunk, bytes):
+                sys.stdout.buffer.write(chunk)
+                sys.stdout.buffer.flush()
+        
+except Exception as e:
+    print(f"Error: {e}", file=sys.stderr)
+    sys.exit(1)
