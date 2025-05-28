@@ -457,7 +457,63 @@ def brightness(ctx, all_lights, group, name, duration, level):
 
 cli.add_command(brightness, name='b')
 
-@cli.command(name='warmer', short_help='Make lights warmer (lower kelvin).')
+@cli.command(name='brighter', short_help='Increase brightness by percentage.')
+@add_target_options
+@add_duration_option
+@click.argument('amount', type=int, default=10)
+@click.pass_context
+def brighter(ctx, all_lights, group, name, duration, amount):
+    all_lights = all_lights or ctx.obj.get('all_lights')
+    group = group or ctx.obj.get('group')
+    name = name or ctx.obj.get('name')
+    lifx, lights = get_lights(all_lights, group, name)
+    duration_ms = int(duration * 1000)
+    try:
+        for light in lights:
+            current_color = light.get_color()
+            if current_color:
+                current_brightness = current_color[2] / 65535 * 100
+                new_brightness_pct = min(100, current_brightness + amount)
+                new_brightness = int(new_brightness_pct / 100 * 65535)
+                new_color = [current_color[0], current_color[1], new_brightness, current_color[3]]
+                light.set_color(new_color, duration=duration_ms)
+                print(f"Increased brightness of '{light.get_label()}' from {current_brightness:.0f}% to {new_brightness_pct:.0f}%.")
+            else:
+                print(f"Cannot adjust brightness for '{light.get_label()}' as color information is unavailable.")
+        save_last_used_lights(lights)
+    except:
+        print("Failed to adjust brightness.")
+    print("\nAll specified actions have been executed.")
+
+@cli.command(name='dimmer', short_help='Decrease brightness by percentage.')
+@add_target_options
+@add_duration_option
+@click.argument('amount', type=int, default=10)
+@click.pass_context
+def dimmer(ctx, all_lights, group, name, duration, amount):
+    all_lights = all_lights or ctx.obj.get('all_lights')
+    group = group or ctx.obj.get('group')
+    name = name or ctx.obj.get('name')
+    lifx, lights = get_lights(all_lights, group, name)
+    duration_ms = int(duration * 1000)
+    try:
+        for light in lights:
+            current_color = light.get_color()
+            if current_color:
+                current_brightness = current_color[2] / 65535 * 100
+                new_brightness_pct = max(0, current_brightness - amount)
+                new_brightness = int(new_brightness_pct / 100 * 65535)
+                new_color = [current_color[0], current_color[1], new_brightness, current_color[3]]
+                light.set_color(new_color, duration=duration_ms)
+                print(f"Decreased brightness of '{light.get_label()}' from {current_brightness:.0f}% to {new_brightness_pct:.0f}%.")
+            else:
+                print(f"Cannot adjust brightness for '{light.get_label()}' as color information is unavailable.")
+        save_last_used_lights(lights)
+    except:
+        print("Failed to adjust brightness.")
+    print("\nAll specified actions have been executed.")
+
+@cli.command(name='warmer', short_help='Make lights warmer (lower kelvin or shift to red).')
 @add_target_options
 @add_duration_option
 @click.argument('amount', type=int, default=100)
@@ -472,10 +528,38 @@ def warmer(ctx, all_lights, group, name, duration, amount):
         for light in lights:
             current_color = light.get_color()
             if current_color:
-                new_kelvin = max(1500, current_color[3] - amount)
-                new_color = [current_color[0], current_color[1], current_color[2], new_kelvin]
-                light.set_color(new_color, duration=duration_ms)
-                print(f"Made '{light.get_label()}' warmer ({new_kelvin}K).")
+                current_kelvin = current_color[3]
+                current_saturation = current_color[1] / 65535 * 100
+                
+                if current_kelvin > 1500:
+                    # Normal temperature adjustment
+                    new_kelvin = max(1500, current_kelvin - amount)
+                    new_color = [current_color[0], current_color[1], current_color[2], new_kelvin]
+                    light.set_color(new_color, duration=duration_ms)
+                    print(f"Made '{light.get_label()}' warmer ({new_kelvin}K).")
+                else:
+                    # Already at 1500K, start shifting towards red
+                    # Convert amount to hue/saturation shift
+                    # Each 100K below 1500K = ~10% more saturation and shift towards red (0°)
+                    shift_factor = amount / 100.0 * 10  # 10% saturation per 100K
+                    
+                    # Increase saturation
+                    new_saturation = min(100, current_saturation + shift_factor)
+                    new_saturation_16bit = int(new_saturation / 100 * 65535)
+                    
+                    # Shift hue towards red (0°)
+                    current_hue = current_color[0] / 65535 * 360
+                    if current_hue > 180:
+                        # If hue is in the blue/purple range, move clockwise towards red
+                        new_hue = max(0, current_hue - shift_factor * 3)
+                    else:
+                        # If already in red/orange range, just move closer to 0
+                        new_hue = max(0, current_hue - shift_factor)
+                    new_hue_16bit = int(new_hue / 360 * 65535)
+                    
+                    new_color = [new_hue_16bit, new_saturation_16bit, current_color[2], 1500]
+                    light.set_color(new_color, duration=duration_ms)
+                    print(f"Made '{light.get_label()}' warmer (shifting to red, {new_saturation:.0f}% saturation).")
             else:
                 print(f"Cannot adjust temperature for '{light.get_label()}' as color information is unavailable.")
         save_last_used_lights(lights)

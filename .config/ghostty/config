@@ -33,7 +33,7 @@ adjust-cell-width = -11%
 font-size = 18
 # font-thicken = true
 
-background-opacity = 0.85
+background-opacity = 0.8
 background-blur-radius = 16
 background = #000000
 
@@ -46,6 +46,8 @@ window-decoration = false
 mouse-hide-while-typing = true
 
 window-save-state = always
+
+alpha-blending = linear-corrected
 
 confirm-close-surface = false
 

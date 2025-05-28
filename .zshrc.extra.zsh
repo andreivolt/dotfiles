@@ -66,10 +66,10 @@ zsh-defer source ~/.zsh.d/completion.zsh
 [[ $TERM == xterm-kitty ]] && source ~/.zsh.d/kitty.zsh
 source ~/.local/share/zsh/plugins/nix-shell/nix-shell.plugin.zsh
 source ~/.zsh.d/accept-line.zsh
-zsh-defer source ~/.zsh.d/autopair.zsh
-zsh-defer source ~/.zsh.d/autosuggestions.zsh
+source ~/.zsh.d/autopair.zsh
+source ~/.zsh.d/autosuggestions.zsh
 source ~/.zsh.d/fzf.zsh
-zsh-defer source ~/.zsh.d/history-substring-search.zsh
+source ~/.zsh.d/history-substring-search.zsh
 [[ -n "$TMUX" ]] && source ~/.zsh.d/tmux-term-title.zsh
 
 zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
