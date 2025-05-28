@@ -1,1 +1,1 @@
-exec npx --yes quicktype --lang schema
+exec bunx quicktype --lang schema

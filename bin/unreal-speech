@@ -1,78 +1,212 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = [
+#     "unrealspeech",
+#     "pydub",
+#     "simpleaudio"
+# ]
+# ///
 
-require 'bundler/inline'
+import os
+import sys
+import argparse
+import threading
+import queue
+import subprocess
+import tempfile
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-gemfile(quiet: true) do
-  source :rubygems
-  gem 'parallel'
-  gem 'httparty', '~> 0.2'
-end
+# Monkey patch to avoid playsound import issue
+sys.modules['playsound'] = type(sys)('playsound')
+sys.modules['playsound'].playsound = lambda x: None
 
-require 'json'
-require 'optparse'
+import unrealspeech
 
-options = {
-  voice_id: 'Liv',
-  bitrate: '320k',
-  speed: '0.5',
-  pitch: '1.0',
-  codec: 'libmp3lame',
-  temperature: 0.5
-}
+def parse_args():
+    parser = argparse.ArgumentParser(description='Unreal Speech TTS with smart streaming')
+    parser.add_argument('-v', '--voice-id', default='Liv',
+                       help='Voice ID (Scarlett, Dan, Liv, Will, Amy, etc.) (default: Liv)')
+    parser.add_argument('-b', '--bitrate', default='320k',
+                       help='Bitrate (320k, 256k, 192k, 128k, 64k, 32k) (default: 320k)')
+    parser.add_argument('-s', '--speed', type=float, default=0.0,
+                       help='Speed (-1.0 to 1.0, 0=normal) (default: 0.0)')
+    parser.add_argument('-p', '--pitch', type=float, default=1.0,
+                       help='Pitch (0.5 to 1.5) (default: 1.0)')
+    parser.add_argument('-c', '--codec', default='pcm_s16le',
+                       help='Codec (pcm_s16le, libmp3lame, pcm_mulaw) (default: pcm_s16le - highest quality)')
+    parser.add_argument('-t', '--temperature', type=float, default=0.25,
+                       help='Temperature (0.1 to 1.0) (default: 0.25)')
+    parser.add_argument('text', nargs='*', help='Text to synthesize (or read from stdin)')
+    return parser.parse_args()
 
-OptionParser.new do |opts|
-  opts.on('-v', '--voice_id VOICE', "Voice ID (Scarlett, Dan, Liv, Will, Amy) (default: #{options[:voice_id]})")
-  opts.on('-b', '--bitrate BITRATE', "Bitrate (320k, 256k, 192k, ...) (default: #{options[:bitrate]})")
-  opts.on('-s', '--speed SPEED', "Speed (-1.0 to 1.0) (default: #{options[:speed]})")
-  opts.on('-p', '--pitch PITCH', "Pitch (0.5 to 1.5) (default: #{options[:pitch]})")
-  opts.on('-c', '--codec CODEC', "Codec (libmp3lame, pcm_mulaw, pcm_s16le) (default: #{options[:codec]})")
-  opts.on('-t', '--temperature TEMP', Float, "Temperature (0.1 to 0.8) (default: #{options[:temperature]})")
-end.parse!(into: options)
+def split_at_sentence_boundary(text, max_length=500):
+    """Split text at sentence boundary, keeping first chunk under max_length"""
+    if len(text) <= max_length:
+        return text, ""
 
-text = ARGV.empty? ? $stdin.read : ARGV.join(' ')
+    # Find last sentence ending before max_length
+    truncated = text[:max_length]
+    last_punct = max(truncated.rfind('.'), truncated.rfind('!'), truncated.rfind('?'))
 
-def split_text(text, max_length)
-  text
-    .split(/(?<=\.|\?|!)/)
-    .map(&:strip)
-    .each_with_object([]) do |sentence, chunks|
-      if chunks.empty? || chunks.last.length + sentence.length > max_length
-        chunks << sentence
-      else
-        chunks.last << " #{sentence}"
-      end
-    end
-end
+    if last_punct > 0:
+        split_point = last_punct + 1
+        return text[:split_point].strip(), text[split_point:].strip()
 
-def synthesize_speech(text_chunk, options, stream: true)
-  endpoint = stream ? 'stream' : 'speech'
-  uri = "https://api.v6.unrealspeech.com/#{endpoint}"
-  body = {
-    Text: text_chunk,
-    VoiceId: options[:voice_id],
-    Bitrate: options[:bitrate],
-    Pitch: options[:pitch],
-    Speed: options[:speed],
-    Codec: options[:codec],
-    Temperature: options[:temperature]
-  }
-  response = HTTParty.post uri,
-    body: body.to_json,
-    headers: {
-      'Content-Type' => 'application/json',
-      'Authorization' => "Bearer #{ENV['UNREAL_SPEECH_API_KEY']}"
-    }
-  if endpoint == 'speech'
-    JSON.parse(response.body)['OutputUri']
-  else
-    response.body
-  end
-end
+    # Fallback to word boundary
+    words = text[:max_length].split()
+    if len(words) > 1:
+        first_part = ' '.join(words[:-1])
+        remaining = text[len(first_part):].strip()
+        return first_part, remaining
 
-if text.length <= 500
-  IO.popen(%w[play --type mp3 -], 'w') { |f| f.write(synthesize_speech(text, options)) }
-else
-  text_chunks = split_text(text, 3000)
-  output_uris = Parallel.map(text_chunks) { |chunk| synthesize_speech(chunk, options, stream: false) }
-  output_uris.each { |uri| `play #{uri}` }
-end
+    return text[:max_length], text[max_length:]
+
+def split_text_into_chunks(text, max_length=3000):
+    """Split text into chunks at sentence boundaries"""
+    chunks = []
+    current_chunk = ""
+
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+
+    for sentence in sentences:
+        if len(current_chunk) + len(sentence) + 1 <= max_length:
+            if current_chunk:
+                current_chunk += " " + sentence
+            else:
+                current_chunk = sentence
+        else:
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = sentence
+            else:
+                # Single sentence longer than max_length
+                chunks.append(sentence)
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
+
+def synthesize_stream(client, text, options):
+    """Synthesize using stream endpoint"""
+    return client.stream(
+        text,
+        voice_id=options.voice_id,
+        bitrate=options.bitrate,
+        speed=options.speed,
+        pitch=options.pitch,
+        codec=options.codec,
+        temperature=options.temperature
+    )
+
+def synthesize_speech(client, text, options):
+    """Synthesize using speech endpoint (returns URL)"""
+    response = client.speech(
+        text,
+        voice_id=options.voice_id,
+        bitrate=options.bitrate,
+        speed=options.speed,
+        pitch=options.pitch,
+        temperature=options.temperature
+    )
+    return response.get('OutputUri')
+
+def play_audio_data(audio_data, audio_format='mp3'):
+    """Play audio data using system play command"""
+    with tempfile.NamedTemporaryFile(suffix=f'.{audio_format}', delete=False) as f:
+        f.write(audio_data)
+        f.flush()
+        subprocess.run(['play', f.name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os.unlink(f.name)
+
+def play_audio_url(url):
+    """Play audio from URL using system play command"""
+    subprocess.run(['play', url], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def main():
+    args = parse_args()
+
+    if not os.getenv('UNREAL_SPEECH_API_KEY'):
+        print("Error: UNREAL_SPEECH_API_KEY environment variable not set", file=sys.stderr)
+        sys.exit(1)
+
+    # Get text from args or stdin
+    if args.text:
+        text = ' '.join(args.text)
+    else:
+        text = sys.stdin.read().strip()
+
+    if not text:
+        print("Error: No text provided", file=sys.stderr)
+        sys.exit(1)
+
+    client = unrealspeech.UnrealSpeechAPI(api_key=os.getenv('UNREAL_SPEECH_API_KEY'))
+
+    # Split text into immediate stream part and remaining chunks
+    first_chunk, remaining_text = split_at_sentence_boundary(text, 500)
+
+    # Queue for sequential playback
+    playback_queue = queue.Queue()
+
+    def background_processor():
+        """Process remaining chunks in background"""
+        if not remaining_text:
+            return
+
+        chunks = split_text_into_chunks(remaining_text, 3000)
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            # Submit all chunks for processing
+            future_to_chunk = {
+                executor.submit(synthesize_speech, client, chunk, args): i
+                for i, chunk in enumerate(chunks)
+            }
+
+            # Collect results in order
+            results = [None] * len(chunks)
+            for future in as_completed(future_to_chunk):
+                chunk_index = future_to_chunk[future]
+                try:
+                    url = future.result()
+                    results[chunk_index] = url
+                except Exception as e:
+                    print(f"Error processing chunk {chunk_index}: {e}", file=sys.stderr)
+
+            # Queue results in order
+            for url in results:
+                if url:
+                    playback_queue.put(url)
+
+        playback_queue.put(None)  # Signal end
+
+    # Start background processing
+    bg_thread = threading.Thread(target=background_processor)
+    bg_thread.daemon = True
+    bg_thread.start()
+
+    # Stream and play first chunk immediately
+    try:
+        first_audio = synthesize_stream(client, first_chunk, args)
+        play_audio_data(first_audio, 'mp3')
+    except Exception as e:
+        print(f"Error streaming first chunk: {e}", file=sys.stderr)
+        return
+
+    # Play remaining chunks as they become available
+    while True:
+        try:
+            url = playback_queue.get(timeout=30)
+            if url is None:  # End signal
+                break
+            play_audio_url(url)
+        except queue.Empty:
+            print("Timeout waiting for background processing", file=sys.stderr)
+            break
+        except Exception as e:
+            print(f"Error playing audio: {e}", file=sys.stderr)
+
+    bg_thread.join(timeout=1)
+
+if __name__ == '__main__':
+    main()

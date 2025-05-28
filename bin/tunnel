@@ -1,40 +1,84 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 
-SCRIPT_NAME=$(basename "$0")
+import argparse
+import subprocess
+import time
+import random
+import sys
+import signal
 
-eval "$(docopts -h - : "$@" <<EOF
-Usage: $SCRIPT_NAME -l <local_port> -r <remote_port> -u <username> -h <remote_host> [-i <identity_file>]
+def create_tunnel(local_port, remote_port, username, remote_host, identity_file=None):
+    random_port = random.randint(30000, 59999)
 
-Options:
-  -l <local_port>, --local-port <local_port>           Local port to be forwarded.
-  -r <remote_port>, --remote-port <remote_port>        Remote port on the server.
-  -u <username>, --username <username>                 Remote server username.
-  -h <remote_host>, --remote-host <remote_host>        Remote server host.
-  -i <identity_file>, --identity-file <identity_file>  SSH identity file [optional].
-  --help                                               Show this screen.
-EOF
-)"
+    ssh_cmd = ["ssh"]
+    if identity_file:
+        ssh_cmd.extend(["-i", identity_file])
 
-RANDOM_HI_PORT=$((RANDOM % 30000 + 30000))
+    ssh_cmd.extend([
+        "-R", f"{random_port}:localhost:{local_port}",
+        f"{username}@{remote_host}",
+        f"socat TCP-LISTEN:{remote_port},fork,reuseaddr TCP:localhost:{random_port}"
+    ])
 
-SSH_CMD="ssh"
-if [ -n "$identity_file" ]; then
-  SSH_CMD="$SSH_CMD -i $identity_file"
-fi
-SSH_CMD="$SSH_CMD -R $RANDOM_HI_PORT:localhost:$local_port $username@$remote_host"
+    return ssh_cmd, random_port
 
-SOCAT_CMD="socat TCP-LISTEN:$remote_port,fork,reuseaddr TCP:localhost:$RANDOM_HI_PORT"
+def is_tunnel_running(random_port, local_port):
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", f"ssh.*-R {random_port}:localhost:{local_port}"],
+            capture_output=True, text=True
+        )
+        return result.returncode == 0
+    except subprocess.SubprocessError:
+        return False
 
-echo "Executing: $SSH_CMD '$SOCAT_CMD'"
-$SSH_CMD "$SOCAT_CMD" &
+def main():
+    parser = argparse.ArgumentParser(description="Create a persistent reverse SSH tunnel")
+    parser.add_argument("-l", "--local-port", type=int, required=True,
+                        help="Local port to be forwarded")
+    parser.add_argument("-r", "--remote-port", type=int, required=True,
+                        help="Remote port on the server")
+    parser.add_argument("-u", "--username", required=True,
+                        help="Remote server username")
+    parser.add_argument("-H", "--remote-host", required=True,
+                        help="Remote server host")
+    parser.add_argument("-i", "--identity-file",
+                        help="SSH identity file")
 
-sleep 5
+    args = parser.parse_args()
 
-while true; do
-  if ! ps aux | grep -q "[s]sh -R $RANDOM_HI_PORT:localhost:$local_port"; then
-    echo "SSH tunnel disconnected. Restarting..."
-    $SSH_CMD "$SOCAT_CMD" &
-    sleep 5
-  fi
-  sleep 60
-done
+    ssh_cmd, random_port = create_tunnel(
+        args.local_port, args.remote_port, args.username,
+        args.remote_host, args.identity_file
+    )
+
+    print(f"Starting tunnel: {' '.join(ssh_cmd)}")
+
+    def signal_handler(sig, frame):
+        print("\nShutting down tunnel...")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    process = None
+
+    try:
+        while True:
+            if process is None or not is_tunnel_running(random_port, args.local_port):
+                if process:
+                    print("SSH tunnel disconnected. Restarting...")
+                    process.terminate()
+
+                process = subprocess.Popen(ssh_cmd)
+                time.sleep(5)
+
+            time.sleep(60)
+
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
+        print("\nTunnel stopped.")
+
+if __name__ == "__main__":
+    main()
