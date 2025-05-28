@@ -5,8 +5,8 @@
 // build_cmd: swiftc -O script.swift -o script
 // scriptisto-end
 
-import AVFoundation
 import Foundation
+import AudioToolbox
 
 func toggleDefaultInputDeviceMute() {
     var defaultInputDeviceID = AudioDeviceID(0)
@@ -17,12 +17,17 @@ func toggleDefaultInputDeviceMute() {
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain)
 
-    let status = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject),
+    let getDeviceStatus = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject),
         &propertyAddress,
         0,
         nil,
         &propertySize,
         &defaultInputDeviceID)
+
+    guard getDeviceStatus == noErr && defaultInputDeviceID != kAudioObjectUnknown else {
+        showMessage("❌ No microphone found")
+        return
+    }
 
     var mute: UInt32 = 0
     propertySize = UInt32(MemoryLayout<UInt32>.size)
@@ -39,8 +44,12 @@ func toggleDefaultInputDeviceMute() {
         &propertySize,
         &mute)
 
+    guard getMuteStatus == noErr else {
+        showMessage("❌ Cannot read microphone status")
+        return
+    }
+
     var newMuteValue: UInt32 = mute == 0 ? 1 : 0
-    print("\(newMuteValue == 0 ? "unmuted" : "muted")")
 
     let setMuteStatus = AudioObjectSetPropertyData(defaultInputDeviceID,
         &mutePropertyAddress,
@@ -49,12 +58,18 @@ func toggleDefaultInputDeviceMute() {
         propertySize,
         &newMuteValue)
 
-    let title = "Microphone Mute"
-    let message = newMuteValue == 0 ? "Microphone is unmuted" : "Microphone is muted"
+    if setMuteStatus == noErr {
+        let message = newMuteValue == 0 ? "🎤 Microphone unmuted" : "🔇 Microphone muted"
+        showMessage(message)
+    } else {
+        showMessage("❌ Failed to toggle microphone")
+    }
+}
 
+func showMessage(_ message: String) {
     let task = Process()
-    task.launchPath = "/run/current-system/sw/bin/terminal-notifier"
-    task.arguments = ["-title", title, "-message", message]
+    task.launchPath = "/opt/homebrew/bin/hs"
+    task.arguments = ["-c", "hs.alert.closeAll(); hs.alert.show('\(message)', 1.5)"]
     task.launch()
     task.waitUntilExit()
 }
