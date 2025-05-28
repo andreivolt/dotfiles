@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+
+speed=$1
+
+ffmpeg -i - -filter:a "atempo=$speed" -f wav - 2>/dev/null
