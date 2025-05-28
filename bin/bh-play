@@ -14,6 +14,8 @@ parser.add_argument("-m", "--monitor", action="store_true",
 parser.add_argument("audiofile", nargs="?", help="Audio file to play")
 args = parser.parse_args()
 
+is_stdin = not sys.stdin.isatty() and not args.audiofile
+
 output_name = "BH-Monitor" if args.monitor else "BlackHole 2ch"
 
 original_output = subprocess.run("bunx macos-audio-devices output get --json",
@@ -37,6 +39,7 @@ if not input_device:
 
 output_id = output_device["id"]
 input_id = input_device["id"]
+output_uid = output_device["uid"]
 
 atexit.register(lambda: subprocess.run(f"bunx macos-audio-devices output set {original_output_id}", shell=True))
 
@@ -46,7 +49,7 @@ subprocess.run("osascript -e 'set volume input volume 100'", shell=True)
 
 ffmpeg_output = subprocess.run(
     "ffmpeg -f lavfi -i anullsrc=channel_layout=stereo:r=48000 -t 0.001 -f audiotoolbox -list_devices true - 2>&1",
-    shell=True, capture_output=True, text=True, stderr=subprocess.STDOUT
+    shell=True, capture_output=True, text=True
 )
 
 matches = re.findall(r'\[AudioToolbox.*?\] \[(\d+)\].*' + re.escape(output_name), ffmpeg_output.stdout)
@@ -54,13 +57,21 @@ device_index = matches[0] if matches else None
 
 print(f"Using device: {output_name} with ffmpeg index: {device_index}", file=sys.stderr)
 
-if args.audiofile:
+if args.audiofile or is_stdin:
+    input_source = args.audiofile if args.audiofile else "-"
     cmd = [
-        "ffmpeg", "-re", "-i", args.audiofile,
+        "ffmpeg", "-re", "-i", input_source,
         "-af", "loudnorm=I=-14:TP=-1.5:LRA=11,alimiter=limit=0.97:level=disabled",
         "-ac", "2", "-ar", "48000", "-f", "audiotoolbox", "-audio_device_index", device_index, "-"
     ]
-    subprocess.run(cmd)
+    try:
+        mpv_cmd = [
+            "mpv", "--no-video", f"--audio-device=coreaudio/{output_uid}",
+            "--af=loudnorm=I=-14:TP=-1.5:LRA=11", input_source
+        ]
+        subprocess.run(mpv_cmd)
+    finally:
+        time.sleep(0.1)
 else:
     print(f"Routing system audio through {output_name}. Press Ctrl+C to stop.", file=sys.stderr)
     try:
