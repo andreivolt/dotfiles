@@ -32,7 +32,7 @@ autoload -Uz ~/.local/share/zsh/site-functions/*(.:t)
 #
 # bindkey -M main ' ' expand-alias
 
-bindkey "${terminfo[kcbt]:-^[[Z}" reverse-menu-complete
+# Moved to after vi-mode setup
 
 # history expansion
 bindkey ' ' magic-space
@@ -42,7 +42,7 @@ export LESS='--RAW-CONTROL-CHARS --LONG-PROMPT --ignore-case --no-init --quit-if
 
 export GPG_TTY="$(tty)"
 
-export EZA_COLORS="reset"
+export EZA_COLORS="di=34:ln=35:fi=0:ex=0:pi=0:so=0:bd=0:cd=0:or=0:su=0:sg=0:tw=0:ow=0:ur=0:uw=0:ux=0:ue=0:gr=0:gw=0:gx=0:tr=0:tw=0:tx=0:sn=0:sb=0:uu=0:gu=0:da=0:*=0"
 export LS_COLORS="di=34:ln=35:so=1;35:pi=1;33:ex=32:bd=1;33:cd=1;33:su=1;31:sg=1;31:tw=1;34:ow=1;33:"
 
 export MANPAGER='nvim +Man!'
@@ -73,3 +73,7 @@ source ~/.zsh.d/history-substring-search.zsh
 [[ -n "$TMUX" ]] && source ~/.zsh.d/tmux-term-title.zsh
 
 zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
+
+# Bind shift-tab for reverse menu completion (after vi-mode setup)
+bindkey -M viins "${terminfo[kcbt]:-^[[Z}" reverse-menu-complete
+bindkey -M emacs "${terminfo[kcbt]:-^[[Z}" reverse-menu-complete
