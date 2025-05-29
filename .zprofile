@@ -25,6 +25,6 @@ path=(
   $path
 )
 
-source ~/.zsh.d/homebrew.sh
-source ~/.config/env
-source ~/.orbstack/shell/init.zsh
+[[ "$OSTYPE" == darwin* ]] && source ~/.zsh.d/homebrew.sh
+source ~/.config/env 2>/dev/null
+[[ "$OSTYPE" == darwin* ]] && source ~/.orbstack/shell/init.zsh

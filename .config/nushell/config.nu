@@ -174,10 +174,10 @@ let light_theme = {
     shape_vardecl: purple
 }
 
-# External completer example
-# let carapace_completer = {|spans|
-#     carapace $spans.0 nushell $spans | from json
-# }
+# External completer - carapace for command argument completion
+let carapace_completer = {|spans|
+    carapace $spans.0 nushell ...$spans | from json
+}
 
 
 # The default config record. This is where much of your global configuration is setup.
@@ -246,7 +246,7 @@ $env.config = {
     }
 
     history: {
-        max_size: 100_000 # Session has to be reloaded for this to take effect
+        max_size: 999_999 # Session has to be reloaded for this to take effect
         sync_on_enter: true # Enable to share history between multiple sessions, else you have to close the session to write history to file
         file_format: "plaintext" # "sqlite" or "plaintext"
         isolation: false # only available with sqlite file_format. true enables history isolation, false disables it. true will allow the history to be isolated to the current session using up/down arrows. false will allow the history to be shared across all sessions.
@@ -260,7 +260,7 @@ $env.config = {
         external: {
             enable: true # set to false to prevent nushell looking into $env.PATH to find more suggestions, `false` recommended for WSL users as this look up may be very slow
             max_results: 100 # setting it lower can improve completion performance at the cost of omitting some options
-            completer: null # check 'carapace_completer' above as an example
+            completer: $carapace_completer # carapace for external command completion
         }
     }
 
@@ -283,6 +283,7 @@ $env.config = {
     use_ansi_coloring: true
     bracketed_paste: true # enable bracketed paste, currently useless on windows
     edit_mode: vi # emacs, vi
+    auto_insert_closing_paren: true
     shell_integration: false # enables terminal shell integration. Off by default, as some terminals have issues with this.
     render_right_prompt_on_last_line: false # true or false to enable or disable right prompt to be rendered on last line of the prompt.
 
@@ -431,11 +432,14 @@ $env.config = {
             event: { send: clearscreen }
         }
         {
-            name: search_history
+            name: fuzzy_history
             modifier: control
             keycode: char_r
-            mode: [emacs, vi_normal, vi_insert]
-            event: { send: searchhistory }
+            mode: [emacs, vi_insert, vi_normal]
+            event: {
+                send: executehostcommand
+                cmd: "commandline edit --replace (history | get command | reverse | uniq | fzf --layout=reverse --height=40% --preview 'echo {}' --preview-window up:3:hidden:wrap --bind 'ctrl-/:toggle-preview' --bind 'ctrl-y:execute-silent(echo {} | pbcopy)+abort' | str trim)"
+            }
         }
         {
             name: open_command_editor
@@ -805,5 +809,33 @@ $env.config = {
             mode: emacs
             event: {edit: capitalizechar}
         }
+        {
+            name: cut_line_from_start_vi
+            modifier: control
+            keycode: char_u
+            mode: [vi_insert, vi_normal]
+            event: {edit: cutfromstart}
+        }
     ]
 }
+
+# Aliases from zsh config
+alias eza = eza --icons never
+alias ls = eza
+alias l = ls -1
+alias la = ls -a
+alias ll = ls -l --classify=auto --git
+alias lla = ll -a
+
+alias diff = diff --color
+alias gc = git clone --depth 1
+alias gist = gh gist
+alias gron = fastgron
+alias j = jobs
+alias rg = rg --smart-case --colors match:bg:yellow --colors match:fg:black
+alias rm = rm --verbose
+alias vi = nvim
+alias yt-dlp = yt-dlp --cookies-from-browser chrome
+alias +x = chmod +x
+
+alias tailscale = /Applications/Tailscale.localized/Tailscale.app/Contents/MacOS/Tailscale
