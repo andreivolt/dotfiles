@@ -42,7 +42,7 @@ export LESS='--RAW-CONTROL-CHARS --LONG-PROMPT --ignore-case --no-init --quit-if
 
 export GPG_TTY="$(tty)"
 
-export EZA_COLORS="di=34:ln=35:fi=0:ex=0:pi=0:so=0:bd=0:cd=0:or=0:su=0:sg=0:tw=0:ow=0:ur=0:uw=0:ux=0:ue=0:gr=0:gw=0:gx=0:tr=0:tw=0:tx=0:sn=0:sb=0:uu=0:gu=0:da=0:*=0"
+export EZA_COLORS="di=34:ln=35:fi=0:ex=32:pi=0:so=0:bd=0:cd=0:or=0:su=0:sg=0:tw=0:ow=0:ur=0:uw=0:ux=0:ue=0:gr=0:gw=0:gx=0:tr=0:tw=0:tx=0:sn=0:sb=0:uu=0:gu=0:da=0:*=0"
 export LS_COLORS="di=34:ln=35:so=1;35:pi=1;33:ex=32:bd=1;33:cd=1;33:su=1;31:sg=1;31:tw=1;34:ow=1;33:"
 
 export MANPAGER='nvim +Man!'
@@ -64,15 +64,19 @@ zsh-defer source ~/.zsh.d/completion.zsh
 
 (( $+commands[orbctl] )) && zsh-defer source ~/.zsh.d/orbstack.zsh
 [[ $TERM == xterm-kitty ]] && source ~/.zsh.d/kitty.zsh
+
 source ~/.local/share/zsh/plugins/nix-shell/nix-shell.plugin.zsh
+
 source ~/.zsh.d/accept-line.zsh
-source ~/.zsh.d/autopair.zsh
-source ~/.zsh.d/autosuggestions.zsh
+zsh-defer source ~/.zsh.d/autopair.zsh
+zsh-defer source ~/.zsh.d/autosuggestions.zsh
 source ~/.zsh.d/fzf.zsh
-source ~/.zsh.d/history-substring-search.zsh
+zsh-defer source ~/.zsh.d/history-substring-search.zsh
 [[ -n "$TMUX" ]] && source ~/.zsh.d/tmux-term-title.zsh
 
-zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
+source ~/.local/share/zsh/plugins/zummoner/zummoner.plugin.zsh
+
+source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
 
 # Bind shift-tab for reverse menu completion (after vi-mode setup)
 bindkey -M viins "${terminfo[kcbt]:-^[[Z}" reverse-menu-complete
