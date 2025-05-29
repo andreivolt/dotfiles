@@ -18,8 +18,8 @@ font-family-bold-italic = "CommitMono Nerd Font Bold Italic"
 # font-family-bold = "CommitMono Nerd Font Mono Bold"
 # font-family-bold-italic = "CommitMono Nerd Font Mono Bold Italic"
 
-adjust-cell-height = -8
-adjust-font-baseline = 2
+adjust-cell-height = -6
+adjust-font-baseline = 1
 adjust-cell-width = -11%
 
 # font-family = "Pragmata Pro Mono"
