@@ -3,7 +3,6 @@ export FZF_DEFAULT_OPTS="\
 --info=inline \
 --border \
 --cycle \
---multi \
 --wrap \
 --ansi \
 --color=border:bright-black \

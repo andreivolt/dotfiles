@@ -1,0 +1,7 @@
+return {
+  'subnut/nvim-ghost.nvim',
+  init = function()
+    vim.g.nvim_ghost_super_quiet = 1
+  end,
+  event = "VeryLazy",
+}

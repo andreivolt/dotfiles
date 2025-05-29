@@ -19,4 +19,4 @@ vim.api.nvim_create_autocmd("ColorScheme", {
 vim.api.nvim_exec([[syn match URL /http[s]\?:\/\/[[:alnum:]%\/_#.-]*/ containedin=ALL]], false)
 vim.api.nvim_set_hl(0, "URL", { underline = true, fg = "skyblue" })
 
-vim.cmd("colorscheme aurora")
+vim.cmd("colorscheme github_dark_default")

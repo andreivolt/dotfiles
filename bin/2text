@@ -2,7 +2,7 @@
 #!nix-shell -i bash -p antiword coreutils python3Packages.docx2txt file ghostscript html2text jq odt2txt poppler_utils ripmime sox tesseract unrtf libxml2 pandoc
 
 if [ $# -eq 0 ]; then
-  echo "Usage: any2text <file> [file2] [file3] ..." >&2
+  echo "Usage: $(basename $0) <file> [file2] [file3] ..." >&2
   exit 1
 fi
 
