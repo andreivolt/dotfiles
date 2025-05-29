@@ -1,13 +1,9 @@
 return {
-  {"pbrisbin/vim-colors-off"},
   {
-    "rafalbromirski/vim-aurora",
+    "projekt0n/github-nvim-theme",
     priority = math.huge,
-    init = function()
-      vim.g.aurora_italic = 1
-      vim.g.aurora_transparent = 1
-      vim.g.aurora_bold = 1
-      vim.g.aurora_darker = 1
+    config = function()
+      vim.cmd("colorscheme github_dark_default")
     end
   },
 }
