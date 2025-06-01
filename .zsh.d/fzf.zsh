@@ -5,12 +5,13 @@ export FZF_DEFAULT_OPTS="\
 --cycle \
 --wrap \
 --ansi \
+--preview-window=wrap \
 --color=border:bright-black \
---color=fg+:blue \
+--color=fg+:white:bold \
 --color=bg:-1,gutter:-1 \
---color=hl+:blue,bg+:-1 \
+--color=hl+:yellow:bold,bg+:236 \
 --color=pointer:blue \
---color=hl:blue \
+--color=hl:yellow \
 --color=prompt:blue \
 --color=border:8 \
 --color=info:240 \
