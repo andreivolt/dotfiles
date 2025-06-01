@@ -81,3 +81,5 @@ source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlight
 # Bind shift-tab for reverse menu completion (after vi-mode setup)
 bindkey -M viins "${terminfo[kcbt]:-^[[Z}" reverse-menu-complete
 bindkey -M emacs "${terminfo[kcbt]:-^[[Z}" reverse-menu-complete
+
+(( ! ${+functions[p10k]} )) || p10k finalize
