@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-
-curl "https://api.pirateweather.net/forecast/$PIRATEWEATHER_API_KEY/48.8566,2.3522?&units=ca"
-
-# curl 'wttr.in/Paris?1Q'
-# http 'wttr.in/Paris?format=j1' | jq .weather
