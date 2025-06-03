@@ -2,7 +2,6 @@
 # /// script
 # dependencies = ["elevenlabs"]
 # ///
-
 import argparse
 import os
 import sys
@@ -10,13 +9,151 @@ from elevenlabs import ElevenLabs, VoiceSettings, stream
 
 parser = argparse.ArgumentParser(description='Convert text to speech using ElevenLabs API')
 parser.add_argument('text', nargs='*', help='Text to convert (reads from stdin if not provided)')
-parser.add_argument('-v', '--voice', default='GqzvpFS0pRUCKubI6ty9', help='Voice ID')
-parser.add_argument('-m', '--model', default='eleven_flash_v2_5', help='Model to use')
+parser.add_argument('-v', '--voice', default='GqzvpFS0pRUCKubI6ty9', help='Voice ID or name')
+parser.add_argument('-m', '--model', default='eleven_multilingual_v2', help='Model to use (eleven_multilingual_v2 recommended for non-English)')
+parser.add_argument('-l', '--language', default=None, help='Language code - ONLY works with eleven_turbo_v2_5 and eleven_flash_v2_5 models')
 parser.add_argument('-s', '--stability', type=float, default=0.3, help='Voice stability (0.0-1.0)')
 parser.add_argument('-b', '--similarity-boost', type=float, default=0.5, help='Similarity boost (0.0-1.0)')
 parser.add_argument('--list-voices', action='store_true', help='List available voices')
-
+parser.add_argument('--list-languages', action='store_true', help='List common language codes')
+parser.add_argument('--list-models', action='store_true', help='List available models and their capabilities')
 args = parser.parse_args()
+
+# Common language codes for reference
+LANGUAGE_CODES = {
+    'en': 'English',
+    'ro': 'Romanian (Română)',
+    'es': 'Spanish (Español)',
+    'fr': 'French (Français)',
+    'de': 'German (Deutsch)',
+    'it': 'Italian (Italiano)',
+    'pt': 'Portuguese (Português)',
+    'pl': 'Polish (Polski)',
+    'nl': 'Dutch (Nederlands)',
+    'sv': 'Swedish (Svenska)',
+    'cs': 'Czech (Čeština)',
+    'tr': 'Turkish (Türkçe)',
+    'ru': 'Russian (Русский)',
+    'zh': 'Chinese (中文)',
+    'ja': 'Japanese (日本語)',
+    'ko': 'Korean (한국어)',
+    'ar': 'Arabic (العربية)',
+    'hi': 'Hindi (हिन्दी)',
+    'hu': 'Hungarian (Magyar)',
+    'el': 'Greek (Ελληνικά)',
+    'da': 'Danish (Dansk)',
+    'fi': 'Finnish (Suomi)',
+    'no': 'Norwegian (Norsk)',
+    'uk': 'Ukrainian (Українська)',
+    'bg': 'Bulgarian (Български)',
+    'hr': 'Croatian (Hrvatski)',
+    'sk': 'Slovak (Slovenčina)',
+    'id': 'Indonesian (Bahasa Indonesia)',
+    'ms': 'Malay (Bahasa Melayu)',
+    'vi': 'Vietnamese (Tiếng Việt)',
+    'th': 'Thai (ไทย)',
+    'he': 'Hebrew (עברית)',
+    'lt': 'Lithuanian (Lietuvių)',
+    'lv': 'Latvian (Latviešu)',
+    'et': 'Estonian (Eesti)',
+    'sl': 'Slovenian (Slovenščina)',
+    'fa': 'Persian (فارسی)',
+    'bn': 'Bengali (বাংলা)',
+    'ta': 'Tamil (தமிழ்)',
+    'te': 'Telugu (తెలుగు)',
+    'mr': 'Marathi (मराठी)',
+    'ur': 'Urdu (اردو)',
+    'gu': 'Gujarati (ગુજરાતી)',
+    'kn': 'Kannada (ಕನ್ನಡ)',
+    'ml': 'Malayalam (മലയാളം)',
+    'pa': 'Punjabi (ਪੰਜਾਬੀ)',
+}
+
+# Model information
+MODELS = {
+    'eleven_multilingual_v2': {
+        'name': 'Multilingual v2',
+        'description': 'Most life-like, emotionally rich model. Best for voiceovers and audiobooks.',
+        'languages': 29,
+        'supports_language_code': False,
+        'latency': 'medium',
+        'cost_per_char': 1.0
+    },
+    'eleven_flash_v2_5': {
+        'name': 'Flash v2.5',
+        'description': 'Ultra-low latency (~75ms), supports language enforcement.',
+        'languages': 32,
+        'supports_language_code': True,
+        'latency': 'ultra-low',
+        'cost_per_char': 0.5
+    },
+    'eleven_turbo_v2_5': {
+        'name': 'Turbo v2.5',
+        'description': 'Good balance of quality and latency, supports language enforcement.',
+        'languages': 32,
+        'supports_language_code': True,
+        'latency': 'low',
+        'cost_per_char': 0.5
+    },
+    'eleven_flash_v2': {
+        'name': 'Flash v2',
+        'description': 'Ultra-low latency, English only.',
+        'languages': 1,
+        'supports_language_code': False,
+        'latency': 'ultra-low',
+        'cost_per_char': 0.5
+    },
+    'eleven_turbo_v2': {
+        'name': 'Turbo v2',
+        'description': 'Low latency, English only.',
+        'languages': 1,
+        'supports_language_code': False,
+        'latency': 'low',
+        'cost_per_char': 0.5
+    },
+    'eleven_monolingual_v1': {
+        'name': 'English v1',
+        'description': 'Original model, English only.',
+        'languages': 1,
+        'supports_language_code': False,
+        'latency': 'medium',
+        'cost_per_char': 1.0
+    },
+    'eleven_multilingual_v1': {
+        'name': 'Multilingual v1',
+        'description': 'Experimental multilingual model, not recommended.',
+        'languages': 8,
+        'supports_language_code': False,
+        'latency': 'medium',
+        'cost_per_char': 1.0
+    }
+}
+
+if args.list_models:
+    print("Available ElevenLabs Models:")
+    print("=" * 80)
+    for model_id, info in MODELS.items():
+        print(f"\nModel ID: {model_id}")
+        print(f"Name: {info['name']}")
+        print(f"Description: {info['description']}")
+        print(f"Languages: {info['languages']}")
+        print(f"Supports language_code: {'YES' if info['supports_language_code'] else 'NO'}")
+        print(f"Latency: {info['latency']}")
+        print(f"Cost per character: {info['cost_per_char']} credit")
+    print("\n" + "=" * 80)
+    print("Note: Only Flash v2.5 and Turbo v2.5 support the language_code parameter!")
+    sys.exit(0)
+
+if args.list_languages:
+    print("Common language codes for ElevenLabs:")
+    print("-" * 40)
+    for code, name in sorted(LANGUAGE_CODES.items()):
+        print(f"{code}: {name}")
+    print("\nIMPORTANT NOTES:")
+    print("- Language codes ONLY work with eleven_turbo_v2_5 and eleven_flash_v2_5 models")
+    print("- For other models (like eleven_multilingual_v2), the language is auto-detected from text")
+    print("- For best results with non-English, write your text in the target language")
+    sys.exit(0)
 
 api_key = os.environ.get('ELEVENLABS_API_KEY')
 if not api_key:
@@ -29,10 +166,21 @@ if args.list_voices:
     voices = client.voices.get_all()
     for voice in voices.voices:
         desc = getattr(voice, 'description', '') or ''
+        labels = getattr(voice, 'labels', {}) or {}
+        
+        # Extract language info if available
+        lang_info = []
+        if 'language' in labels:
+            lang_info.append(f"Primary: {labels['language']}")
+        if 'accent' in labels:
+            lang_info.append(f"Accent: {labels['accent']}")
+        
+        lang_str = f" [{', '.join(lang_info)}]" if lang_info else ""
+        
         if desc:
-            print(f"{voice.voice_id}: {voice.name} - {desc}")
+            print(f"{voice.voice_id}: {voice.name}{lang_str} - {desc}")
         else:
-            print(f"{voice.voice_id}: {voice.name}")
+            print(f"{voice.voice_id}: {voice.name}{lang_str}")
     sys.exit(0)
 
 if args.text:
@@ -46,7 +194,7 @@ if not text:
 
 # Resolve voice name to voice_id if needed
 voice_id = args.voice
-if not voice_id.startswith(('21m', '9BW', 'EXA', 'FGY', 'IKn', 'JBF', 'TxG')):  # Common voice ID prefixes
+if not voice_id.startswith(('21m', '9BW', 'EXA', 'FGY', 'IKn', 'JBF', 'TxG', 'Gqz')):  # Common voice ID prefixes
     voices = client.voices.get_all()
     for voice in voices.voices:
         if voice.name.lower() == args.voice.lower():
@@ -61,13 +209,36 @@ voice_settings = VoiceSettings(
     similarity_boost=args.similarity_boost
 )
 
+# Build kwargs for API call
+kwargs = {
+    'text': text,
+    'voice_id': voice_id,
+    'model_id': args.model,
+    'voice_settings': voice_settings
+}
+
+# Check if model supports language_code
+model_info = MODELS.get(args.model, {})
+supports_language_code = model_info.get('supports_language_code', False)
+
+# Add language code ONLY if supported by the model
+if args.language:
+    if supports_language_code:
+        # Validate language code
+        if args.language not in LANGUAGE_CODES and len(args.language) != 2:
+            print(f"Warning: '{args.language}' may not be a valid language code. Use --list-languages to see common codes.", file=sys.stderr)
+        kwargs['language_code'] = args.language
+        print(f"Using language code: {args.language}", file=sys.stderr)
+    else:
+        print(f"\n⚠️  WARNING: Model '{args.model}' does NOT support language_code parameter!", file=sys.stderr)
+        print(f"Language will be auto-detected from your text.", file=sys.stderr)
+        print(f"\nTo use language enforcement, switch to one of these models:", file=sys.stderr)
+        print(f"  - eleven_turbo_v2_5 (use -m eleven_turbo_v2_5)", file=sys.stderr)
+        print(f"  - eleven_flash_v2_5 (use -m eleven_flash_v2_5)", file=sys.stderr)
+        print(f"\nFor multilingual without language enforcement, write your text in the target language.", file=sys.stderr)
+
 try:
-    audio_stream = client.text_to_speech.stream(
-        text=text,
-        voice_id=voice_id,
-        model_id=args.model,
-        voice_settings=voice_settings
-    )
+    audio_stream = client.text_to_speech.stream(**kwargs)
     
     if sys.stdout.isatty():
         stream(audio_stream)
