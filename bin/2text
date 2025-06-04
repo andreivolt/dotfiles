@@ -1,103 +1,147 @@
-#!/usr/bin/env cached-nix-shell
-#!nix-shell -i bash -p antiword coreutils python3Packages.docx2txt file ghostscript html2text jq odt2txt poppler_utils ripmime sox tesseract unrtf libxml2 pandoc
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = ["pypandoc", "panflute", "click", "sh"]
+# ///
 
-if [ $# -eq 0 ]; then
-  echo "Usage: $(basename $0) <file> [file2] [file3] ..." >&2
-  exit 1
-fi
+import sys
+from pathlib import Path
+import pypandoc
+import panflute as pf
+import click
+import sh
 
-convert_file() {
-  local input_file="$1"
-  
-  if [ ! -f "$input_file" ]; then
-    echo "File not found: $input_file" >&2
-    return 1
-  fi
+def clean_filter(elem):
+    """Panflute filter to remove styling attributes"""
+    # Handle all elements that can have attributes - be more aggressive
+    if hasattr(elem, 'attributes'):
+        elem.attributes = {}
+    if hasattr(elem, 'classes'):
+        elem.classes = []
+    if hasattr(elem, 'identifier'):
+        elem.identifier = ""
 
-  local mime_type=$(file --mime-type -b "$input_file")
+    # Convert formatting elements to plain content
+    if isinstance(elem, (pf.Strong, pf.Emph, pf.Underline)):
+        return elem.content
+    elif isinstance(elem, pf.Link) and elem.url == "":
+        return elem.content
 
-  case "$mime_type" in
-  text/*)
-    cat "$input_file"
-    ;;
-  application/pdf)
-    unoconv -f txt --stdout "$input_file" 2>/dev/null || pdftotext "$input_file" -
-    ;;
-  application/msword)
-    unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown
-    ;;
-  application/vnd.openxmlformats-officedocument.wordprocessingml.document)
-    unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown
-    ;;
-  application/vnd.ms-excel|application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
-    unoconv -f csv --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown || echo "Unsupported Excel format"
-    ;;
-  application/vnd.ms-powerpoint|application/vnd.openxmlformats-officedocument.presentationml.presentation)
-    unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown || echo "Unsupported PowerPoint format"
-    ;;
-  text/csv)
-    pandoc "$input_file" -t markdown
-    ;;
-  text/html)
-    pandoc "$input_file" -t markdown
-    ;;
-  text/markdown)
-    cat "$input_file"
-    ;;
-  application/epub+zip)
-    unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown
-    ;;
-  image/*)
-    echo "# OCR Output from $(basename "$input_file")"
-    echo
-    tesseract "$input_file" stdout
-    ;;
-  message/rfc822)
-    echo "# Email Content"
-    echo
-    ripmime --name-by-type --textname stdout.txt -i "$input_file" && cat stdout.txt && rm stdout.txt
-    ;;
-  application/vnd.oasis.opendocument.text)
-    unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown
-    ;;
-  application/rtf)
-    unoconv -f txt --stdout "$input_file" 2>/dev/null || pandoc "$input_file" -t markdown
-    ;;
-  application/postscript)
-    ps2ascii "$input_file"
-    ;;
-  application/json)
-    echo "# JSON Content"
-    echo
-    echo '```json'
-    jq '.' "$input_file"
-    echo '```'
-    ;;
-  application/xml)
-    echo "# XML Content"
-    echo
-    echo '```xml'
-    xmllint --format "$input_file"
-    echo '```'
-    ;;
-  audio/*)
-    echo "# Audio Transcription"
-    echo
-    deepgram --detect-language "$input_file"
-    ;;
-  *)
-    echo "Unsupported MIME type: $mime_type" >&2
-    return 1
-    ;;
-  esac
+    return elem
+
+def clean_markdown_output(text):
+    """Remove any remaining styling artifacts from markdown"""
+    import re
+    # Remove {.underline} and similar class markers
+    text = re.sub(r'\{\.[\w-]+\}', '', text)
+    # Remove {#id} markers
+    text = re.sub(r'\{#[\w-]+\}', '', text)
+    # Remove empty [] markers
+    text = re.sub(r'\[\]\{[^}]*\}', '', text)
+    return text
+
+def unoconv_to_markdown(input_file):
+    """Convert file using unoconv -> pypandoc with panflute filter"""
+    try:
+        html_content = sh.unoconv('--format', 'html', '--stdout', input_file, _err='/dev/null')
+        doc = pf.convert_text(str(html_content), input_format='html', output_format='panflute')
+        doc = doc.walk(clean_filter)
+        markdown = pf.convert_text(doc, input_format='panflute', output_format='markdown')
+        return clean_markdown_output(markdown)
+    except:
+        return None
+
+
+def convert_text_html(file_path):
+    doc = pf.convert_text(file_path.read_text(), input_format='html', output_format='panflute')
+    doc = doc.walk(clean_filter)
+    markdown = pf.convert_text(doc, input_format='panflute', output_format='markdown')
+    return clean_markdown_output(markdown)
+
+def convert_with_unoconv(file_path):
+    result = unoconv_to_markdown(str(file_path))
+    if result:
+        return result
+    else:
+        # Fallback: use pypandoc but still clean the output
+        markdown = pypandoc.convert_file(str(file_path), 'markdown')
+        return clean_markdown_output(markdown)
+
+def convert_excel(file_path):
+    return unoconv_to_markdown(str(file_path)) or "Unsupported Excel format"
+
+def convert_powerpoint(file_path):
+    return unoconv_to_markdown(str(file_path)) or "Unsupported PowerPoint format"
+
+def convert_image(file_path):
+    return f"# OCR Output from {file_path.name}\n\n{sh.tesseract(str(file_path), 'stdout')}"
+
+def convert_audio(file_path):
+    return f"# Audio Transcription\n\n{sh.deepgram('--detect-language', str(file_path))}"
+
+# MIME type mapping
+CONVERTERS = {
+    'text/html': convert_text_html,
+    'text/csv': lambda f: pypandoc.convert_file(str(f), 'markdown'),
+    'text/markdown': lambda f: f.read_text(),
+    'application/pdf': convert_with_unoconv,
+    'application/msword': convert_with_unoconv,
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': convert_with_unoconv,
+    'application/vnd.oasis.opendocument.text': convert_with_unoconv,
+    'application/rtf': convert_with_unoconv,
+    'application/epub+zip': convert_with_unoconv,
+    'application/vnd.ms-excel': convert_excel,
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': convert_excel,
+    'application/vnd.ms-powerpoint': convert_powerpoint,
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': convert_powerpoint,
+    'application/postscript': lambda f: str(sh.ps2ascii(str(f))),
+    'application/json': lambda f: f"# JSON Content\n\n```json\n{sh.jq('.', str(f))}```",
+    'application/xml': lambda f: f"# XML Content\n\n```xml\n{sh.xmllint('--format', str(f))}```",
 }
 
-if [ $# -eq 1 ]; then
-  convert_file "$1"
-else
-  for file in "$@"; do
-    output_file="${file%.*}.txt"
-    echo "Converting $file to $output_file..." >&2
-    convert_file "$file" > "$output_file"
-  done
-fi
+def convert_by_mime(mime_type: str, file_path: Path):
+    """Convert file based on MIME type"""
+    # Check exact match first
+    if mime_type in CONVERTERS:
+        return CONVERTERS[mime_type](file_path)
+
+    # Check prefix matches
+    if mime_type.startswith('text/'):
+        return file_path.read_text()
+    elif mime_type.startswith('image/'):
+        return convert_image(file_path)
+    elif mime_type.startswith('audio/'):
+        return convert_audio(file_path)
+
+    raise click.ClickException(f"Unsupported MIME type: {mime_type}")
+
+def get_mime_type(file_path: Path) -> str:
+    """Get MIME type using sh.file"""
+    return str(sh.file('--mime-type', '-b', str(file_path))).strip()
+
+@click.command()
+@click.argument('files', nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+def main(files):
+    """Convert files to text/markdown format"""
+    if len(files) == 1:
+        # Single file to stdout
+        file_path = files[0]
+        mime_type = get_mime_type(file_path)
+        try:
+            result = convert_by_mime(mime_type, file_path)
+            click.echo(result, nl=False)
+        except Exception as e:
+            raise click.ClickException(f"Error converting {file_path}: {e}")
+    else:
+        # Multiple files to .txt files
+        for file_path in files:
+            output_path = file_path.with_suffix('.txt')
+            click.echo(f"Converting {file_path} to {output_path}...", err=True)
+
+            mime_type = get_mime_type(file_path)
+            try:
+                result = convert_by_mime(mime_type, file_path)
+                output_path.write_text(result)
+            except Exception as e:
+                click.echo(f"Failed to convert {file_path}: {e}", err=True)
+
+main()

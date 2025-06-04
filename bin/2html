@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+# Parse command line arguments
+TITLE="Document"
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -t|--title)
+      TITLE="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Usage: 2html [-t|--title \"Title\"]"
+      exit 1
+      ;;
+  esac
+done
+
+# Change to the 2html-vite directory
+cd "$(dirname "$0")/2html-vite" || exit 1
+
+# Create temporary file for HTML
+temp_file=$(mktemp /tmp/2html.XXXXXX.html)
+
+# Generate HTML from markdown
+yarn run build:html --title "$TITLE" > "$temp_file"
+
+# Process with single-file to embed all external resources
+temp_output="singlefile-output.html"
+
+# Try to find browser if BROWSER is not set
+if [[ -z "$BROWSER" ]]; then
+  if command -v chromium >/dev/null 2>&1; then
+    BROWSER="chromium"
+  elif command -v google-chrome >/dev/null 2>&1; then
+    BROWSER="google-chrome"
+  elif command -v chrome >/dev/null 2>&1; then
+    BROWSER="chrome"
+  fi
+fi
+
+# Run single-file-cli using the exact working pattern
+if [[ -n "$BROWSER" ]]; then
+  bunx single-file-cli \
+    --browser-executable-path="$BROWSER" \
+    "file://$temp_file" \
+    "$temp_output"
+  
+  # Check if output file was created and has content
+  if [[ -s "$temp_output" ]]; then
+    cat "$temp_output"
+  else
+    echo "Warning: single-file-cli failed, using original HTML" >&2
+    cat "$temp_file"
+  fi
+else
+  echo "Warning: No browser found, using original HTML" >&2
+  cat "$temp_file"
+fi
+
+# Clean up both temp files
+rm -f "$temp_output" "$temp_file"

@@ -63,7 +63,7 @@ def parse_node_output(output: str) -> List[Dict]:
                 # Get the remainder of the line after the hostname
                 remainder_pos = line.find(hostname) + len(hostname)
                 remainder = line[remainder_pos:].strip()
-                
+
                 # Remove the final dash (all lines have it)
                 remainder = remainder[:-2].strip()
 
@@ -199,54 +199,50 @@ def list_nodes_formatted(filter_text: Optional[str] = None) -> None:
     for node in nodes_info:
         print(node['display'])
 
-def main():
-    # Create an argument parser with subcommands
-    parser = argparse.ArgumentParser(
-        description="Manage Tailscale exit nodes with interactive selection"
-    )
+# Create an argument parser with subcommands
+parser = argparse.ArgumentParser(
+    description="Manage Tailscale exit nodes with interactive selection"
+)
 
-    # Create subparsers for commands
-    subparsers = parser.add_subparsers(dest='command', help='Command to run')
+# Create subparsers for commands
+subparsers = parser.add_subparsers(dest='command', help='Command to run')
 
-    # set command
-    set_parser = subparsers.add_parser('set', help='Set exit node')
-    set_parser.add_argument('hostname', nargs='?', help='Hostname of exit node (interactive if omitted)')
+# set command
+set_parser = subparsers.add_parser('set', help='Set exit node')
+set_parser.add_argument('hostname', nargs='?', help='Hostname of exit node (interactive if omitted)')
 
-    # clear command
-    clear_parser = subparsers.add_parser('clear', help='Clear/disable exit node')
+# clear command
+clear_parser = subparsers.add_parser('clear', help='Clear/disable exit node')
 
-    # list command
-    list_parser = subparsers.add_parser('list', help='List available exit nodes')
-    list_parser.add_argument('filter', nargs='?', help='Filter string')
+# list command
+list_parser = subparsers.add_parser('list', help='List available exit nodes')
+list_parser.add_argument('filter', nargs='?', help='Filter string')
 
-    # random command
-    random_parser = subparsers.add_parser('random', help='Select a random exit node')
-    random_parser.add_argument('filter', nargs='?', help='Filter string')
+# random command
+random_parser = subparsers.add_parser('random', help='Select a random exit node')
+random_parser.add_argument('filter', nargs='?', help='Filter string')
 
-    args = parser.parse_args()
+args = parser.parse_args()
 
-    # Default to 'set' if no command is provided
-    if not args.command:
+# Default to 'set' if no command is provided
+if not args.command:
+    interactive_select()
+    sys.exit(0)
+
+# Handle commands
+if args.command == 'set':
+    if args.hostname:
+        set_exit_node(args.hostname)
+        print(f"Exit node set to: {args.hostname}")
+    else:
         interactive_select()
-        return
 
-    # Handle commands
-    if args.command == 'set':
-        if args.hostname:
-            set_exit_node(args.hostname)
-            print(f"Exit node set to: {args.hostname}")
-        else:
-            interactive_select()
+elif args.command == 'clear':
+    clear_exit_node()
+    print("Exit node cleared")
 
-    elif args.command == 'clear':
-        clear_exit_node()
-        print("Exit node cleared")
+elif args.command == 'list':
+    list_nodes_formatted(args.filter)
 
-    elif args.command == 'list':
-        list_nodes_formatted(args.filter)
-
-    elif args.command == 'random':
-        random_exit_node(args.filter)
-
-if __name__ == "__main__":
-    main()
+elif args.command == 'random':
+    random_exit_node(args.filter)

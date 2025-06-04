@@ -347,39 +347,36 @@ def list_sessions():
 
         console.print(line)
 
-def main():
-    parser = argparse.ArgumentParser(description="Browser session manager")
-    subparsers = parser.add_subparsers(dest="command", help="Commands")
+# Parse arguments
+parser = argparse.ArgumentParser(description="Browser session manager")
+subparsers = parser.add_subparsers(dest="command", help="Commands")
 
-    save_parser = subparsers.add_parser("save", help="Save current browser session")
-    save_parser.add_argument("--name", help="Name for the session")
-    save_parser.add_argument("--overwrite", action="store_true", help="Overwrite existing session with same name")
+save_parser = subparsers.add_parser("save", help="Save current browser session")
+save_parser.add_argument("--name", help="Name for the session")
+save_parser.add_argument("--overwrite", action="store_true", help="Overwrite existing session with same name")
 
-    restore_parser = subparsers.add_parser("restore", help="Restore browser session")
-    restore_parser.add_argument("filename", nargs="?", help="Session file to restore (optional - will use fzf if not provided)")
+restore_parser = subparsers.add_parser("restore", help="Restore browser session")
+restore_parser.add_argument("filename", nargs="?", help="Session file to restore (optional - will use fzf if not provided)")
 
-    delete_parser = subparsers.add_parser("delete", help="Delete browser session")
-    delete_parser.add_argument("name", nargs="?", help="Session name or filename to delete (optional - will use fzf if not provided)")
+delete_parser = subparsers.add_parser("delete", help="Delete browser session")
+delete_parser.add_argument("name", nargs="?", help="Session name or filename to delete (optional - will use fzf if not provided)")
 
-    show_parser = subparsers.add_parser("show", help="Show session details (title and URL)")
-    show_parser.add_argument("name", help="Session name or filename")
+show_parser = subparsers.add_parser("show", help="Show session details (title and URL)")
+show_parser.add_argument("name", help="Session name or filename")
 
-    subparsers.add_parser("list", help="List saved sessions")
+subparsers.add_parser("list", help="List saved sessions")
 
-    args = parser.parse_args()
+args = parser.parse_args()
 
-    if args.command == "save":
-        save_session(args.name, args.overwrite)
-    elif args.command == "restore":
-        restore_session(args.filename)
-    elif args.command == "delete":
-        delete_session(args.name)
-    elif args.command == "show":
-        show_session(args.name)
-    elif args.command == "list":
-        list_sessions()
-    else:
-        parser.print_help()
-
-if __name__ == "__main__":
-    main()
+if args.command == "save":
+    save_session(args.name, args.overwrite)
+elif args.command == "restore":
+    restore_session(args.filename)
+elif args.command == "delete":
+    delete_session(args.name)
+elif args.command == "show":
+    show_session(args.name)
+elif args.command == "list":
+    list_sessions()
+else:
+    parser.print_help()

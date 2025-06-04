@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import subprocess
+import tempfile
+import shutil
+import re
+import atexit
+
+if len(sys.argv) < 2:
+    print(f"Usage: {sys.argv[0]} <stream_url>")
+    sys.exit(1)
+
+space_url = sys.argv[1]
+original_dir = os.getcwd()
+
+# Get filename using yt-dlp
+try:
+    file_name = subprocess.check_output([
+        'yt-dlp', '--cookies-from-browser', 'chrome', '--get-filename',
+        '-o', '%(upload_date)s - %(uploader_id)s.%(title)s.%(id)s.%(ext)s',
+        space_url
+    ], text=True).strip()
+except subprocess.CalledProcessError:
+    print("Failed to get filename from yt-dlp")
+    sys.exit(1)
+
+with tempfile.TemporaryDirectory() as tmp_dir:
+    os.chdir(tmp_dir)
+
+    def cleanup():
+        files_to_remove = ['stream.m3u8', 'modified.m3u8']
+        for file in files_to_remove:
+            if os.path.exists(file):
+                os.remove(file)
+
+        for aac_file in [f for f in os.listdir('.') if f.endswith('.aac')]:
+            os.remove(aac_file)
+
+        os.chdir(original_dir)
+
+    atexit.register(cleanup)
+
+    # Get stream URL
+    try:
+        stream = subprocess.check_output([
+            'yt-dlp', '--cookies-from-browser', 'chrome', '-g', space_url
+        ], text=True).strip()
+    except subprocess.CalledProcessError:
+        print("Failed to get stream URL")
+        sys.exit(1)
+
+    # Extract stream path
+    stream_path_match = re.match(r'^.*/', stream)
+    if not stream_path_match:
+        print("Failed to extract stream path")
+        sys.exit(1)
+    stream_path = stream_path_match.group(0)
+
+    # Download stream manifest
+    result = subprocess.run(['wget', '-q', '-O', 'stream.m3u8', stream])
+    if result.returncode != 0:
+        print("Failed to download the stream.")
+        sys.exit(1)
+
+    # Modify m3u8 file
+    with open('stream.m3u8', 'r') as stream_file, open('modified.m3u8', 'w') as modified_file:
+        for line in stream_file:
+            line = line.rstrip('\n')
+            if re.match(r'^[^.#]+\.aac$', line):
+                modified_file.write(f"{stream_path}{line}\n")
+            else:
+                modified_file.write(f"{line}\n")
+
+    # Download segments and convert
+    subprocess.run(['aria2c', '-i', 'modified.m3u8'])
+    subprocess.run(['ffmpeg', '-i', 'stream.m3u8', '-c', 'copy', file_name])
+
+    # Move file to original directory
+    shutil.move(file_name, original_dir)
+
+# Check if file was successfully downloaded
+final_path = os.path.join(original_dir, file_name)
+if os.path.exists(final_path):
+    print(f"File downloaded and saved in the original directory: {file_name}")
+else:
+    print("Failed to download the file.")

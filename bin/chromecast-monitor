@@ -80,7 +80,7 @@ else:
         }))
         sys.stdout.flush()
     discovery_browser.stop_discovery()
-    
+
     # Now start monitoring for changes
     browser.start_discovery()
     try:

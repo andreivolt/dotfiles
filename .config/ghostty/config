@@ -1,40 +1,34 @@
-font-family = "IosevkaTerm NFM Light"
-font-family-italic = "IosevkaTerm NFM Light Italic"
-font-family-bold = "IosevkaTerm NFM"
-font-family-bold-italic = "IosevkaTerm NFM Italic"
+# font-family-italic = "IosevkaTerm NFM Italic"
+# font-family = "IosevkaTerm NFM"
+# font-family-bold-italic = "IosevkaTerm NFM Bold Italic"
+# font-family-bold = "IosevkaTerm NFM Bold"
 
-font-family = "IosevkaTerm NFM"
-font-family-italic = "IosevkaTerm NFM Italic"
-font-family-bold = "IosevkaTerm NFM Bold"
-font-family-bold-italic = "IosevkaTerm NFM Bold Italic"
+# Pragmasevka Nerd Font
+font-family = "Pragmasevka Nerd Font"
+font-family-italic = "Pragmasevka Nerd Font Italic"
+font-family-bold = "Pragmasevka Nerd Font Bold"
+font-family-bold-italic = "Pragmasevka Nerd Font Bold Italic"
 
-font-family = "CommitMono Nerd Font"
-font-family-italic = "CommitMono Nerd Font Italic"
-font-family-bold = "CommitMono Nerd Font Bold"
-font-family-bold-italic = "CommitMono Nerd Font Bold Italic"
+# Sauce Code Pro Nerd Font
+# font-family-italic = "SauceCodePro Nerd Font Italic"
+# font-family = "SauceCodePro Nerd Font"
+# font-family-bold = "SauceCodePro Nerd Font Bold"
+# font-family-bold-italic = "SauceCodePro Nerd Font Bold Italic"
 
-# font-family = "CommitMono Nerd Font Mono"
-# font-family-italic = "CommitMono Nerd Font Mono Italic"
-# font-family-bold = "CommitMono Nerd Font Mono Bold"
-# font-family-bold-italic = "CommitMono Nerd Font Mono Bold Italic"
-
-adjust-cell-height = -6
+adjust-cell-height = -4
 adjust-font-baseline = 1
-adjust-cell-width = -11%
+adjust-cell-width = -10%
 
-# font-family = "Pragmata Pro Mono"
-# font-feature = -calt
-# font-feature = -liga
-# font-feature = -dlig
-#
 # adjust-cell-height = -8
 # adjust-cell-width = -12%
 
 font-size = 18
-# font-thicken = true
 
 background-opacity = 0.8
-background-blur-radius = 16
+background-blur-radius = 18
+
+theme = IR_Black
+foreground = #dddddd
 background = #000000
 
 window-vsync = false
@@ -63,8 +57,6 @@ window-colorspace = display-p3
 
 keybind = cmd+left=csi:\x1b[1;5D
 keybind = cmd+right=csi:\x1b[1;5C
-
-theme = IR_Black
 
 auto-update = off
 keybind = shift+enter=text:\n

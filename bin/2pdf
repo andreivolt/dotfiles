@@ -1,75 +1,66 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env python3
 
-require 'optparse'
-require 'tempfile'
-require 'shellwords'
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
-options = {}
-parser = OptionParser.new do |opts|
-  opts.banner = "Usage: #{File.basename($PROGRAM_NAME)} [options] [file1 file2...]"
+def log(msg, quiet):
+    if not quiet:
+        print(msg, file=sys.stderr)
 
-  opts.on("-o", "--output FILE", "Output file (for stdin mode)") do |o|
-    options[:output] = o
-  end
+parser = argparse.ArgumentParser(description="Convert documents to PDF using unoconv")
+parser.add_argument("-o", "--output", help="Output file (for stdin mode)")
+parser.add_argument("-q", "--quiet", action="store_true", help="Quiet mode")
+parser.add_argument("files", nargs="*", help="Input files to convert")
 
-  opts.on("-q", "--quiet", "Quiet mode") do
-    options[:quiet] = true
-  end
+args = parser.parse_args()
 
-  opts.on("-h", "--help", "Show this help") do
-    puts opts
-    exit
-  end
-end
-parser.parse!
+# Handle stdin mode
+if not sys.stdin.isatty():
+    with tempfile.NamedTemporaryFile(suffix='.tmp', delete=False) as temp:
+        shutil.copyfileobj(sys.stdin.buffer, temp)
+        temp_path = temp.name
 
-def log(msg, options)
-  STDERR.puts msg unless options[:quiet]
-end
+    try:
+        subprocess.run(["unoconv", "-f", "pdf", temp_path], check=True)
+        pdf_file = f"{temp_path}.pdf"
 
-unless STDIN.tty?
-  Tempfile.create(['any2pdf', '.tmp']) do |temp|
-    IO.copy_stream(STDIN, temp.path)
-    temp.close
+        if os.path.exists(pdf_file):
+            if args.output:
+                shutil.copy2(pdf_file, args.output)
+                log(f"Created '{args.output}'", args.quiet)
+            else:
+                with open(pdf_file, 'rb') as f:
+                    shutil.copyfileobj(f, sys.stdout.buffer)
+            os.unlink(pdf_file)
+        else:
+            log("Error: Conversion failed", args.quiet)
+            sys.exit(1)
+    finally:
+        os.unlink(temp_path)
+    sys.exit(0)
 
-    system("unoconv -f pdf #{temp.path.shellescape}")
-    pdf_file = "#{temp.path}.pdf"
+if not args.files:
+    parser.print_help()
+    sys.exit(1)
 
-    if File.exist?(pdf_file)
-      if options[:output]
-        require 'fileutils'
-        FileUtils.cp(pdf_file, options[:output])
-        log("Created '#{options[:output]}'", options)
-      else
-        IO.copy_stream(pdf_file, STDOUT)
-      end
-      File.unlink(pdf_file)
-    else
-      log("Error: Conversion failed", options)
-      exit 1
-    end
-  end
-  exit
-end
+for file in args.files:
+    if not os.path.exists(file):
+        log(f"Error: '{file}' not found", args.quiet)
+        continue
 
-if ARGV.empty?
-  puts parser
-  exit 1
-end
+    log(f"Converting '{file}'", args.quiet)
+    subprocess.run(["unoconv", "-f", "pdf", file])
 
-ARGV.each do |file|
-  unless File.exist?(file)
-    log("Error: '#{file}' not found", options)
-    next
-  end
+    # Generate output filename
+    path = Path(file)
+    output = path.with_suffix('.pdf')
 
-  log("Converting '#{file}'", options)
-  system("unoconv -f pdf #{file.shellescape}")
-  output = "#{file.sub(/\.[^.]+$/, '')}.pdf"
-
-  if File.exist?(output)
-    log("Created '#{output}'", options)
-  else
-    log("Error: Failed to convert '#{file}'", options)
-  end
-end
+    if output.exists():
+        log(f"Created '{output}'", args.quiet)
+    else:
+        log(f"Error: Failed to convert '{file}'", args.quiet)

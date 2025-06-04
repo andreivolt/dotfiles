@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --quiet --script
+#!/usr/bin/env -S uv run --script --quiet
 # /// script
 # dependencies = [
 #   "yt-dlp>=2024.1,<2026",  # Major version for compatibility

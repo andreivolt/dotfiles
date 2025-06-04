@@ -337,23 +337,23 @@ def are_tracks_similar(result1, result2):
     """Check if tracks are the same base song (handles remixes, versions, etc.)"""
     if not result1 or not result2:
         return False
-    
+
     # Extract track data from results
     track1 = result1.get('track') if isinstance(result1, dict) else None
     track2 = result2.get('track') if isinstance(result2, dict) else None
-    
+
     if not track1 or not track2:
         return False
 
     def extract_base_song(track):
         import re
-        
+
         title = track.get('title', '')
         subtitle = track.get('subtitle', '')  # Usually the artist
-        
+
         # Get first word of artist (main artist)
         artist = subtitle.split()[0] if subtitle else ""
-        
+
         # Clean title: remove remix/version indicators
         base_title = re.sub(r'\s*\([^)]*remix[^)]*\)', '', title, flags=re.I)
         base_title = re.sub(r'\s*\([^)]*version[^)]*\)', '', base_title, flags=re.I)
@@ -361,10 +361,10 @@ def are_tracks_similar(result1, result2):
         base_title = re.sub(r'\s*\([^)]*mix[^)]*\)', '', base_title, flags=re.I)
         base_title = re.sub(r'\s*\(feat\.?[^)]*\)', '', base_title, flags=re.I)
         base_title = re.sub(r'\s*feat\.?\s+.*$', '', base_title, flags=re.I)
-        
+
         # Clean up whitespace
         base_title = re.sub(r'\s+', ' ', base_title).strip()
-        
+
         return f"{base_title}|{artist}".lower()
 
     base1 = extract_base_song(track1)
@@ -497,5 +497,4 @@ async def main():
     finally:
         audio_capture.close()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())

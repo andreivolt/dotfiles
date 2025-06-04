@@ -2,12 +2,12 @@
 
 /**
  * cssq.js
- * 
+ *
  * A CLI tool to query HTML using CSS selectors, powered by css-select.
- * 
+ *
  * Usage:
  *   cssq [file] --selector <selector> [options]
- * 
+ *
  * Options:
  *   -s, --selector <selector>    CSS selector to apply (required)
  *   -a, --attribute <attribute>  Extract a specific attribute from matched elements
@@ -125,7 +125,7 @@ function processMatches(matches) {
 async function main(html, selector) {
   const parser = new DOMParser();
   const document = parser.parseFromString(html, "text/html");
-  
+
   if (!document) {
     console.error("Failed to parse HTML.");
     Deno.exit(1);
@@ -158,7 +158,7 @@ if (args.test) {
 </body>
 </html>
   `;
-  
+
   console.log("Running test case with selector 'div:has(h1)'");
   await main(testHTML, "div:has(h1)");
 } else {

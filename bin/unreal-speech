@@ -107,8 +107,7 @@ def synthesize_speech(client, text, options):
         voice_id=options.voice_id,
         bitrate=options.bitrate,
         speed=options.speed,
-        pitch=options.pitch,
-        temperature=options.temperature
+        pitch=options.pitch
     )
     return response.get('OutputUri')
 
@@ -124,89 +123,101 @@ def play_audio_url(url):
     """Play audio from URL using system play command"""
     subprocess.run(['play', url], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-def main():
-    args = parse_args()
+# Parse arguments
+args = parse_args()
 
-    if not os.getenv('UNREAL_SPEECH_API_KEY'):
-        print("Error: UNREAL_SPEECH_API_KEY environment variable not set", file=sys.stderr)
-        sys.exit(1)
+if not os.getenv('UNREALSPEECH_API_KEY'):
+    print("Error: UNREALSPEECH_API_KEY environment variable not set", file=sys.stderr)
+    sys.exit(1)
 
-    # Get text from args or stdin
-    if args.text:
-        text = ' '.join(args.text)
-    else:
-        text = sys.stdin.read().strip()
+# Get text from args or stdin
+if args.text:
+    text = ' '.join(args.text)
+else:
+    text = sys.stdin.read().strip()
 
-    if not text:
-        print("Error: No text provided", file=sys.stderr)
-        sys.exit(1)
+if not text:
+    print("Error: No text provided", file=sys.stderr)
+    sys.exit(1)
 
-    client = unrealspeech.UnrealSpeechAPI(api_key=os.getenv('UNREAL_SPEECH_API_KEY'))
+client = unrealspeech.UnrealSpeechAPI(api_key=os.getenv('UNREALSPEECH_API_KEY'))
 
-    # Split text into immediate stream part and remaining chunks
-    first_chunk, remaining_text = split_at_sentence_boundary(text, 500)
+# Check if stdout is a pipe (not a TTY)
+is_piped = not sys.stdout.isatty()
 
-    # Queue for sequential playback
-    playback_queue = queue.Queue()
-
-    def background_processor():
-        """Process remaining chunks in background"""
-        if not remaining_text:
-            return
-
-        chunks = split_text_into_chunks(remaining_text, 3000)
-
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            # Submit all chunks for processing
-            future_to_chunk = {
-                executor.submit(synthesize_speech, client, chunk, args): i
-                for i, chunk in enumerate(chunks)
-            }
-
-            # Collect results in order
-            results = [None] * len(chunks)
-            for future in as_completed(future_to_chunk):
-                chunk_index = future_to_chunk[future]
-                try:
-                    url = future.result()
-                    results[chunk_index] = url
-                except Exception as e:
-                    print(f"Error processing chunk {chunk_index}: {e}", file=sys.stderr)
-
-            # Queue results in order
-            for url in results:
-                if url:
-                    playback_queue.put(url)
-
-        playback_queue.put(None)  # Signal end
-
-    # Start background processing
-    bg_thread = threading.Thread(target=background_processor)
-    bg_thread.daemon = True
-    bg_thread.start()
-
-    # Stream and play first chunk immediately
+if is_piped:
+    # Output raw audio to stdout when piped
     try:
-        first_audio = synthesize_stream(client, first_chunk, args)
-        play_audio_data(first_audio, 'mp3')
+        audio_data = synthesize_stream(client, text, args)
+        sys.stdout.buffer.write(audio_data)
+        sys.stdout.buffer.flush()
     except Exception as e:
-        print(f"Error streaming first chunk: {e}", file=sys.stderr)
+        print(f"Error synthesizing audio: {e}", file=sys.stderr)
+        sys.exit(1)
+    sys.exit(0)
+
+# Original streaming playback behavior for TTY
+# Split text into immediate stream part and remaining chunks
+first_chunk, remaining_text = split_at_sentence_boundary(text, 500)
+
+# Queue for sequential playback
+playback_queue = queue.Queue()
+
+def background_processor():
+    """Process remaining chunks in background"""
+    if not remaining_text:
         return
 
-    # Play remaining chunks as they become available
-    while True:
-        try:
-            url = playback_queue.get(timeout=30)
-            if url is None:  # End signal
-                break
-            play_audio_url(url)
-        except queue.Empty:
-            print("Timeout waiting for background processing", file=sys.stderr)
+    chunks = split_text_into_chunks(remaining_text, 3000)
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        # Submit all chunks for processing
+        future_to_chunk = {
+            executor.submit(synthesize_speech, client, chunk, args): i
+            for i, chunk in enumerate(chunks)
+        }
+
+        # Collect results in order
+        results = [None] * len(chunks)
+        for future in as_completed(future_to_chunk):
+            chunk_index = future_to_chunk[future]
+            try:
+                url = future.result()
+                results[chunk_index] = url
+            except Exception as e:
+                print(f"Error processing chunk {chunk_index}: {e}", file=sys.stderr)
+
+        # Queue results in order
+        for url in results:
+            if url:
+                playback_queue.put(url)
+
+    playback_queue.put(None)  # Signal end
+
+# Start background processing
+bg_thread = threading.Thread(target=background_processor)
+bg_thread.daemon = True
+bg_thread.start()
+
+# Stream and play first chunk immediately
+try:
+    first_audio = synthesize_stream(client, first_chunk, args)
+    play_audio_data(first_audio, 'mp3')
+except Exception as e:
+    print(f"Error streaming first chunk: {e}", file=sys.stderr)
+    sys.exit(1)
+
+# Play remaining chunks as they become available
+while True:
+    try:
+        url = playback_queue.get(timeout=30)
+        if url is None:  # End signal
             break
-        except Exception as e:
-            print(f"Error playing audio: {e}", file=sys.stderr)
+        play_audio_url(url)
+    except queue.Empty:
+        print("Timeout waiting for background processing", file=sys.stderr)
+        break
+    except Exception as e:
+        print(f"Error playing audio: {e}", file=sys.stderr)
 
-    bg_thread.join(timeout=1)
-
-if __name__ == '__main__':
-    main()
+bg_thread.join(timeout=1)

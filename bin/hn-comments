@@ -1,80 +1,230 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S PYTHONPATH=/Users/andrei/bin/lib uv run --script --quiet
+# /// script
+# dependencies = [
+#   "beautifulsoup4",
+#   "requests",
+#   "rich>=13.0",
+#   "markdownify",
+#   "joblib",
+# ]
+# ///
 
-$VERBOSE = nil
-require 'bundler/inline'
+import argparse
+import re
+import sys
+from urllib.parse import urljoin, urlparse, parse_qs
 
-gemfile(true, quiet: true) do
-  source 'https://rubygems.org'
-  gem 'nokogiri'
-end
+import requests
+from bs4 import BeautifulSoup
+from joblib import Memory
+from markdownify import markdownify as md
+from comment_tree import print_comment_tree
 
-$VERBOSE = false
+INDENT_WIDTH = 40
 
-require 'open-uri'
-require 'nokogiri'
-require 'json'
+memory = Memory(location='~/.cache/hn-comments', verbose=0)
 
-if ARGV.empty?
-  puts "Usage: #{$0} ITEM_ID|ITEM_URL"
-  exit
-end
 
-input = ARGV[0]
+def fetch_html(url):
+    """Fetch HTML content from URL."""
+    response = requests.get(url)
+    return response.text
 
-if input =~ /^\d+$/
-  base_url = 'https://news.ycombinator.com/'
-  url = "#{base_url}item?id=#{input}"
-elsif input =~ /^https?:\/\//
-  url = input
-else
-  puts "Invalid input. Provide a numeric item ID or a full URL."
-  exit
-end
+def parse_comments(html):
+    """Parse comments from HTML content."""
+    soup = BeautifulSoup(html, 'html.parser')
+    comments = []
 
-comments = []
-stack = []
+    for comment in soup.find_all('tr', class_='comtr'):
+        comment_data = parse_comment_element(comment)
+        comments.append(comment_data)
 
-while url
-  html = URI.open(url).read
-  doc = Nokogiri::HTML(html)
+    return comments
 
-  doc.css('tr.comtr').each do |comment|
-    comment_id = comment['id']
-    author = comment.at_css('a.hnuser')&.text || '[deleted]'
-    time = comment.at_css('span.age')&.text || ''
-    text = comment.at_css('div.comment > span.commtext, div.comment > div.commtext')&.inner_html || '[deleted]'
+def build_comment_tree(flat_comments):
+    """Build tree structure from flat comment list with indentation."""
+    tree = []
+    stack = []
 
-    ind_img = comment.at_css('td.ind img')
-    indentation = ind_img ? ind_img['width'].to_i / 40 : 0
+    for comment_data in flat_comments:
+        # Adjust stack to match indentation level
+        while len(stack) > comment_data['indentation']:
+            stack.pop()
 
-    comment_hash = {
-      id: comment_id,
-      author: author,
-      time: time,
-      text: text,
-      children: []
+        if not stack:
+            tree.append(comment_data)
+        else:
+            stack[-1]['children'].append(comment_data)
+
+        stack.append(comment_data)
+
+    return tree
+
+def get_more_link(html):
+    """Extract 'more' link from HTML if it exists."""
+    soup = BeautifulSoup(html, 'html.parser')
+    more_link = soup.find('a', class_='morelink')
+    if more_link:
+        return urljoin('https://news.ycombinator.com', more_link.get('href'))
+    return None
+
+@memory.cache
+def fetch_comments_from_hn(url, limit):
+    """Fetch comments from HackerNews by combining pure functions."""
+    all_comments = []
+    current_url = url
+
+    while current_url and len(all_comments) < limit:
+        html = fetch_html(current_url)
+        page_comments = parse_comments(html)
+
+        remaining = limit - len(all_comments)
+        all_comments.extend(page_comments[:remaining])
+
+        if len(all_comments) < limit:
+            current_url = get_more_link(html)
+        else:
+            current_url = None
+
+    return build_comment_tree(all_comments)
+
+
+def parse_comment_element(comment):
+    """Parse a single comment element from HN HTML."""
+    comment_id = comment.get('id')
+    author_elem = comment.find('a', class_='hnuser')
+    author = author_elem.text if author_elem else '[deleted]'
+
+    time_elem = comment.find('span', class_='age')
+    time = time_elem.text if time_elem else ''
+
+    text_elem = comment.find('div', class_='comment')
+    if text_elem:
+        commtext = text_elem.find(['span', 'div'], class_='commtext')
+        text = process_comment_html(commtext) if commtext else '[deleted]'
+    else:
+        text = '[deleted]'
+
+    ind_img = comment.find('td', class_='ind').find('img') if comment.find('td', class_='ind') else None
+    indentation = int(ind_img.get('width', 0)) // INDENT_WIDTH if ind_img else 0
+
+    return {
+        'id': comment_id,
+        'author': author,
+        'time': time,
+        'text': text,
+        'indentation': indentation,
+        'children': []
     }
 
-    while stack.length > indentation
-      stack.pop
-    end
 
-    if stack.empty?
-      comments << comment_hash
-    else
-      stack.last[:children] << comment_hash
-    end
+def process_comment_html(commtext_elem):
+    """Process HN comment HTML to proper markdown using markdownify."""
+    if not commtext_elem:
+        return '[deleted]'
 
-    stack << comment_hash
-  end
+    html_content = commtext_elem.decode_contents()
 
-  more_link = doc.at_css('a.morelink')
-  if more_link
-    next_url = more_link['href']
-    url = URI.join('https://news.ycombinator.com/', next_url).to_s
-  else
-    url = nil
-  end
-end
+    # Wrap any text before first <p> tag
+    if '<p>' in html_content:
+        # Split at first <p> tag
+        parts = html_content.split('<p>', 1)
+        if len(parts) == 2 and parts[0].strip():
+            before_p = parts[0].strip()
+            # Always wrap in paragraph - let markdownify handle blockquote formatting
+            html_content = f'<p>{before_p}</p><p>{parts[1]}'
 
-puts JSON.pretty_generate(comments)
+    # Convert links to plain text
+    soup = BeautifulSoup(html_content, 'html.parser')
+    for link in soup.find_all('a'):
+        href = link.get('href', '')
+        if href.startswith('/'):
+            href = 'https://news.ycombinator.com' + href
+        text = link.get_text()
+        if text.strip() and text.strip() != href:
+            link.replace_with(f"{text} - {href}")
+        else:
+            link.replace_with(href)
+    html_content = str(soup)
+
+    # Escape square brackets to prevent markdownify from treating them as reference links
+    html_content = html_content.replace('[', '&#91;').replace(']', '&#93;')
+
+    markdown_text = md(html_content)
+
+    # Restore square brackets
+    markdown_text = markdown_text.replace('&#91;', '[').replace('&#93;', ']')
+
+    # Clean up extra whitespace
+    markdown_text = re.sub(r'\n{3,}', '\n\n', markdown_text)
+    markdown_text = markdown_text.strip()
+
+    return markdown_text if markdown_text else '[deleted]'
+
+
+def prune_thread_tree(comments, target_user):
+    """Prune comment tree to only show target user's comments and their direct parents."""
+    def has_target_user(comment):
+        """Check if this comment or any descendant is by the target user."""
+        if comment['author'] == target_user:
+            return True
+        return any(has_target_user(child) for child in comment['children'])
+
+    def prune_comment(comment):
+        """Prune a comment tree, keeping only relevant branches."""
+        if comment['author'] == target_user:
+            # Keep this comment and prune its children
+            comment['children'] = [
+                pruned for child in comment['children']
+                if (pruned := prune_comment(child)) is not None
+            ]
+            return comment
+        else:
+            # Only keep this comment if it has a descendant by target user
+            relevant_children = [
+                pruned for child in comment['children']
+                if (pruned := prune_comment(child)) is not None
+            ]
+            if relevant_children:
+                comment['children'] = relevant_children
+                return comment
+            return None
+
+    # Filter top-level comments and prune each tree
+    return [
+        pruned for comment in comments
+        if has_target_user(comment) and (pruned := prune_comment(comment)) is not None
+    ]
+
+
+parser = argparse.ArgumentParser(description="Extract HackerNews comments")
+parser.add_argument("input", help="Item ID, URL, or username")
+parser.add_argument("-n", "--limit", type=int, default=100, help="Maximum number of comments to fetch (default: 100)")
+parser.add_argument("-r", "--reset-cache", action="store_true", help="Reset cache for this specific item")
+args = parser.parse_args()
+
+is_user_threads = False
+target_user = None
+
+if args.input.isdigit():
+    url = f"https://news.ycombinator.com/item?id={args.input}"
+elif args.input.startswith(('http://', 'https://')):
+    url = args.input
+    parsed = urlparse(url)
+    if parsed.path == '/threads':
+        is_user_threads = True
+        target_user = parse_qs(parsed.query).get('id', [''])[0]
+else:
+    url = f"https://news.ycombinator.com/threads?id={args.input}"
+    is_user_threads = True
+    target_user = args.input
+
+if args.reset_cache:
+    memory.clear(warn=False)
+
+comments = fetch_comments_from_hn(url, args.limit)
+
+if is_user_threads and target_user:
+    comments = prune_thread_tree(comments, target_user)
+
+print_comment_tree(comments)

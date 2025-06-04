@@ -4,7 +4,7 @@
 import sys
 import json
 import re
-
+import argparse
 
 INDENT = " " * 2
 
@@ -82,21 +82,17 @@ def fmt_any(o, flatten):
         return fmt_object(o, flatten)
     raise TypeError(f"Unknown type {type(o)!r}")
 
+parser = argparse.ArgumentParser(description="Converts JSON objects into nix")
+parser.add_argument("file", nargs="?", help="JSON file to convert (reads from stdin if not provided)")
+parser.add_argument("--flatten", action="store_true", help="Flatten nested objects")
+args = parser.parse_args()
 
-def main():
-    flatten = "--flatten" in sys.argv
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+if args.file:
+    with open(args.file, "r") as f:
+        input_data = f.read()
+else:
+    input_data = sys.stdin.read()
 
-    if len(args) < 1:
-        input_data = sys.stdin.read()
-    else:
-        with open(args[0], "r") as f:
-            input_data = f.read()
+data = json.loads(strip_comments(input_data))
 
-    data = json.loads(strip_comments(input_data))
-
-    print(fmt_any(data, flatten=flatten))
-
-
-if __name__ == "__main__":
-    main()
+print(fmt_any(data, flatten=args.flatten))

@@ -1,0 +1,106 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = [
+#   "pyobjc-core==10.3",
+#   "pyobjc==10.3",
+#   "pyobjc-framework-Vision==10.3",
+#   "pyobjc-framework-Quartz==10.3",
+#   "wurlitzer==3.1",
+# ]
+# ///
+
+""" Use Apple's Vision Framework via PyObjC to detect text in images """
+
+import pathlib
+import sys
+import subprocess
+
+def image_to_text_from_path(img_path, lang="eng"):
+    import Quartz
+    import Vision
+    from Cocoa import NSURL
+    from Foundation import NSDictionary
+    from wurlitzer import pipes
+
+    input_url = NSURL.fileURLWithPath_(img_path)
+
+    with pipes() as (out, err):
+        input_image = Quartz.CIImage.imageWithContentsOfURL_(input_url)
+
+    vision_options = NSDictionary.dictionaryWithDictionary_({})
+    vision_handler = Vision.VNImageRequestHandler.alloc().initWithCIImage_options_(
+        input_image, vision_options
+    )
+    results = []
+    handler = make_request_handler(results)
+    vision_request = Vision.VNRecognizeTextRequest.alloc().initWithCompletionHandler_(handler)
+    error = vision_handler.performRequests_error_([vision_request], None)
+
+    return results
+
+def image_to_text_from_data(img_data, lang="eng"):
+    import Quartz
+    import Vision
+    from Foundation import NSDictionary, NSData
+    from wurlitzer import pipes
+
+    ns_data = NSData.dataWithBytes_length_(img_data, len(img_data))
+
+    with pipes() as (out, err):
+        input_image = Quartz.CIImage.imageWithData_(ns_data)
+
+    vision_options = NSDictionary.dictionaryWithDictionary_({})
+    vision_handler = Vision.VNImageRequestHandler.alloc().initWithCIImage_options_(
+        input_image, vision_options
+    )
+    results = []
+    handler = make_request_handler(results)
+    vision_request = Vision.VNRecognizeTextRequest.alloc().initWithCompletionHandler_(handler)
+    error = vision_handler.performRequests_error_([vision_request], None)
+
+    return results
+
+def make_request_handler(results):
+    """ results: list to store results """
+    if not isinstance(results, list):
+        raise ValueError("results must be a list")
+
+    def handler(request, error):
+        if error:
+            print(f"Error! {error}")
+        else:
+            observations = request.results()
+            for text_observation in observations:
+                recognized_text = text_observation.topCandidates_(1)[0]
+                results.append([recognized_text.string(), recognized_text.confidence()])
+    return handler
+
+import argparse
+
+parser = argparse.ArgumentParser(description="Use Apple's Vision Framework to detect text in images")
+parser.add_argument('image_path', nargs='?',
+                   help='Path to image file (use - for stdin)')
+
+args = parser.parse_args()
+
+if args.image_path == '-' or (not args.image_path and not sys.stdin.isatty()):
+    # Read from stdin
+    img_data = sys.stdin.buffer.read()
+    results = image_to_text_from_data(img_data)
+elif args.image_path:
+    # Read from file path
+    img_path = pathlib.Path(args.image_path)
+    if not img_path.is_file():
+        sys.exit("Invalid image path")
+    img_path = str(img_path.resolve())
+    results = image_to_text_from_path(img_path)
+else:
+    # Default: capture screenshot selection
+    result = subprocess.run(['screenshot', 'selection'], capture_output=True)
+    if result.returncode != 0:
+        sys.exit("Failed to capture screenshot")
+    img_data = result.stdout
+    results = image_to_text_from_data(img_data)
+
+for text, confidence in results:
+    print(text)

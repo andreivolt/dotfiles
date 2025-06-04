@@ -31,11 +31,11 @@ def send_notification(title, message, url):
         '-message', message,
         '-open', url
     ])
-    
+
     # Send pushover notification
     subprocess.run([
         'pushover-cli', 'push',
-        '-t', title, 
+        '-t', title,
         f"{message}\n{url}"
     ])
 
@@ -43,39 +43,34 @@ def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         description='Monitor HackerNews for updates to your posts and comments',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog='''
-Configuration:
-  Config file: ~/.config/hn-monitor/config.yml
-  Cache file:  ~/.local/state/hn-monitor/cache.yml
-        '''
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    
+
     parser.add_argument(
         '--interval', '-i',
         type=int,
         default=None,
         help='Check interval in seconds (default: from config or 30)'
     )
-    
+
     parser.add_argument(
         '--once',
         action='store_true',
         help='Run once and exit (no continuous monitoring)'
     )
-    
+
     parser.add_argument(
         '--reset-config',
         action='store_true',
         help='Reset configuration and re-enter credentials'
     )
-    
+
     parser.add_argument(
         '--verbose', '-v',
         action='store_true',
         help='Verbose output'
     )
-    
+
     return parser.parse_args()
 
 # Parse command line arguments
@@ -445,9 +440,9 @@ else:
 
 while True:
     time.sleep(config['interval'])
-    
+
     if args.verbose:
         print(f"Checking at {datetime.now().strftime('%H:%M:%S')}")
-    
+
     # Run the check function
     check_hn()

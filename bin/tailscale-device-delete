@@ -1,8 +1,8 @@
 #!/usr/bin/env -S uv run --script --quiet
 # /// script
 # dependencies = [
-#   "timeago==1.0",  // Human-friendly time format (e.g., "3 days ago")
-#   "requests==2.32",  // HTTP library for Tailscale API calls
+#   "timeago", # Human-friendly time format (e.g., "3 days ago")
+#   "requests", # HTTP library for Tailscale API calls
 # ]
 # ///
 
@@ -41,14 +41,14 @@ def api_request(url, method='GET'):
         'Content-Type': 'application/json',
         'Accept': 'application/json'
     }
-    
+
     response = requests.request(method, url, headers=headers)
     return response.status_code, response.text
 
 def time_ago_in_words(time_str):
     if not time_str:
         return 'Never'
-    
+
     try:
         if isinstance(time_str, str) and time_str.isdigit():
             # Unix timestamp as string
@@ -66,7 +66,7 @@ def time_ago_in_words(time_str):
         else:
             # ISO format string - convert to timezone-naive
             time_obj = datetime.fromisoformat(str(time_str).replace('Z', '+00:00')).replace(tzinfo=None)
-        
+
         return timeago.format(time_obj, datetime.now())
     except:
         return 'unknown'
@@ -118,10 +118,10 @@ for device_line in selected_devices.split('\n'):
     else:
         print(f"Error: Could not parse device line: {device_line}")
         continue
-    
+
     print(f"Deleting device: {device_name}...")
     status_code, _ = api_request(f"{api_base_url}/device/{device_id}", 'DELETE')
-    
+
     if status_code == 200:
         print(f"✓ Device '{device_name}' deleted successfully.")
     else:

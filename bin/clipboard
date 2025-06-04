@@ -1,0 +1,214 @@
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! clap = { version = "4.5", features = ["derive"] }
+//! serde_json = "1.0"
+//! anyhow = "1.0"
+//! dirs = "5.0"
+//! plist = "1.7"
+//! ```
+
+use anyhow::{Result, bail, Context};
+use clap::Parser;
+use std::{
+    collections::HashSet,
+    io::Write,
+    process::{Command, Stdio},
+};
+use plist::Value as PlistValue;
+
+#[derive(Parser)]
+#[command(about = "Browse and manage Jumpcut clipboard history with interactive selection")]
+struct Args {
+    #[arg(short, long, help = "Copy selected item to clipboard")]
+    copy: bool,
+
+    #[arg(short, long, help = "Echo selected item to stdout (default)")]
+    echo: bool,
+
+    #[arg(short, long, value_enum, default_value = "plain", help = "Output format")]
+    format: Format,
+
+    #[arg(short, long, help = "Limit number of items shown")]
+    number: Option<usize>,
+
+    #[arg(short, long, help = "Pre-filter items containing search term")]
+    search: Option<String>,
+
+    #[arg(long, help = "Show items in reverse chronological order")]
+    reverse: bool,
+
+    #[arg(long, help = "Allow duplicate items")]
+    no_unique: bool,
+}
+
+#[derive(Clone, clap::ValueEnum)]
+enum Format {
+    Plain,
+    Json,
+    Csv,
+}
+
+fn get_jumpcut_data() -> Result<Vec<String>> {
+    let jumpcut_file = dirs::home_dir()
+        .context("Could not find home directory")?
+        .join("Library/Application Support/Jumpcut/JCEngine.save");
+
+    if !jumpcut_file.exists() {
+        bail!("Jumpcut data file not found");
+    }
+
+    let data = std::fs::read(&jumpcut_file)?;
+    let plist = plist::from_bytes(&data)
+        .context("Failed to parse plist file")?;
+
+    let items = match plist {
+        PlistValue::Dictionary(dict) => {
+            dict.get("jcList")
+                .and_then(|v| v.as_array())
+                .context("jcList not found or not an array")?
+                .iter()
+                .filter_map(|item| {
+                    item.as_dictionary()
+                        .and_then(|d| d.get("Contents"))
+                        .and_then(|v| v.as_string())
+                        .map(|s| s.to_string())
+                })
+                .collect()
+        }
+        _ => bail!("Root plist object is not a dictionary"),
+    };
+
+    Ok(items)
+}
+
+fn filter_items(
+    items: Vec<String>,
+    search: Option<&str>,
+    number: Option<usize>,
+    reverse: bool,
+    unique: bool,
+) -> Vec<String> {
+    let mut items = items;
+
+    if unique {
+        let mut seen = HashSet::new();
+        items = items.into_iter()
+            .filter(|item| seen.insert(item.clone()))
+            .collect();
+    }
+
+    if let Some(search_term) = search {
+        let search_lower = search_term.to_lowercase();
+        items.retain(|item| item.to_lowercase().contains(&search_lower));
+    }
+
+    if reverse {
+        items.reverse();
+    }
+
+    if let Some(n) = number {
+        items.truncate(n);
+    }
+
+    items
+}
+
+fn run_fzf(items: &[String], _copy_mode: bool) -> Result<String> {
+    if items.is_empty() {
+        bail!("No items found");
+    }
+
+    let encoded_items: Vec<String> = items.iter()
+        .map(|item| item.replace('\n', "\\n").replace('\t', "\\t"))
+        .collect();
+
+    let keybinds = vec![
+        "ctrl-y:execute-silent(echo -n {} | sed 's/\\\\n/\\n/g; s/\\\\t/\\t/g' | pbcopy)+abort",
+        "ctrl-e:execute(echo -n {} | sed 's/\\\\n/\\n/g; s/\\\\t/\\t/g' | pbcopy && osascript -e 'tell app \"System Events\" to keystroke \"v\" using command down')+abort",
+        "ctrl-d:execute-silent(echo 'Delete not implemented yet')+abort",
+    ];
+
+    let mut cmd = Command::new("fzf");
+    cmd.arg("--preview")
+        .arg("echo {} | sed 's/\\\\n/\\n/g; s/\\\\t/\\t/g' | fold -s -w 80")
+        .arg("--preview-window")
+        .arg("wrap")
+        .arg("--bind")
+        .arg(keybinds.join(","))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+
+    let mut child = cmd.spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(encoded_items.join("\n").as_bytes())?;
+    }
+
+    let output = child.wait_with_output()?;
+
+    if !output.status.success() {
+        std::process::exit(1);
+    }
+
+    let encoded_result = String::from_utf8(output.stdout)?.trim().to_string();
+    Ok(encoded_result.replace("\\n", "\n").replace("\\t", "\t"))
+}
+
+fn output_result(selection: &str, format: Format, copy_mode: bool) -> Result<()> {
+    if selection.is_empty() {
+        return Ok(());
+    }
+
+    if copy_mode {
+        let mut cmd = Command::new("pbcopy")
+            .stdin(Stdio::piped())
+            .spawn()?;
+
+        if let Some(mut stdin) = cmd.stdin.take() {
+            stdin.write_all(selection.as_bytes())?;
+        }
+        cmd.wait()?;
+
+        if let Ok(mut hs) = Command::new("hs")
+            .arg("-c")
+            .arg(format!("hs.alert.show('Copied ' .. [[{}]])", selection))
+            .spawn()
+        {
+            let _ = hs.wait();
+        }
+    } else {
+        match format {
+            Format::Json => {
+                let json = serde_json::json!({"content": selection});
+                println!("{}", json);
+            }
+            Format::Csv => {
+                println!("\"{}\"", selection.replace('"', "\"\""));
+            }
+            Format::Plain => {
+                println!("{}", selection);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    let args = Args::parse();
+
+    let items = get_jumpcut_data()?;
+    let filtered_items = filter_items(
+        items,
+        args.search.as_deref(),
+        args.number,
+        args.reverse,
+        !args.no_unique,
+    );
+
+    let selection = run_fzf(&filtered_items, args.copy)?;
+    output_result(&selection, args.format, args.copy)?;
+
+    Ok(())
+}
