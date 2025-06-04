@@ -11,6 +11,17 @@ return {
     disable_netrw = true,
     hijack_cursor = true,
     sync_root_with_cwd = true,
+    filesystem_watchers = {
+      ignore_dirs = {
+        "node_modules",
+        ".git",
+        "/Users/andrei/Library",
+        "/System",
+        "/Applications",
+        "/usr",
+        "/opt",
+      },
+    },
     renderer = {
       highlight_git = true,
       highlight_opened_files = "all",
@@ -26,6 +37,7 @@ return {
     view = {
       cursorline = false,
       width = 30,
-    }
+    },
+    on_attach = require("user.nvim-tree-git-mv").on_attach,
   },
 }

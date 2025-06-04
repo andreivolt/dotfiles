@@ -1,16 +1,19 @@
 #!/usr/bin/env -S uv run --script --quiet
+"""Convert text to speech using ElevenLabs API."""
 # /// script
 # dependencies = [
-#     "elevenlabs~=2.1",  # TTS API client
+#   "elevenlabs~=2.1",
 # ]
 # ///
+
+
 import argparse
 import os
 import sys
 from elevenlabs import ElevenLabs, VoiceSettings, stream
 
-parser = argparse.ArgumentParser(description='Convert text to speech using ElevenLabs API')
-parser.add_argument('text', nargs='*', help='Text to convert (reads from stdin if not provided)')
+parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument('text', nargs='*', help='Text to convert')
 parser.add_argument('-v', '--voice', default='EXAVITQu4vr4xnSDxMaL', help='Voice ID or name')
 parser.add_argument('-m', '--model', default='eleven_multilingual_v2', help='Model to use (eleven_multilingual_v2 recommended for non-English)')
 parser.add_argument('-l', '--language', default=None, help='Language code - ONLY works with eleven_turbo_v2_5 and eleven_flash_v2_5 models')
@@ -169,16 +172,16 @@ if args.list_voices:
     for voice in voices.voices:
         desc = getattr(voice, 'description', '') or ''
         labels = getattr(voice, 'labels', {}) or {}
-        
+
         # Extract language info if available
         lang_info = []
         if 'language' in labels:
             lang_info.append(f"Primary: {labels['language']}")
         if 'accent' in labels:
             lang_info.append(f"Accent: {labels['accent']}")
-        
+
         lang_str = f" [{', '.join(lang_info)}]" if lang_info else ""
-        
+
         if desc:
             print(f"{voice.voice_id}: {voice.name}{lang_str} - {desc}")
         else:
@@ -227,6 +230,7 @@ supports_language_code = model_info.get('supports_language_code', False)
 if args.language:
     if supports_language_code:
         # Validate language code
+
         if args.language not in LANGUAGE_CODES and len(args.language) != 2:
             print(f"Warning: '{args.language}' may not be a valid language code. Use --list-languages to see common codes.", file=sys.stderr)
         kwargs['language_code'] = args.language
@@ -241,7 +245,7 @@ if args.language:
 
 try:
     audio_stream = client.text_to_speech.stream(**kwargs)
-    
+
     if sys.stdout.isatty():
         stream(audio_stream)
     else:
@@ -249,7 +253,7 @@ try:
             if isinstance(chunk, bytes):
                 sys.stdout.buffer.write(chunk)
                 sys.stdout.buffer.flush()
-        
+
 except Exception as e:
     print(f"Error: {e}", file=sys.stderr)
     sys.exit(1)

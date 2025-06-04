@@ -1,0 +1,63 @@
+#!/usr/bin/env ruby
+
+require 'bundler/inline'
+require 'uri'
+require 'shellwords'
+
+$VERBOSE = nil
+gemfile do
+  source 'https://rubygems.org'
+  gem 'parallel'
+end
+$VERBOSE = false
+
+def get_handler(parsed_url)
+  return unless parsed_url && parsed_url.scheme =~ /^https?$/
+
+  host = parsed_url.host
+  return unless host
+
+  case host
+  when ->(h) { h.end_with?('reddit.com') }
+    proc { |input| ['reddit-comments', input] }
+  when 'news.ycombinator.com'
+    proc { |input| ['hn-comments', input] }
+  when ->(h) { h.end_with?('youtube.com') || h == 'youtu.be' }
+    proc { |input| ['youtube-transcript', input] }
+  when 'x.com', 'twitter.com'
+    proc { |input| ['x-thread', '-p'] }
+  else
+    # Default handler for any other URL
+    proc { |input| ['sh', '-c', "firecrawl scrape #{input.shellescape} || puremd #{input.shellescape}"] }
+  end
+end
+
+inputs = if ARGV.any?
+  ARGV
+elsif !$stdin.tty?
+  $stdin.readlines.map(&:strip).reject(&:empty?)
+else
+  clipboard = `pbpaste`.strip
+  abort "No input provided." if clipboard.empty?
+  [clipboard]
+end
+
+abort "No input provided." if inputs.empty?
+
+results = Parallel.map(inputs.each_with_index) do |input_text, index|
+  parsed_url = URI.parse(input_text)
+
+  handler = get_handler(parsed_url)
+
+  cmd = handler.call(input_text)
+  output = `#{cmd.shelljoin}`
+  [index, input_text, output]
+end
+
+puts(if inputs.length == 1
+  results.first[2]
+else
+  results.map do |index, input_text, output|
+    "=" * 80 + "\n" + input_text + "\n" + "=" * 80 + "\n" + output + "\n"
+  end.join
+end)

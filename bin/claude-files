@@ -307,17 +307,15 @@ fn main() {
         build_cache_in_background();
     }
 
-    // If we have no cache and no items, exit early
-    if cached_items.is_empty() {
-        eprintln!("No cached items available. Cache is being built in background.");
-        return;
-    }
-
     // Check if stdout is piped before using fzf
     let is_piped = !atty::is(atty::Stream::Stdout);
 
     if is_piped {
         // If output is piped, just output all content directly
+        if cached_items.is_empty() {
+            // No cache available yet when piping
+            return;
+        }
         for item in &cached_items {
             println!("{}", item.content);
         }

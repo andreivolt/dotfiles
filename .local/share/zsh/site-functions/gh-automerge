@@ -1,3 +1,0 @@
-for i in reviewed-by review-requested; do
-	gh pr list --search $i:@me --json number,isDraft --jq '.[] | select(.isDraft == false).number'
-done | xargs -I% -n1 gh pr merge % --merge --auto

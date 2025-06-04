@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-
-set -e
-
-git stash
-git fetch --depth 1
-git reflog expire --expire=now --all
-git gc --prune=now
-git stash apply

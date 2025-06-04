@@ -1,43 +1,74 @@
-#!/usr/bin/env nix-shell
-#!nix-shell -i bash -p httpie jwt-cli jq util-linux jo
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = [
+#   "cryptography",
+#   "pyjwt",
+#   "requests",
+# ]
+# ///
 
-set -euo pipefail
+import argparse
+import json
+import os
+import sys
+import time
+import uuid
+from datetime import datetime, timedelta
 
-if [[ $# -ne 1 ]]; then
-  echo "Usage: $0 <ADDON_ID>"
-  exit 1
-fi
+import jwt
+import requests
 
-if [[ -z "${AMO_API_KEY:-}" || -z "${AMO_API_SECRET:-}" ]]; then
-  echo "AMO_API_KEY and AMO_API_SECRET must be set."
-  exit 1
-fi
 
-ADDON_ID="$1"
+def generate_jwt(api_key, api_secret):
+    issued_at = int(time.time())
+    expiration = issued_at + 300
+    jti = str(uuid.uuid4())
 
-generate_jwt() {
-  local issued_at
-  local expiration
-  local jti
-  local payload
+    payload = {
+        "iss": api_key,
+        "jti": jti,
+        "iat": issued_at,
+        "exp": expiration
+    }
 
-  issued_at=$(date +%s)
-  expiration=$((issued_at + 300))
-  jti=$(uuidgen)
+    return jwt.encode(payload, api_secret, algorithm="HS256")
 
-  payload=$(jo iss="$AMO_API_KEY" jti="$jti" iat="$issued_at" exp="$expiration")
-  jwt encode --alg HS256 --secret "$AMO_API_SECRET" "$payload"
-}
 
-JWT_GET=$(generate_jwt)
+def delete_addon(addon_id, api_key, api_secret):
+    # Get delete confirmation token
+    jwt_get = generate_jwt(api_key, api_secret)
 
-DELETE_CONFIRM=$(http GET "https://addons.mozilla.org/api/v5/addons/addon/$ADDON_ID/delete_confirm/" \
-  "Authorization:JWT $JWT_GET" | jq -r .delete_confirm)
+    response = requests.get(
+        f"https://addons.mozilla.org/api/v5/addons/addon/{addon_id}/delete_confirm/",
+        headers={"Authorization": f"JWT {jwt_get}"}
+    )
+    response.raise_for_status()
 
-JWT_DELETE=$(generate_jwt)
+    delete_confirm = response.json()["delete_confirm"]
 
-http DELETE "https://addons.mozilla.org/api/v5/addons/addon/$ADDON_ID/" \
-  "delete_confirm==$DELETE_CONFIRM" \
-  "Authorization:JWT $JWT_DELETE"
+    # Delete the addon
+    jwt_delete = generate_jwt(api_key, api_secret)
 
-echo "Add-on ID $ADDON_ID has been deleted."
+    response = requests.delete(
+        f"https://addons.mozilla.org/api/v5/addons/addon/{addon_id}/",
+        params={"delete_confirm": delete_confirm},
+        headers={"Authorization": f"JWT {jwt_delete}"}
+    )
+    response.raise_for_status()
+
+    print(f"Add-on ID {addon_id} has been deleted.")
+
+
+parser = argparse.ArgumentParser(description="Delete Firefox addon")
+parser.add_argument("addon_id", help="The addon ID to delete")
+
+args = parser.parse_args()
+
+api_key = os.getenv("AMO_API_KEY")
+api_secret = os.getenv("AMO_API_SECRET")
+
+if not api_key or not api_secret:
+    print("AMO_API_KEY and AMO_API_SECRET must be set.", file=sys.stderr)
+    sys.exit(1)
+
+delete_addon(args.addon_id, api_key, api_secret)

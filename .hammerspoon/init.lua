@@ -7,29 +7,28 @@ spoon.SpoonInstall:updateAllRepos()
 local screen = require("hs.screen")
 local application = require("hs.application")
 
-local toggleApp = require('toggle_app')
-require('hotkeys')
+local toggleApp = require("toggle_app")
+require("hotkeys")
 
 spoon.SpoonInstall:andUse("ReloadConfiguration", {
   repo = "default", -- Repository where the spoon is located
   watch_paths = {
     hs.configdir, -- Default Hammerspoon config directory
-  }
+  },
 })
 
 spoon.ReloadConfiguration:start()
 
 spoon.SpoonInstall:andUse("WinWin", {
-  repo = "default" -- Repository where WinWin is located
+  repo = "default", -- Repository where WinWin is located
 })
 
-local redshift = require('redshift')
+local redshift = require("redshift")
 redshift.init()
 
--- CLI command handlers
-hs.ipc.cliInstall()  -- Ensure CLI is installed
+-- CLI setup
+hs.ipc.cliInstall()
 
--- Register CLI commands
 if hs.ipc then
   hs.ipc.handler = function(str)
     if str == "toggle-terminal" then

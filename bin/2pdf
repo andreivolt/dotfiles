@@ -1,75 +1,89 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S uv run --script --quiet
+"""Convert documents to PDF using LibreOffice."""
+# /// script
+# dependencies = [
+#   "sh",
+# ]
+# ///
 
-require 'optparse'
-require 'tempfile'
-require 'shellwords'
 
-options = {}
-parser = OptionParser.new do |opts|
-  opts.banner = "Usage: #{File.basename($PROGRAM_NAME)} [options] [file1 file2...]"
+import argparse
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+from sh import soffice, ErrorReturnCode
 
-  opts.on("-o", "--output FILE", "Output file (for stdin mode)") do |o|
-    options[:output] = o
-  end
+def log(msg, quiet):
+    if not quiet:
+        print(msg, file=sys.stderr)
 
-  opts.on("-q", "--quiet", "Quiet mode") do
-    options[:quiet] = true
-  end
+parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument("-o", "--output", help="Output file (for stdin mode)")
+parser.add_argument("-q", "--quiet", action="store_true", help="Quiet mode")
+parser.add_argument("files", nargs="*", help="Input files to convert")
 
-  opts.on("-h", "--help", "Show this help") do
-    puts opts
-    exit
-  end
-end
-parser.parse!
+args = parser.parse_args()
 
-def log(msg, options)
-  STDERR.puts msg unless options[:quiet]
-end
+# Handle stdin mode
+if not sys.stdin.isatty():
+    with tempfile.NamedTemporaryFile(prefix='any2pdf', suffix='.tmp', delete=False) as temp:
+        shutil.copyfileobj(sys.stdin.buffer, temp)
+        temp_path = temp.name
 
-unless STDIN.tty?
-  Tempfile.create(['any2pdf', '.tmp']) do |temp|
-    IO.copy_stream(STDIN, temp.path)
-    temp.close
+    try:
+        # Convert using LibreOffice
+        soffice("--headless", "--convert-to", "pdf",
+                "--outdir", os.path.dirname(temp_path), temp_path,
+                _out="/dev/null", _err="/dev/null")
 
-    system("unoconv -f pdf #{temp.path.shellescape}")
-    pdf_file = "#{temp.path}.pdf"
+        pdf_file = str(Path(temp_path).with_suffix('.pdf'))
 
-    if File.exist?(pdf_file)
-      if options[:output]
-        require 'fileutils'
-        FileUtils.cp(pdf_file, options[:output])
-        log("Created '#{options[:output]}'", options)
-      else
-        IO.copy_stream(pdf_file, STDOUT)
-      end
-      File.unlink(pdf_file)
-    else
-      log("Error: Conversion failed", options)
-      exit 1
-    end
-  end
-  exit
-end
+        if os.path.exists(pdf_file):
+            if args.output:
+                shutil.copy2(pdf_file, args.output)
+                log(f"Created '{args.output}'", args.quiet)
+            else:
+                with open(pdf_file, 'rb') as f:
+                    shutil.copyfileobj(f, sys.stdout.buffer)
+            os.unlink(pdf_file)
+        else:
+            log("Error: Conversion failed", args.quiet)
+            sys.exit(1)
+    except ErrorReturnCode as e:
+        log(f"Error: LibreOffice conversion failed: {e}", args.quiet)
+        sys.exit(1)
+    finally:
+        try:
+            os.unlink(temp_path)
+        except:
+            pass
+    sys.exit(0)
 
-if ARGV.empty?
-  puts parser
-  exit 1
-end
+if not args.files:
+    parser.print_help()
+    sys.exit(1)
 
-ARGV.each do |file|
-  unless File.exist?(file)
-    log("Error: '#{file}' not found", options)
-    next
-  end
+for file in args.files:
+    if not os.path.exists(file):
+        log(f"Error: '{file}' not found", args.quiet)
+        continue
 
-  log("Converting '#{file}'", options)
-  system("unoconv -f pdf #{file.shellescape}")
-  output = "#{file.sub(/\.[^.]+$/, '')}.pdf"
+    log(f"Converting '{file}'", args.quiet)
+    try:
+        soffice("--headless", "--convert-to", "pdf",
+                "--outdir", os.path.dirname(file), file,
+                _out="/dev/null", _err="/dev/null")
+    except ErrorReturnCode:
+        log(f"Error: Failed to convert '{file}'", args.quiet)
+        continue
 
-  if File.exist?(output)
-    log("Created '#{output}'", options)
-  else
-    log("Error: Failed to convert '#{file}'", options)
-  end
-end
+    # Generate output filename
+
+    output = str(Path(file).with_suffix('.pdf'))
+
+    if os.path.exists(output):
+        log(f"Created '{output}'", args.quiet)
+    else:
+        log(f"Error: Failed to convert '{file}'", args.quiet)

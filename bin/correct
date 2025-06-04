@@ -1,0 +1,58 @@
+#!/usr/bin/env -S uv run --script --quiet
+"""Fix orthographic errors and egregious grammatical errors while preserving style."""
+# /// script
+# dependencies = [
+#     "openai",
+# ]
+# ///
+
+import sys
+import os
+import argparse
+from openai import OpenAI
+
+def correct_text(text):
+    client = OpenAI()
+
+    prompt = """Fix only orthographic errors (spelling, punctuation, capitalization) and egregious grammatical errors in the following text.
+
+CRITICAL RULES:
+- Keep the original meaning and style intact
+- Do NOT rephrase or restructure sentences
+- Do NOT change vocabulary unless it's clearly misspelled
+- Only fix obvious spelling mistakes, missing punctuation, and clear grammatical errors
+- Preserve the author's voice and tone completely
+- If unsure whether something is an error, leave it unchanged
+
+Text to correct:"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a careful proofreader who fixes only obvious errors while preserving the original text's style and meaning."},
+                {"role": "user", "content": f"{prompt}\n\n{text}"}
+            ],
+            temperature=0.1
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return text
+
+parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument('text', nargs='*', help='Text to correct (use stdin if not provided)')
+
+args = parser.parse_args()
+
+if args.text:
+    text = " ".join(args.text)
+else:
+    text = sys.stdin.read().strip()
+
+if not text:
+    print("No text provided", file=sys.stderr)
+    sys.exit(1)
+
+corrected = correct_text(text)
+print(corrected)

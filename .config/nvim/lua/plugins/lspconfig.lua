@@ -19,7 +19,7 @@ return {
         vim.keymap.set('n', 'gd', vim.lsp.buf.definition, opts)
         vim.keymap.set('n', 'K', vim.lsp.buf.hover, opts)
         vim.keymap.set('n', 'gi', vim.lsp.buf.implementation, opts)
-        vim.keymap.set('n', '<C-k>', vim.lsp.buf.signature_help, opts)
+        -- vim.keymap.set('n', '<C-k>', vim.lsp.buf.signature_help, opts) -- TODO: conflicts with tmux navigation
         vim.keymap.set('n', '<space>wa', vim.lsp.buf.add_workspace_folder, opts)
         vim.keymap.set('n', '<space>wr', vim.lsp.buf.remove_workspace_folder, opts)
         vim.keymap.set('n', '<space>wl', function() print(vim.inspect(vim.lsp.buf.list_workspace_folders())) end, opts)

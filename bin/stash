@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 
-tmpfile="/tmp/${0##*/}.tmp"
+tmpfile=$(mktemp -t "${0##*/}.XXXXXX")
 
-if [ ! -t 0 ]; then
+if [ -t 0 ]; then
+  # stdin is a terminal, read input like cat
   cat > "$tmpfile"
-  exit 0
+else
+  # stdin is not a terminal (being piped), output stored content
+  cat "$tmpfile"
 fi
-
-cat "$tmpfile"

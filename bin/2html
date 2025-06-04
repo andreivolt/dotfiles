@@ -1,0 +1,70 @@
+#!/usr/bin/env -S uv run --script --quiet
+"""Convert markdown to HTML using pandoc."""
+# /// script
+# dependencies = [
+#   "sh",
+# ]
+# ///
+
+
+import argparse
+import os
+import sys
+import tempfile
+from pathlib import Path
+import sh
+
+
+parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument('-t', '--title', default='Document', help='Title for the HTML document')
+args = parser.parse_args()
+
+script_dir = Path(__file__).parent
+vite_dir = script_dir / '2html-vite'
+
+if not vite_dir.exists():
+    print(f"Error: {vite_dir} does not exist", file=sys.stderr)
+    sys.exit(1)
+
+os.chdir(vite_dir)
+
+with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as temp_file:
+    temp_path = temp_file.name
+
+try:
+    result = sh.yarn('run', 'build:html', '--title', args.title)
+
+    with open(temp_path, 'w') as f:
+        f.write(str(result))
+
+    browser = os.environ.get('BROWSER')
+    temp_output = 'singlefile-output.html'
+
+    if browser:
+        try:
+            sh.bunx('single-file-cli',
+                   f'--browser-executable-path={browser}',
+                   f'file://{temp_path}',
+                   temp_output)
+
+            if Path(temp_output).exists() and Path(temp_output).stat().st_size > 0:
+                with open(temp_output) as f:
+                    print(f.read())
+            else:
+                print("Warning: single-file-cli failed, using original HTML", file=sys.stderr)
+                with open(temp_path) as f:
+                    print(f.read())
+        except sh.ErrorReturnCode:
+            print("Warning: single-file-cli failed, using original HTML", file=sys.stderr)
+            with open(temp_path) as f:
+                print(f.read())
+    else:
+        print("Warning: No browser found, using original HTML", file=sys.stderr)
+        with open(temp_path) as f:
+            print(f.read())
+
+finally:
+    if Path(temp_path).exists():
+        os.unlink(temp_path)
+    if Path(temp_output).exists():
+        os.unlink(temp_output)

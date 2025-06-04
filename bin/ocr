@@ -1,0 +1,223 @@
+#!/usr/bin/env -S uv run --script --quiet
+"""Extract text from images using AI vision models."""
+# /// script
+# dependencies = [
+#   "pyperclip",
+#   "rich",
+#   "sh",
+# ]
+# ///
+
+import argparse
+from sh import Command, ErrorReturnCode
+import sys
+import tempfile
+from pathlib import Path
+from rich.console import Console
+from rich.markdown import Markdown
+import pyperclip
+
+
+def _looks_like_markdown(text):
+    """Simple heuristic to detect if text contains markdown formatting."""
+    markdown_indicators = [
+        '# ', '## ', '### ',
+        '**', '__',
+        '*', '_',
+        '- ', '* ',
+        '```',
+        '[', '](', '![',
+        '|',
+    ]
+
+    # Check for multiple indicators to avoid false positives
+    indicator_count = sum(1 for indicator in markdown_indicators if indicator in text)
+    return indicator_count >= 2
+
+
+def get_mime_type(file_path):
+    """Get MIME type of file using the file command."""
+    try:
+        file_cmd = Command("file")
+        return file_cmd("--mime-type", "-b", str(file_path)).strip()
+    except ErrorReturnCode:
+        return None
+
+
+def run_llm_ocr(image_path, mode, custom_prompt=None, copy_to_clipboard=False, model=None):
+    """Run LLM command with appropriate prompt and attachment."""
+    function_description = "You are an AI assistant specialized in optical character recognition (OCR) and text extraction from images."
+
+    if mode == "readable":
+        base_prompt = "OCR this image and extract the text with readable formatting. Make sensible adjustments for better readability, fix obvious OCR errors, and organize the content in a clear, well-structured way."
+    else:  # layout mode
+        base_prompt = "OCR this image and preserve the original layout as closely as possible. Maintain spacing, alignment, and visual structure exactly as shown in the image."
+
+    if custom_prompt:
+        prompt = f"{function_description}\n\n{base_prompt}\n\nAdditional instructions: {custom_prompt}"
+    else:
+        prompt = f"{function_description}\n\n{base_prompt}"
+
+    mime_type = get_mime_type(image_path)
+    if not mime_type:
+        print(f"Error: Could not determine MIME type for '{image_path}'", file=sys.stderr)
+        return 1
+
+    if not mime_type.startswith("image/"):
+        print(f"Error: '{image_path}' is not an image file (detected: {mime_type})", file=sys.stderr)
+        return 1
+
+    try:
+        # Capture output to determine if we should render as markdown
+        llm_cmd = Command("llm")
+        cmd_args = ["--extract", "--at", str(image_path), mime_type]
+        if model:
+            cmd_args.extend(["-m", model])
+        cmd_args.append(prompt)
+        output = llm_cmd(*cmd_args)
+
+        if copy_to_clipboard:
+            pyperclip.copy(output)
+            print("Text copied to clipboard")
+        else:
+            # If output is to terminal and looks like markdown, render with rich
+            if sys.stdout.isatty() and _looks_like_markdown(output):
+                console = Console()
+                markdown = Markdown(output)
+                console.print(markdown)
+            else:
+                # Otherwise, just print normally
+                print(output, end='')
+
+        return 0
+    except sh.ErrorReturnCode as e:
+        print(f"Error running LLM command: {e}", file=sys.stderr)
+        return 1
+    except FileNotFoundError:
+        print("Error: 'llm' command not found. Please install it first.", file=sys.stderr)
+        return 1
+
+
+parser = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+parser.add_argument(
+    "image_file",
+    nargs="?",
+    help="Image file to extract text from (defaults to stdin if not provided)"
+)
+
+parser.add_argument(
+    "-l", "--layout",
+    action="store_true",
+    help="Preserve original layout as closely as possible"
+)
+
+parser.add_argument(
+    "-p", "--prompt",
+    help="Custom prompt to append to the default OCR prompt. This allows additional instructions that work alongside the base OCR functionality"
+)
+
+parser.add_argument(
+    "-c", "--copy",
+    action="store_true",
+    help="Copy text to clipboard"
+)
+
+parser.add_argument(
+    "-s", "--screenshot",
+    action="store_true",
+    help="Take a screenshot first using the screenshot script"
+)
+
+parser.add_argument(
+    "-m", "--model",
+    help="LLM model to use for OCR (e.g., gpt-4o, claude-3-5-sonnet-20241022)"
+)
+
+args = parser.parse_args()
+
+# Default to readable mode, layout if flag is set
+mode = "layout" if args.layout else "readable"
+
+# Handle screenshot option
+if args.screenshot:
+    if args.image_file:
+        print("Error: Cannot specify both --screenshot and image file", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        # Create screenshot command - assumes 'screenshot' is in PATH or bin directory
+        screenshot_cmd = Command("screenshot")
+
+        # Create temporary file for screenshot
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
+            temp_screenshot_path = Path(temp_file.name)
+
+        # Use filename mode to ensure screenshot is saved to file
+        screenshot_cmd("selection", str(temp_screenshot_path))
+
+        if not temp_screenshot_path.exists() or temp_screenshot_path.stat().st_size == 0:
+            print("Error: Screenshot was not created or is empty", file=sys.stderr)
+            sys.exit(1)
+
+        screenshot_path = temp_screenshot_path
+
+        # Process the screenshot
+        result = run_llm_ocr(screenshot_path, mode, args.prompt, args.copy, args.model)
+
+        # Clean up screenshot file
+        try:
+            screenshot_path.unlink()
+        except:
+            pass
+
+        sys.exit(result)
+
+    except Exception as e:
+        print(f"Error taking screenshot: {e}", file=sys.stderr)
+        sys.exit(1)
+
+# Handle stdin input
+if not args.image_file:
+    if sys.stdin.isatty():
+        print("Error: No image file specified and stdin is empty", file=sys.stderr)
+        sys.exit(1)
+
+    # Read from stdin and write to temporary file
+    try:
+        data = sys.stdin.buffer.read()
+        if not data:
+            print("Error: No data received from stdin", file=sys.stderr)
+            sys.exit(1)
+
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            temp_file.write(data)
+            temp_path = Path(temp_file.name)
+    except Exception as e:
+        print(f"Error reading from stdin: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        result = run_llm_ocr(temp_path, mode, args.prompt, args.copy, args.model)
+        sys.exit(result)
+    finally:
+        # Clean up temp file
+        try:
+            temp_path.unlink()
+        except:
+            pass
+
+# Handle file input
+
+image_path = Path(args.image_file)
+if not image_path.exists():
+    print(f"Error: File '{args.image_file}' not found", file=sys.stderr)
+    sys.exit(1)
+
+if not image_path.is_file():
+    print(f"Error: '{args.image_file}' is not a file", file=sys.stderr)
+    sys.exit(1)
+
+result = run_llm_ocr(image_path, mode, args.prompt, args.copy, args.model)
+sys.exit(result)

@@ -1,22 +1,26 @@
 #!/usr/bin/env -S uv run --script --quiet
+"""Extract timestamp ranges from timestamped content using LLM."""
 # /// script
-# dependencies = []
+# dependencies = [
+#   "sh",
+# ]
 # ///
 
+
 import sys
-import subprocess
+import argparse
+from sh import llm, ErrorReturnCode
 import json
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: timestamp-extract <prompt>", file=sys.stderr)
-        print("Reads timestamped content from stdin and extracts timestamp range for the given prompt", file=sys.stderr)
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('prompt', help='The topic to extract timestamp range for')
+    args = parser.parse_args()
     
-    prompt = ' '.join(sys.argv[1:])
     content = sys.stdin.read()
     
-    llm_prompt = f"""Extract the timestamp range when: {prompt}
+    llm_prompt = f"""Extract the timestamp range when: {args.prompt}
+
 
 Find where this topic is discussed and output a JSON object wrapped in a code block like:
 ```json
@@ -31,27 +35,22 @@ Rules:
 
 Content:
 {content}"""
-    
+
     # Run llm with --extract flag to extract first code block
-    result = subprocess.run(
-        ['sh', '-c', 'llm -x'],
-        input=llm_prompt,
-        capture_output=True,
-        text=True
-    )
-    
-    if result.returncode != 0:
-        print(f"Error running llm: {result.stderr}", file=sys.stderr)
+    try:
+        output = llm('-x', _in=llm_prompt)
+    except ErrorReturnCode as e:
+        print(f"Error running llm: {e.stderr.decode()}", file=sys.stderr)
         sys.exit(1)
-    
+
     # Parse and validate the JSON response
     try:
-        output = result.stdout.strip()
-        if not output:
+        output_str = str(output).strip()
+        if not output_str:
             print("Empty response from llm", file=sys.stderr)
             sys.exit(1)
-        
-        data = json.loads(output)
+
+        data = json.loads(output_str)
         if "error" in data:
             print(data["error"], file=sys.stderr)
             sys.exit(1)
@@ -59,11 +58,11 @@ Content:
             print(f"{data['start']} - {data['end']}")
         else:
             print("Invalid response format", file=sys.stderr)
-            print(f"Got: {output}", file=sys.stderr)
+            print(f"Got: {output_str}", file=sys.stderr)
             sys.exit(1)
     except json.JSONDecodeError as e:
         print(f"Failed to parse JSON: {e}", file=sys.stderr)
-        print(f"Raw output: {result.stdout}", file=sys.stderr)
+        print(f"Raw output: {output}", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":
