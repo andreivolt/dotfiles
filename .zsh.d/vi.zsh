@@ -1,14 +1,8 @@
 bindkey -v
+export KEYTIMEOUT=10
 
-export KEYTIMEOUT=1
-
-autoload -Uz edit-command-line; zle -N edit-command-line
-bindkey -M vicmd v edit-command-line
-
-bindkey -M vicmd 'H' run-help
-
-bindkey -M viins '\e[1;5C' forward-word
-bindkey -M viins '\e[1;5D' backward-word
+autoload -Uz edit-command-line
+zle -N edit-command-line
 
 autoload -Uz select-bracketed
 zle -N select-bracketed
@@ -35,16 +29,25 @@ bindkey -a ds delete-surround
 bindkey -a ys add-surround
 bindkey -M visual S add-surround
 
-# change cursor according to mode
 function zle-keymap-select zle-line-init zle-line-finish {
   case $KEYMAP in
-    vicmd) print -n '\033[1 q' ;; # block
-    viins|main) print -n '\033[6 q' ;; # line
+    vicmd) print -n '\033[1 q' ;;
+    viins|main) print -n '\033[6 q' ;;
   esac
 }
-zle -N zle-line-init; zle -N zle-line-finish; zle -N zle-keymap-select
+zle -N zle-line-init
+zle -N zle-line-finish
+zle -N zle-keymap-select
 
-# completion menu
+bindkey -M vicmd v edit-command-line
+bindkey -M vicmd 'H' run-help
+
+bindkey -M viins '\e[1;5C' forward-word
+bindkey -M viins '\e[1;5D' backward-word
+bindkey -M viins '^A' beginning-of-line
+bindkey -M viins '^E' end-of-line
+bindkey -M viins "${terminfo[kcbt]:-^[[Z}" reverse-menu-complete
+
 zmodload zsh/complist
 bindkey -M menuselect 'h' vi-backward-char
 bindkey -M menuselect 'j' vi-down-line-or-history
@@ -52,7 +55,6 @@ bindkey -M menuselect 'k' vi-up-line-or-history
 bindkey -M menuselect 'l' vi-forward-char
 bindkey -M menuselect 'i' accept-and-menu-complete
 bindkey -M menuselect 'u' undo
-# jump between categories of matches
 bindkey -M menuselect 'n' vi-forward-blank-word
 bindkey -M menuselect 'b' vi-backward-blank-word
 
