@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-
-(echo authenticate '"torpasswd"'; echo signal newnym; echo quit) | nc localhost 9051

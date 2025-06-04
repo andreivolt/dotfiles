@@ -1,0 +1,16 @@
+*.git
+.cache
+/.bundle/cache
+/.cargo/registry
+/.config/emacs/straight
+/.docker/buildx
+/.gitlibs
+/.local
+/.nix-defexpr
+/.nix-profile
+/.npm
+/.vscode
+/Google Drive/.Trash
+/Library
+/OrbStack
+/Pictures

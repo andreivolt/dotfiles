@@ -1,0 +1,81 @@
+#!/usr/bin/env -S uv run --script --quiet
+"""Play audio through BlackHole virtual audio device."""
+# /// script
+# dependencies = [
+#   "sh",
+# ]
+# ///
+
+
+import sys
+import json
+from sh import bunx, osascript, ffmpeg, mpv, ErrorReturnCode
+import argparse
+import re
+import time
+import atexit
+
+
+parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument("-m", "--monitor", action="store_true",
+                    help="Use BH-Monitor for output (speakers + BlackHole)")
+parser.add_argument("audiofile", nargs="?", help="Audio file to play")
+args = parser.parse_args()
+
+is_stdin = not sys.stdin.isatty() and not args.audiofile
+
+output_name = "BH-Monitor" if args.monitor else "BlackHole 2ch"
+
+original_output = bunx("macos-audio-devices", "output", "get", "--json")
+original_output_id = json.loads(str(original_output).strip())["id"]
+
+devices_output = bunx("macos-audio-devices", "list", "--json")
+devices = json.loads(str(devices_output).strip())
+
+output_device = next((d for d in devices if d["name"] == output_name), None)
+input_device = next((d for d in devices if d["name"] == "BlackHole 2ch"), None)
+
+if not output_device:
+    print(f"Output device '{output_name}' not found", file=sys.stderr)
+    sys.exit(1)
+
+if not input_device:
+    print("Input device 'BlackHole 2ch' not found", file=sys.stderr)
+    sys.exit(1)
+
+output_id = output_device["id"]
+input_id = input_device["id"]
+output_uid = output_device["uid"]
+
+atexit.register(lambda: bunx("macos-audio-devices", "output", "set", original_output_id))
+
+bunx("macos-audio-devices", "output", "set", output_id)
+bunx("macos-audio-devices", "input", "set", input_id)
+osascript("-e", "set volume input volume 100")
+
+try:
+    ffmpeg_output = ffmpeg("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:r=48000",
+                              "-t", "0.001", "-f", "audiotoolbox", "-list_devices", "true", "-",
+                              _err_to_out=True)
+except ErrorReturnCode:
+    ffmpeg_output = ""
+
+matches = re.findall(r'\[AudioToolbox.*?\] \[(\d+)\].*' + re.escape(output_name), str(ffmpeg_output))
+device_index = matches[0] if matches else None
+
+print(f"Using device: {output_name} with ffmpeg index: {device_index}", file=sys.stderr)
+
+if args.audiofile or is_stdin:
+    input_source = args.audiofile if args.audiofile else "-"
+    try:
+        mpv("--no-video", f"--audio-device=coreaudio/{output_uid}",
+            "--af=loudnorm=I=-14:TP=-1.5:LRA=11", input_source)
+    finally:
+        time.sleep(0.1)
+else:
+    print(f"Routing system audio through {output_name}. Press Ctrl+C to stop.", file=sys.stderr)
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass

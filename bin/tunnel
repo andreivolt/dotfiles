@@ -1,11 +1,19 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script --quiet
+"""Create SSH tunnels for port forwarding."""
+# /// script
+# dependencies = [
+#   "sh",
+# ]
+# ///
+
 
 import argparse
-import subprocess
+from sh import pgrep, ssh
 import time
 import random
 import sys
 import signal
+
 
 def create_tunnel(local_port, remote_port, username, remote_host, identity_file=None):
     random_port = random.randint(30000, 59999)
@@ -24,61 +32,54 @@ def create_tunnel(local_port, remote_port, username, remote_host, identity_file=
 
 def is_tunnel_running(random_port, local_port):
     try:
-        result = subprocess.run(
-            ["pgrep", "-f", f"ssh.*-R {random_port}:localhost:{local_port}"],
-            capture_output=True, text=True
-        )
-        return result.returncode == 0
-    except subprocess.SubprocessError:
+        pgrep("-f", f"ssh.*-R {random_port}:localhost:{local_port}")
+        return True
+    except sh.ErrorReturnCode:
         return False
 
-def main():
-    parser = argparse.ArgumentParser(description="Create a persistent reverse SSH tunnel")
-    parser.add_argument("-l", "--local-port", type=int, required=True,
-                        help="Local port to be forwarded")
-    parser.add_argument("-r", "--remote-port", type=int, required=True,
-                        help="Remote port on the server")
-    parser.add_argument("-u", "--username", required=True,
-                        help="Remote server username")
-    parser.add_argument("-H", "--remote-host", required=True,
-                        help="Remote server host")
-    parser.add_argument("-i", "--identity-file",
-                        help="SSH identity file")
+parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument("-l", "--local-port", type=int, required=True,
+                    help="Local port to be forwarded")
+parser.add_argument("-r", "--remote-port", type=int, required=True,
+                    help="Remote port on the server")
+parser.add_argument("-u", "--username", required=True,
+                    help="Remote server username")
+parser.add_argument("-H", "--remote-host", required=True,
+                    help="Remote server host")
+parser.add_argument("-i", "--identity-file",
+                    help="SSH identity file")
 
-    args = parser.parse_args()
+args = parser.parse_args()
 
-    ssh_cmd, random_port = create_tunnel(
-        args.local_port, args.remote_port, args.username,
-        args.remote_host, args.identity_file
-    )
+ssh_cmd, random_port = create_tunnel(
+    args.local_port, args.remote_port, args.username,
+    args.remote_host, args.identity_file
+)
 
-    print(f"Starting tunnel: {' '.join(ssh_cmd)}")
+print(f"Starting tunnel: {' '.join(ssh_cmd)}")
 
-    def signal_handler(sig, frame):
-        print("\nShutting down tunnel...")
-        sys.exit(0)
+def signal_handler(sig, frame):
+    print("\nShutting down tunnel...")
+    sys.exit(0)
 
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
-    process = None
+process = None
 
-    try:
-        while True:
-            if process is None or not is_tunnel_running(random_port, args.local_port):
-                if process:
-                    print("SSH tunnel disconnected. Restarting...")
-                    process.terminate()
+try:
+    while True:
+        if process is None or not is_tunnel_running(random_port, args.local_port):
+            if process:
+                print("SSH tunnel disconnected. Restarting...")
+                process.terminate()
 
-                process = subprocess.Popen(ssh_cmd)
-                time.sleep(5)
+            process = ssh(*ssh_cmd[1:], _bg=True)
+            time.sleep(5)
 
-            time.sleep(60)
+        time.sleep(60)
 
-    except KeyboardInterrupt:
-        if process:
-            process.terminate()
-        print("\nTunnel stopped.")
-
-if __name__ == "__main__":
-    main()
+except KeyboardInterrupt:
+    if process:
+        process.terminate()
+    print("\nTunnel stopped.")

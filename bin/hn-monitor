@@ -1,81 +1,76 @@
-#!/usr/bin/env -S uv run --script
+#!/usr/bin/env -S uv run --script --quiet
+"""Monitor Hacker News for specific keywords and send notifications."""
 # /// script
 # requires-python = ">=3.9"
 # dependencies = [
-#   "requests",
 #   "beautifulsoup4",
 #   "platformdirs",
 #   "pyyaml",
+#   "requests",
+#   "sh",
 # ]
 # ///
+
 
 import os
 import sys
 import yaml
 import time
 import getpass
-import subprocess
 import requests
 import argparse
 from pathlib import Path
 from datetime import datetime
 from bs4 import BeautifulSoup
 from platformdirs import user_config_dir, user_state_dir
+from sh import terminal_notifier, pushover_cli
 
 def send_notification(title, message, url):
     """Send a notification using terminal-notifier and pushover-cli with the given parameters."""
     # Send terminal notification
-    subprocess.run([
-        'terminal-notifier',
+    terminal_notifier(
         '-title', title,
         '-message', message,
         '-open', url
-    ])
-    
+    )
+
     # Send pushover notification
-    subprocess.run([
-        'pushover-cli', 'push',
-        '-t', title, 
+    pushover_cli(
+        'push',
+        '-t', title,
         f"{message}\n{url}"
-    ])
+    )
 
 def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description='Monitor HackerNews for updates to your posts and comments',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog='''
-Configuration:
-  Config file: ~/.config/hn-monitor/config.yml
-  Cache file:  ~/.local/state/hn-monitor/cache.yml
-        '''
-    )
-    
+    """Configure monitoring options."""
+    parser = argparse.ArgumentParser(description='Monitor HackerNews for updates to your posts and comments',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
     parser.add_argument(
         '--interval', '-i',
         type=int,
         default=None,
-        help='Check interval in seconds (default: from config or 30)'
+        help='Check interval in seconds'
     )
-    
+
     parser.add_argument(
         '--once',
         action='store_true',
         help='Run once and exit (no continuous monitoring)'
     )
-    
+
     parser.add_argument(
         '--reset-config',
         action='store_true',
         help='Reset configuration and re-enter credentials'
     )
-    
+
     parser.add_argument(
         '--verbose', '-v',
         action='store_true',
         help='Verbose output'
     )
-    
+
     return parser.parse_args()
 
 # Parse command line arguments
@@ -445,9 +440,10 @@ else:
 
 while True:
     time.sleep(config['interval'])
-    
+
     if args.verbose:
         print(f"Checking at {datetime.now().strftime('%H:%M:%S')}")
-    
+
     # Run the check function
+
     check_hn()

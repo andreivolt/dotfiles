@@ -1,0 +1,286 @@
+#!/usr/bin/env -S uv run --script --quiet
+"""Render tree-structured data in terminal."""
+# /// script
+# dependencies = [
+#   "rich>=13.0",
+# ]
+# ///
+
+
+import json
+import sys
+import hashlib
+import shutil
+import io
+import argparse
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.text import Text
+from rich.color import Color
+
+def get_author_color(author):
+    """Get a consistent background color with high contrast for white text"""
+    # Return empty string if not outputting to terminal
+    if not sys.stdout.isatty():
+        return ""
+
+    # Dark saturated colors that provide good contrast with white text
+    colors = [
+        Color.from_rgb(139, 0, 0),    # Dark red
+        Color.from_rgb(0, 100, 0),    # Dark green
+        Color.from_rgb(0, 0, 139),    # Dark blue
+        Color.from_rgb(128, 0, 128),  # Purple
+        Color.from_rgb(255, 140, 0),  # Dark orange
+        Color.from_rgb(220, 20, 60),  # Crimson
+        Color.from_rgb(25, 25, 112),  # Midnight blue
+        Color.from_rgb(128, 128, 0),  # Olive
+        Color.from_rgb(75, 0, 130),   # Indigo
+        Color.from_rgb(0, 128, 128),  # Teal
+        Color.from_rgb(165, 42, 42),  # Brown
+        Color.from_rgb(72, 61, 139),  # Dark slate blue
+    ]
+    # Use hash of author name to get consistent color
+    author_hash = int(hashlib.md5(author.encode()).hexdigest(), 16)
+    color = colors[author_hash % len(colors)]
+    rgb = color.get_truecolor()
+    return f"\033[48;2;{rgb.red};{rgb.green};{rgb.blue}m"
+
+def render_markdown(text, width):
+    """Render markdown using rich and return plain text with ANSI codes"""
+    # Disable colors if not outputting to terminal
+    force_terminal = sys.stdout.isatty()
+    console = Console(width=width, file=io.StringIO(), force_terminal=force_terminal)
+    md = Markdown(text)
+    console.print(md, end="")
+    return console.file.getvalue()
+
+def print_comment_tree(comments, field_map):
+    """Print a tree structure of nested comments with proper indentation and spacing."""
+
+    def get_field(comment, field_type):
+        """Get field value using field mapping."""
+        field_name = field_map.get(field_type, field_type)
+        return comment.get(field_name, '')
+
+    def print_comment(comment, prefix="", is_last=True, is_root=False):
+        # Check if this starts a back-and-forth conversation to flatten
+        conversation = []
+        current = comment
+        remaining_children = []
+
+        # Collect linear conversation chain
+        while current:
+            conversation.append({
+                'author': get_field(current, 'author') or '[deleted]',
+                'time': get_field(current, 'timestamp'),
+                'text': get_field(current, 'content')
+            })
+
+            children = get_field(current, 'replies') or current.get('children', [])
+            if not children:
+                break
+            elif len(children) == 1:
+                child = children[0]
+                # Continue if different author for back-and-forth
+                if (get_field(child, 'author') or '[deleted]') != (get_field(current, 'author') or '[deleted]'):
+                    current = child
+                else:
+                    # Same author child - stop conversation here
+                    remaining_children = children
+                    break
+            else:
+                # Multiple children - check if they're all from same author
+                authors = set((get_field(child, 'author') or '[deleted]') for child in children)
+                if len(authors) == 1:
+                    # All children same author
+                    next_author = list(authors)[0]
+                    if next_author != (get_field(current, 'author') or '[deleted]'):
+                        # Different author, merge all children into one and continue
+                        merged_child = children[0].copy()
+                        texts = []
+                        all_grandchildren = []
+                        for child in children:
+                            child_text = get_field(child, 'content')
+                            if child_text:
+                                texts.append(child_text)
+                            child_children = get_field(child, 'replies') or child.get('children', [])
+                            all_grandchildren.extend(child_children)
+                        merged_child[field_map.get('content', 'content')] = '\n\n'.join(texts)
+                        merged_child[field_map.get('replies', 'children')] = all_grandchildren
+                        current = merged_child
+                    else:
+                        # Same author children - stop conversation
+                        remaining_children = children
+                        break
+                else:
+                    # Multiple different authors - stop conversation here
+                    remaining_children = children
+                    break
+
+        # Check if this is actually a back-and-forth conversation (alternating authors)
+        is_alternating = True
+        if len(conversation) >= 3:
+            for i in range(1, len(conversation)):
+                if conversation[i]['author'] == conversation[i-1]['author']:
+                    is_alternating = False
+                    break
+
+        # If we have a meaningful alternating conversation (3+ exchanges), flatten it
+        if len(conversation) >= 3 and is_alternating:
+            # Print the first author's info with bright background
+            author_color = get_author_color(get_field(comment, 'author') or '[deleted]')
+            reset = "\033[0m" if sys.stdout.isatty() else ""
+            name = f"{author_color}{get_field(comment, 'author') or '[deleted]'}{reset} ({get_field(comment, 'timestamp')})"
+            if is_root:
+                print(f"{name}")
+            else:
+                symbol = "└── " if is_last else "├── "
+                print(f"{prefix}{symbol}{name}")
+
+            # Print the flattened conversation
+            terminal_width = shutil.get_terminal_size().columns
+            if is_root:
+                text_prefix = ""
+            else:
+                text_prefix = prefix + ("    " if is_last else "│   ")
+            available_width = max(40, terminal_width - len(text_prefix))
+
+            for i, msg in enumerate(conversation):
+                if msg['text']:
+                    # Add author label with bright background
+                    if i > 0:
+                        author_color = get_author_color(msg['author'])
+                        reset = "\033[0m" if sys.stdout.isatty() else ""
+                        print(f"{text_prefix}{author_color}{msg['author']}{reset} ({msg['time']})")
+
+                    rendered_text = render_markdown(msg['text'], available_width)
+
+                    lines = rendered_text.rstrip().split('\n')
+                    for line in lines:
+                        if line.strip():
+                            print(f"{text_prefix}{line}")
+
+                    # Add newline after each comment
+                    if rendered_text.strip():
+                        print(f"{text_prefix}")
+
+            # Use the remaining children we collected
+        else:
+            # Normal single comment rendering with bright background
+            author_color = get_author_color(get_field(comment, 'author') or '[deleted]')
+            reset = "\033[0m" if sys.stdout.isatty() else ""
+            name = f"{author_color}{get_field(comment, 'author') or '[deleted]'}{reset} ({get_field(comment, 'timestamp')})"
+            if is_root:
+                print(f"{name}")
+            else:
+                symbol = "└── " if is_last else "├── "
+                print(f"{prefix}{symbol}{name}")
+
+            comment_text = get_field(comment, 'content')
+            if comment_text:
+                terminal_width = shutil.get_terminal_size().columns
+                if is_root:
+                    text_prefix = ""
+                else:
+                    text_prefix = prefix + ("    " if is_last else "│   ")
+                available_width = max(40, terminal_width - len(text_prefix))
+
+                rendered_text = render_markdown(comment_text, available_width)
+
+                lines = rendered_text.rstrip().split('\n')
+                for line in lines:
+                    if line.strip():
+                        print(f"{text_prefix}{line}")
+
+                # Add newline after each comment
+                if rendered_text.strip():
+                    print(f"{text_prefix}")
+
+            remaining_children = get_field(comment, 'replies') or comment.get('children', [])
+
+        # Print remaining children
+        if remaining_children:
+            for i, child in enumerate(remaining_children):
+                if is_root:
+                    child_prefix = ""
+                else:
+                    child_prefix = prefix + ("    " if is_last else "│   ")
+                child_is_last = (i == len(remaining_children) - 1)
+                print_comment(child, child_prefix, child_is_last)
+
+    for i, comment in enumerate(comments):
+        is_last = (i == len(comments) - 1)
+        print_comment(comment, "", is_last, True)
+
+def render_comment_tree(data, field_map, header_key=None):
+    """Render comment tree using field mapping."""
+    console = Console()
+
+    # Handle header if present
+    if header_key and header_key in data and data[header_key]:
+        story = data[header_key]
+        console.print(f"[bold]{story.get('title', 'No title')}[/bold]")
+        if story.get('url'):
+            console.print(f"[dim]{story['url']}[/dim]")
+        points = story.get('points', 0)
+        user = story.get('user', 'unknown')
+        console.print(f"[yellow]{points} points[/yellow] [dim]by {user}[/dim]")
+        console.print()
+
+    # Get comments from data
+    comments = data.get('comments', data) if isinstance(data, dict) else data
+    
+    # If data is a list, treat it as comments directly
+    if isinstance(comments, list):
+        comment_list = comments
+    else:
+        comment_list = []
+    
+    if not comment_list:
+        console.print("[dim]No comments[/dim]")
+        return
+
+    print_comment_tree(comment_list, field_map)
+
+def main():
+    """Read JSON from stdin and render as tree."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--author', default='user', help='Field name for comment author')
+    parser.add_argument('--timestamp', default='timeAgo', help='Field name for comment timestamp')
+    parser.add_argument('--content', default='text', help='Field name for comment content')
+    parser.add_argument('--replies', default='children', help='Field name for comment replies')
+    parser.add_argument('--header', help='Field name for header/story data')
+    
+    args = parser.parse_args()
+    
+    # Build field mapping from CLI args
+    field_map = {
+        'author': args.author,
+        'timestamp': args.timestamp,
+        'content': args.content,
+        'replies': args.replies
+    }
+    
+    try:
+        # Read JSON from stdin
+        input_data = sys.stdin.read()
+        if not input_data.strip():
+            print("Error: No input provided", file=sys.stderr)
+            sys.exit(1)
+
+        data = json.loads(input_data)
+
+        # Render the tree
+        render_comment_tree(data, field_map, args.header)
+
+    except json.JSONDecodeError as e:
+        print(f"Error: Invalid JSON - {e}", file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(0)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

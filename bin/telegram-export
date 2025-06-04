@@ -1,10 +1,13 @@
-#!/usr/bin/env uv run -qs
+#!/usr/bin/env -S uv run --script --quiet
+"""Export Telegram chat messages and media."""
 # /// script
 # dependencies = [
-#   "telethon~=1.40",  # Telegram client library - using ~= for compatible releases
-#   "platformdirs",    # Platform-specific directory paths
+#   "platformdirs",
+#   "telethon~=1.40",
 # ]
 # ///
+
+
 import os
 import json
 import argparse
@@ -368,143 +371,137 @@ def fetch_messages(api_id, api_hash, channel_input, num_messages=None, format_ty
     with client:
         client.loop.run_until_complete(main())
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Telegram conversation and message export tool"
-    )
+# Parse arguments
+parser = argparse.ArgumentParser(description="Telegram conversation and message export tool"
+, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    commands = parser.add_subparsers(dest="command", help="Command to execute")
+commands = parser.add_subparsers(dest="command", help="Command to execute")
 
-    # Add usage examples to help text
-    # No examples in epilog
-    parser.epilog = ""
-    parser.formatter_class = argparse.RawDescriptionHelpFormatter
+# Add usage examples to help text
 
-    # List command
-    list_cmd = commands.add_parser("list", help="List all available conversations")
-    list_cmd.add_argument(
-        "--json", "-j",
-        action="store_true",
-        help="Output in JSON format"
-    )
+# List command
+list_cmd = commands.add_parser("list", help="List all available conversations")
+list_cmd.add_argument(
+    "--json", "-j",
+    action="store_true",
+    help="Output in JSON format"
+)
 
-    # Export command
-    export_cmd = commands.add_parser("export", help="Export messages from a conversation")
-    export_cmd.add_argument(
-        "identifier",
-        help="Chat ID or username to export messages from"
-    )
-    export_cmd.add_argument(
-        "--limit", "-l",
-        type=int,
-        default=None,
-        help="Number of recent messages to export (default: all)"
-    )
-    export_cmd.add_argument(
-        "--format", "-f",
-        choices=["text", "json", "markdown"],
-        default="text",
-        help="Output format (default: text)"
-    )
-    export_cmd.add_argument(
-        "--reverse", "-r",
-        action="store_true",
-        help="Output in reverse chronological order (newest first). Enables streaming output."
-    )
-    export_cmd.add_argument(
-        "--search", "-s",
-        type=str,
-        help="Search for messages containing the specified text"
-    )
-    export_cmd.add_argument(
-        "--parallel", "-p",
-        type=int,
-        default=5,
-        help="Number of parallel fetching tasks (default: 5, higher values may improve speed but use more resources)"
-    )
-    export_cmd.add_argument(
-        "--from-date",
-        type=str,
-        help="Filter messages from this date (format: YYYY-MM-DD)"
-    )
-    export_cmd.add_argument(
-        "--to-date",
-        type=str,
-        help="Filter messages up to this date (format: YYYY-MM-DD)"
-    )
+# Export command
+export_cmd = commands.add_parser("export", help="Export messages from a conversation")
+export_cmd.add_argument(
+    "identifier",
+    help="Chat ID or username to export messages from"
+)
+export_cmd.add_argument(
+    "--limit", "-l",
+    type=int,
+    default=None,
+    help="Recent messages to export"
+)
+export_cmd.add_argument(
+    "--format", "-f",
+    choices=["text", "json", "markdown"],
+    default="text",
+    help="Output format"
+)
+export_cmd.add_argument(
+    "--reverse", "-r",
+    action="store_true",
+    help="Output in reverse chronological order (newest first). Enables streaming output."
+)
+export_cmd.add_argument(
+    "--search", "-s",
+    type=str,
+    help="Search for messages containing the specified text"
+)
+export_cmd.add_argument(
+    "--parallel", "-p",
+    type=int,
+    default=5,
+    help="Parallel fetching tasks"
+)
+export_cmd.add_argument(
+    "--from-date",
+    type=str,
+    help="Filter messages from this date (format: YYYY-MM-DD)"
+)
+export_cmd.add_argument(
+    "--to-date",
+    type=str,
+    help="Filter messages up to this date (format: YYYY-MM-DD)"
+)
 
-    # For backward compatibility
-    parser.add_argument(
-        "--list",
-        action="store_true",
-        help=argparse.SUPPRESS
-    )
-    parser.add_argument(
-        "--channel",
-        help=argparse.SUPPRESS
-    )
-    parser.add_argument(
-        "--num",
-        type=int,
-        default=None,
-        help=argparse.SUPPRESS
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help=argparse.SUPPRESS
-    )
+# For backward compatibility
+parser.add_argument(
+    "--list",
+    action="store_true",
+    help=argparse.SUPPRESS
+)
+parser.add_argument(
+    "--channel",
+    help=argparse.SUPPRESS
+)
+parser.add_argument(
+    "--num",
+    type=int,
+    default=None,
+    help=argparse.SUPPRESS
+)
+parser.add_argument(
+    "--json",
+    action="store_true",
+    help=argparse.SUPPRESS
+)
 
-    args = parser.parse_args()
+args = parser.parse_args()
 
-    API_ID = os.getenv('TELEGRAM_API_ID')
-    API_HASH = os.getenv('TELEGRAM_API_HASH')
-    if not API_ID or not API_HASH:
-        parser.error("Set TELEGRAM_API_ID and TELEGRAM_API_HASH environment variables.")
+API_ID = os.getenv('TELEGRAM_API_ID')
+API_HASH = os.getenv('TELEGRAM_API_HASH')
+if not API_ID or not API_HASH:
+    parser.error("Set TELEGRAM_API_ID and TELEGRAM_API_HASH environment variables.")
 
-    # Handle new command structure
-    if args.command == "list":
-        list_dialogs(API_ID, API_HASH, args.json)
-    elif args.command == "export":
+# Handle new command structure
+if args.command == "list":
+    list_dialogs(API_ID, API_HASH, args.json)
+elif args.command == "export":
+    try:
+        channel_input = int(args.identifier)
+    except ValueError:
+        channel_input = args.identifier
+
+    # Parse date strings to datetime objects if provided
+    from_date = None
+    to_date = None
+    if args.from_date:
         try:
-            channel_input = int(args.identifier)
+            from_date = datetime.strptime(args.from_date, "%Y-%m-%d")
         except ValueError:
-            channel_input = args.identifier
+            parser.error("Invalid from-date format. Use YYYY-MM-DD")
 
-        # Parse date strings to datetime objects if provided
-        from_date = None
-        to_date = None
-        if args.from_date:
-            try:
-                from_date = datetime.strptime(args.from_date, "%Y-%m-%d")
-            except ValueError:
-                parser.error("Invalid from-date format. Use YYYY-MM-DD")
-
-        if args.to_date:
-            try:
-                to_date = datetime.strptime(args.to_date, "%Y-%m-%d")
-                # Set time to end of day (23:59:59)
-                to_date = to_date.replace(hour=23, minute=59, second=59)
-            except ValueError:
-                parser.error("Invalid to-date format. Use YYYY-MM-DD")
-
-        fetch_messages(API_ID, API_HASH, channel_input, args.limit, args.format,
-                       reverse_order=args.reverse, search_query=args.search,
-                       parallel=args.parallel, from_date=from_date, to_date=to_date)
-
-    # Handle legacy arguments
-    elif args.list:
-        list_dialogs(API_ID, API_HASH, args.json)
-    elif args.channel:
+    if args.to_date:
         try:
-            channel_input = int(args.channel)
+            to_date = datetime.strptime(args.to_date, "%Y-%m-%d")
+            # Set time to end of day (23:59:59)
+            to_date = to_date.replace(hour=23, minute=59, second=59)
         except ValueError:
-            channel_input = args.channel
+            parser.error("Invalid to-date format. Use YYYY-MM-DD")
 
-        format_type = "json" if args.json else "text"
-        fetch_messages(API_ID, API_HASH, channel_input, args.num, format_type)
-    else:
-        parser.print_help()
+    fetch_messages(API_ID, API_HASH, channel_input, args.limit, args.format,
+                   reverse_order=args.reverse, search_query=args.search,
+                   parallel=args.parallel, from_date=from_date, to_date=to_date)
 
-if __name__ == "__main__":
-    main()
+# Handle legacy arguments
+
+elif args.list:
+    list_dialogs(API_ID, API_HASH, args.json)
+elif args.channel:
+    try:
+        channel_input = int(args.channel)
+    except ValueError:
+        channel_input = args.channel
+
+    format_type = "json" if args.json else "text"
+    fetch_messages(API_ID, API_HASH, channel_input, args.num, format_type)
+else:
+    parser.print_help()

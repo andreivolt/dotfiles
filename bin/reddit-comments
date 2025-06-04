@@ -1,9 +1,13 @@
-#!/usr/bin/env -S uv run --quiet --script
+#!/usr/bin/env -S uv run --script --quiet
 # /// script
 # dependencies = [
-#     "praw>=7.8",  # Reddit API wrapper
+#   "praw>=7.8",
+#   "rich>=13.0",
+#   "sh",
 # ]
 # ///
+
+"""Fetch and display Reddit comments in a formatted view."""
 
 import os
 import praw
@@ -14,9 +18,7 @@ from pathlib import Path
 from datetime import datetime
 import sys
 
-script_path = Path(sys.argv[0] if __file__ is None else __file__).resolve().parent
-
-def build_comment_tree(comment):
+def build_comment_tree_json(comment):
     comment_data = {
         'author': str(comment.author),
         'body': comment.body,
@@ -27,19 +29,44 @@ def build_comment_tree(comment):
 
     if hasattr(comment, 'replies'):
         for reply in comment.replies:
-            comment_data['replies'].append(build_comment_tree(reply))
+            comment_data['replies'].append(build_comment_tree_json(reply))
 
     return comment_data
 
-def print_comment_tree(comment, level=0, is_last=False):
-    prefix = "  " * level
-    connector = '└─' if is_last else '├─'
-    timestamp_iso = datetime.fromtimestamp(comment.created_utc).isoformat()
-    print(f"{prefix}{connector} {comment.author} ({timestamp_iso}) [Score: {comment.score}]: {comment.body}")
-    if hasattr(comment, 'replies'):
-        replies = list(comment.replies)
-        for i, reply in enumerate(replies):
-            print_comment_tree(reply, level + 1, i == len(replies) - 1)
+def reddit_to_tree_format(comment):
+    """Convert Reddit comment to tree format expected by comment_tree library"""
+    # Skip deleted, removed, or empty comments
+    try:
+        if (not comment or
+            not hasattr(comment, 'author') or
+            not comment.author or
+            str(comment.author) in ['[deleted]', 'None'] or
+            not hasattr(comment, 'body') or
+            not comment.body or
+            comment.body.strip() in ['[deleted]', '[removed]', ''] or
+            not hasattr(comment, 'id') or
+            not comment.id):
+            return None
+    except:
+        return None
+
+    timestamp = datetime.fromtimestamp(comment.created_utc).strftime('%Y-%m-%d %H:%M')
+
+    comment_data = {
+        'id': comment.id,
+        'author': str(comment.author),
+        'time': timestamp,
+        'text': comment.body.strip(),
+        'children': []
+    }
+
+    if hasattr(comment, 'replies') and comment.replies:
+        for reply in comment.replies:
+            converted_reply = reddit_to_tree_format(reply)
+            if converted_reply:  # Only add non-None replies
+                comment_data['children'].append(converted_reply)
+
+    return comment_data
 
 def get_submission_and_comment_id_from_url(url):
     parsed_url = urlparse(url)
@@ -51,41 +78,43 @@ def get_submission_and_comment_id_from_url(url):
             return submission_id, comment_id
     return None, None
 
-def main():
-    parser = argparse.ArgumentParser(description='Process a Reddit submission or comment URL.')
-    parser.add_argument('url', help='The Reddit submission or comment URL')
-    parser.add_argument('--json', action='store_true', help='Output the comment tree in JSON format')
-    args = parser.parse_args()
+# Parse arguments
+parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument('url', help='The Reddit submission or comment URL')
+parser.add_argument('--json', action='store_true', help='Output the comment tree in JSON format')
+args = parser.parse_args()
 
-    submission_id, comment_id = get_submission_and_comment_id_from_url(args.url)
-    if not submission_id:
-        print("Invalid submission or comment URL.")
-        return
+submission_id, comment_id = get_submission_and_comment_id_from_url(args.url)
+if not submission_id:
+    print("Invalid submission or comment URL.")
+    sys.exit(1)
 
-    reddit = praw.Reddit(
-        client_id=os.getenv('REDDIT_CLIENT_ID'),
-        client_secret=os.getenv('REDDIT_CLIENT_SECRET'),
-        user_agent='_',
-        username=os.getenv('REDDIT_USERNAME'),
-        password=os.getenv('REDDIT_PASSWORD')
-    )
+reddit = praw.Reddit(
+    client_id=os.getenv('REDDIT_CLIENT_ID'),
+    client_secret=os.getenv('REDDIT_CLIENT_SECRET'),
+    user_agent='_',
+    username=os.getenv('REDDIT_USERNAME'),
+    password=os.getenv('REDDIT_PASSWORD')
+)
 
-    submission = reddit.submission(id=submission_id)
-    submission.comments.replace_more(limit=None)
+submission = reddit.submission(id=submission_id)
+submission.comments.replace_more(limit=None)
 
-    if comment_id:
-        comment = reddit.comment(id=comment_id)
-        comment.refresh()
-        comments = [comment]
-    else:
-        comments = submission.comments
+if comment_id:
+    comment = reddit.comment(id=comment_id)
+    comment.refresh()
+    comments = [comment]
+else:
+    comments = submission.comments
 
-    if args.json:
-        comment_tree = [build_comment_tree(comment) for comment in comments]
-        print(json.dumps(comment_tree))
-    else:
-        for comment in comments:
-            print_comment_tree(comment)
-
-if __name__ == "__main__":
-    main()
+if args.json:
+    comment_tree = [build_comment_tree_json(comment) for comment in comments]
+    print(json.dumps(comment_tree))
+else:
+    tree_comments = [reddit_to_tree_format(comment) for comment in comments]
+    # Filter out None values from deleted/removed comments
+    tree_comments = [comment for comment in tree_comments if comment is not None]
+    
+    # Use tree-render via sh
+    import sh
+    print(sh.Command('tree-render')('--author=author', '--timestamp=time', '--content=text', '--replies=children', _in=json.dumps(tree_comments)), end='')

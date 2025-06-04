@@ -1,0 +1,195 @@
+#!/usr/bin/env -S uv run --script --quiet
+"""Text translation using AI models."""
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "click",
+#   "pysbd",
+#   "sh",
+#   "tiktoken",
+# ]
+# ///
+
+
+import sys
+from typing import List, Tuple
+import click
+import pysbd
+import tiktoken
+from sh import Command, ErrorReturnCode
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+
+class TextChunker:
+    def __init__(self, max_tokens: int = 2000, model: str = "gpt-4", lang: str = "en"):
+        """Initialize text chunker with token limits for translation."""
+        self.max_tokens = max_tokens
+        self.segmenter = pysbd.Segmenter(language=lang, clean=False)
+
+        try:
+            # Try to get encoder for the specific model
+            self.encoder = tiktoken.encoding_for_model(model)
+        except:
+            # Fallback to cl100k_base (used by GPT-4)
+            self.encoder = tiktoken.get_encoding("cl100k_base")
+
+    def count_tokens(self, text: str) -> int:
+        """Count tokens in text."""
+        return len(self.encoder.encode(text))
+
+    def chunk_by_sentences(self, text: str) -> List[str]:
+        """Chunk text by sentences while respecting token limits."""
+        # Split into sentences using pysbd
+        sentences = self.segmenter.segment(text)
+
+        chunks = []
+        current_chunk = []
+        current_tokens = 0
+
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+
+            sentence_tokens = self.count_tokens(sentence)
+
+            # If single sentence exceeds limit, add it as its own chunk
+            if sentence_tokens > self.max_tokens:
+                if current_chunk:
+                    chunks.append(' '.join(current_chunk))
+                    current_chunk = []
+                    current_tokens = 0
+                chunks.append(sentence)
+            # If adding sentence would exceed limit, start new chunk
+            elif current_tokens + sentence_tokens > self.max_tokens:
+                if current_chunk:
+                    chunks.append(' '.join(current_chunk))
+                current_chunk = [sentence]
+                current_tokens = sentence_tokens
+            # Otherwise add to current chunk
+            else:
+                current_chunk.append(sentence)
+                current_tokens += sentence_tokens
+
+        # Add remaining sentences
+        if current_chunk:
+            chunks.append(' '.join(current_chunk))
+
+        return chunks
+
+def translate_chunk(chunk: str, target_lang: str, model: str, llm_command: str, chunk_id: int, custom_prompt: str = None) -> Tuple[int, str]:
+    """Translate a single chunk using LLM CLI."""
+    base_prompt = f"Translate the following text to {target_lang}."
+    if custom_prompt:
+        base_prompt += f"\n\n{custom_prompt}"
+
+    prompt = f"""{base_prompt}
+Only output the translation, no explanations or comments.
+
+Text to translate:
+{chunk}"""
+
+    try:
+        # Create command object
+        llm = Command(llm_command)
+
+        # Run the command with arguments
+        result = llm("-m", model, prompt)
+
+        return chunk_id, result.strip()
+    except ErrorReturnCode as e:
+        return chunk_id, f"[ERROR translating chunk {chunk_id}: {e.stderr.decode() if e.stderr else str(e)}]"
+    except Exception as e:
+        return chunk_id, f"[ERROR translating chunk {chunk_id}: {str(e)}]"
+
+def parallel_translate(chunks: List[str], target_lang: str, model: str,
+                      llm_command: str, custom_prompt: str = None) -> List[str]:
+    """Translate chunks in parallel with limited concurrency."""
+    results = []
+
+    # Use ThreadPoolExecutor for parallel execution
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        # Submit all translation tasks
+        future_to_chunk = {
+            executor.submit(translate_chunk, chunk, target_lang, model, llm_command, i, custom_prompt): i
+            for i, chunk in enumerate(chunks)
+        }
+
+        # Collect results as they complete
+        for future in as_completed(future_to_chunk):
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as exc:
+                chunk_id = future_to_chunk[future]
+                results.append((chunk_id, f"[ERROR translating chunk {chunk_id}: {str(exc)}]"))
+
+    # Sort results by chunk ID to maintain order
+    results.sort(key=lambda x: x[0])
+
+    return [result[1] for result in results]
+
+@click.command()
+@click.option('--target-lang', '-t', required=True, help='Target language for translation')
+@click.option('--model', '-m', default='gpt-4o', help='Model to use')
+@click.option('--max-tokens', default=2000, help='Max tokens per chunk')
+@click.option('--llm-command', '-c', default='llm', help='LLM CLI command')
+@click.option('--verbose', '-v', is_flag=True, help='Verbose output')
+@click.option('--lang', '-l', default='en', help='Source language (en, es, fr, de, it, nl, pl, ru, ar, fa, ur, hi, zh, ja)')
+@click.option('--prompt', '-p', help='Additional context or adjustments for translation')
+def main(target_lang: str, model: str, max_tokens: int,
+         llm_command: str, verbose: bool, lang: str, prompt: str):
+    """
+    Translate text from stdin using parallel LLM calls.
+
+    Reads text from stdin, chunks it by sentences respecting token limits,
+    and translates in parallel using the specified LLM CLI tool.
+
+    Example:
+        cat document.txt | ./translate.py -t Spanish -m gpt-4o -p 10
+
+        # For French source text:
+        cat french.txt | ./translate.py -t English -l fr
+
+        # Using Gemini with larger chunks:
+        cat document.txt | ./translate.py -t German -m gemini-2.0-flash --max-tokens 20000
+    """
+    # Read from stdin
+    text = sys.stdin.read()
+
+    if not text.strip():
+        click.echo("Error: No input text provided", err=True)
+        sys.exit(1)
+
+    # Initialize chunker
+    chunker = TextChunker(max_tokens=max_tokens, model=model, lang=lang)
+
+    # Chunk the text
+    if verbose:
+        click.echo(f"Chunking text with max {max_tokens} tokens per chunk...", err=True)
+        click.echo(f"Source language: {lang}", err=True)
+
+    chunks = chunker.chunk_by_sentences(text)
+
+    if verbose:
+        click.echo(f"Created {len(chunks)} chunks", err=True)
+        for i, chunk in enumerate(chunks):
+            tokens = chunker.count_tokens(chunk)
+            click.echo(f"  Chunk {i+1}: {tokens} tokens", err=True)
+
+    # Translate chunks in parallel
+    if verbose:
+        click.echo(f"\nTranslating to {target_lang} using {model}...", err=True)
+        click.echo(f"Max parallel requests: 5", err=True)
+
+    # Run parallel translation
+    translations = parallel_translate(chunks, target_lang, model, llm_command, prompt)
+
+    # Output translated text
+    output = '\n\n'.join(translations)
+    click.echo(output)
+
+    if verbose:
+        click.echo(f"\nTranslation complete!", err=True)
+
+main()

@@ -22,15 +22,22 @@ vim.filetype.add({
           ["python"] = "python",
           ["ruby"] = "ruby",
           ["perl"] = "perl",
+          ["bb"] = "clojure",
         }
-        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, 2, false)
-        local secondLine = lines[2] or ""
-        local nix_interp = secondLine:match("^#!.*nix%-shell%s+%-i%s+(%S+)")
-        if nix_interp then
-          return interpreter_to_filetype[nix_interp] or nix_interp
-        end
-        if secondLine:match("^#!.*nix%-shell") then
-          return "bash"
+        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, 10, false)
+        local first_line = lines[1] or ""
+        if first_line:match("cached%-nix%-shell") or first_line:match("^#!/.*nix%-shell") then
+          for _, line in ipairs(lines) do
+            local nix_interp = line:match("^#!%s*.*nix%-shell.*%-i%s+(%S+)")
+            if nix_interp then
+              return interpreter_to_filetype[nix_interp] or nix_interp
+            end
+          end
+          for _, line in ipairs(lines) do
+            if line:match("^#!%s*.*nix%-shell") then
+              return "bash"
+            end
+          end
         end
         local shebang = lines[1]:match("^#!(.*)")
         if shebang then

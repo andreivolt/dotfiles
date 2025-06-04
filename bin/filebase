@@ -1,0 +1,81 @@
+#!/usr/bin/env -S uv run --script --quiet
+"""Upload files to Filebase storage service."""
+# /// script
+# dependencies = [
+#   "boto3~=1.38.0",
+#   "pyperclip",
+# ]
+# ///
+
+
+import argparse
+import boto3
+import mimetypes
+import os
+import secrets
+import pyperclip
+import sys
+from pathlib import Path
+
+parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument('file', nargs='?', help='File to upload')
+parser.add_argument('-c', '--copy', action='store_true', help='Copy URL to clipboard (macOS only)')
+
+args = parser.parse_args()
+
+# Initialize S3 client with filebase profile
+session = boto3.Session(profile_name='filebase')
+s3 = session.client('s3')
+bucket = 'andreiv'
+
+if args.file:
+    file_path = Path(args.file)
+    file_name = file_path.name
+    content = file_path.read_bytes()
+
+    # Get MIME type
+    content_type, _ = mimetypes.guess_type(str(file_path))
+    if not content_type:
+        content_type = 'application/octet-stream'
+else:
+    content = sys.stdin.buffer.read()
+
+    # For stdin, try to detect common formats or default to text
+    if content.startswith(b'%PDF'):
+        content_type = 'application/pdf'
+        ext = 'pdf'
+    elif content.startswith(b'\x89PNG'):
+        content_type = 'image/png'
+        ext = 'png'
+    elif content.startswith(b'\xff\xd8\xff'):
+        content_type = 'image/jpeg'
+        ext = 'jpg'
+    elif content.startswith(b'{') or content.startswith(b'['):
+        content_type = 'application/json'
+        ext = 'json'
+    else:
+        content_type = 'text/plain'
+        ext = 'txt'
+
+    file_name = f"{secrets.token_hex(8)}.{ext}"
+
+# Upload to S3
+s3.put_object(
+    Bucket=bucket,
+    Key=file_name,
+    Body=content,
+    ContentType=content_type,
+    Metadata={'Content-Type': content_type}
+)
+
+# Get CID from metadata
+
+head_response = s3.head_object(Bucket=bucket, Key=file_name)
+cid = head_response['Metadata']['cid']
+ipfs_url = f"https://ipfs.filebase.io/ipfs/{cid}"
+
+if args.copy:
+    pyperclip.copy(ipfs_url)
+    print("URL copied to clipboard")
+else:
+    print(ipfs_url)
