@@ -1,6 +1,6 @@
 case "$(uname)" in
     Darwin)
-        command pngpaste -
+        exec "$(which -a pngpaste | grep -v "^$(realpath "$0")$" | head -1)" -
         ;;
     Linux)
         if [[ "$XDG_SESSION_TYPE" == "wayland" ]]; then

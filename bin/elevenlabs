@@ -1,6 +1,8 @@
 #!/usr/bin/env -S uv run --script --quiet
 # /// script
-# dependencies = ["elevenlabs"]
+# dependencies = [
+#     "elevenlabs~=2.1",  # TTS API client
+# ]
 # ///
 import argparse
 import os
@@ -9,7 +11,7 @@ from elevenlabs import ElevenLabs, VoiceSettings, stream
 
 parser = argparse.ArgumentParser(description='Convert text to speech using ElevenLabs API')
 parser.add_argument('text', nargs='*', help='Text to convert (reads from stdin if not provided)')
-parser.add_argument('-v', '--voice', default='GqzvpFS0pRUCKubI6ty9', help='Voice ID or name')
+parser.add_argument('-v', '--voice', default='EXAVITQu4vr4xnSDxMaL', help='Voice ID or name')
 parser.add_argument('-m', '--model', default='eleven_multilingual_v2', help='Model to use (eleven_multilingual_v2 recommended for non-English)')
 parser.add_argument('-l', '--language', default=None, help='Language code - ONLY works with eleven_turbo_v2_5 and eleven_flash_v2_5 models')
 parser.add_argument('-s', '--stability', type=float, default=0.3, help='Voice stability (0.0-1.0)')

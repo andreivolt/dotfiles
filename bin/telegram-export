@@ -1,4 +1,10 @@
-#!/usr/bin/env uv run -qs --with telethon,platformdirs
+#!/usr/bin/env uv run -qs
+# /// script
+# dependencies = [
+#   "telethon~=1.40",  # Telegram client library - using ~= for compatible releases
+#   "platformdirs",    # Platform-specific directory paths
+# ]
+# ///
 import os
 import json
 import argparse

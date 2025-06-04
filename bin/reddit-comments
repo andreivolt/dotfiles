@@ -1,4 +1,9 @@
-#!/usr/bin/env -S uv run --with praw --quiet --script
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# dependencies = [
+#     "praw>=7.8",  # Reddit API wrapper
+# ]
+# ///
 
 import os
 import praw

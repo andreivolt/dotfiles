@@ -1,0 +1,72 @@
+#!/usr/bin/env clojure
+;; Lists all public symbols recursively in a Clojure library
+
+(require '[clojure.string :as str]
+         '[clojure.java.classpath :as cp]
+         '[clojure.tools.namespace.find :as find]
+         '[clojure.tools.cli :as cli])
+
+(def cli-options
+  [["-h" "--help" "Show help"]])
+
+(defn usage []
+  (->> ["Lists all public symbols recursively in a Clojure library"
+        ""
+        "Usage: clj-ns-symbols <library-name>"
+        ""
+        "Examples:"
+        "  clj-ns-symbols clojure.string"
+        "  clj-ns-symbols org.httpkit"
+        "  clj-ns-symbols cheshire"]
+       (str/join \newline)))
+
+(let [parsed (cli/parse-opts *command-line-args* cli-options)
+      {:keys [options arguments]} parsed]
+  
+  (cond
+    (:help options) (do (println (usage)) (System/exit 0))
+    (empty? arguments) (do (println (usage)) (System/exit 1)))
+  
+  (let [lib-arg (first arguments)
+        lib-prefix (if (str/includes? lib-arg "/")
+                     (str/replace lib-arg "/" ".")
+                     lib-arg)]
+
+    ;; Find all namespaces on classpath
+    (let [jars (cp/classpath-jarfiles)
+          dirs (cp/classpath-directories)
+          all-ns-syms (concat
+                        (mapcat find/find-namespaces-in-jarfile jars)
+                        (mapcat find/find-namespaces-in-dir dirs))
+
+          ;; Filter namespaces that start with the library prefix
+          matching-ns-syms (filter #(str/starts-with? (str %) lib-prefix) all-ns-syms)]
+
+      (when (empty? matching-ns-syms)
+        (println "No namespaces found for library:" lib-arg)
+        (System/exit 1))
+
+      ;; Try to require each matching namespace
+      (doseq [ns-sym matching-ns-syms]
+        (try
+          (require ns-sym)
+          (catch Exception e
+            (binding [*out* *err*]
+              (println "Could not require" ns-sym ":" (.getMessage e))))))
+
+      ;; List symbols from successfully loaded namespaces
+      (doseq [ns (filter #(str/starts-with? (str (ns-name %)) lib-prefix) (all-ns))]
+        (println)
+        (println (str "=== " (ns-name ns) " ==="))
+        (let [publics (ns-publics ns)]
+          (if (empty? publics)
+            (println "  (no public symbols)")
+            (doseq [[sym var] (sort-by key publics)]
+              (println (str "  " sym))
+              (let [m (meta var)]
+                (when-let [args (:arglists m)]
+                  (println (str "    Arglists: " args)))
+                (when-let [doc (:doc m)]
+                  (let [clean-doc (str/replace doc #"\n" "\n         ")]
+                    (println (str "    Doc: " clean-doc))))))))
+        (println)))))

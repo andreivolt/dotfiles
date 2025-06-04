@@ -1,8 +1,8 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # dependencies = [
-#    "b2sdk>=1.17.0",
-#    "boto3>=1.28.0"
+#    "b2sdk>=1.17",
+#    "boto3>=1.28",
 # ]
 # ///
 import argparse

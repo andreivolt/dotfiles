@@ -16,6 +16,7 @@ import time
 import getpass
 import subprocess
 import requests
+import argparse
 from pathlib import Path
 from datetime import datetime
 from bs4 import BeautifulSoup
@@ -38,6 +39,48 @@ def send_notification(title, message, url):
         f"{message}\n{url}"
     ])
 
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description='Monitor HackerNews for updates to your posts and comments',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Configuration:
+  Config file: ~/.config/hn-monitor/config.yml
+  Cache file:  ~/.local/state/hn-monitor/cache.yml
+        '''
+    )
+    
+    parser.add_argument(
+        '--interval', '-i',
+        type=int,
+        default=None,
+        help='Check interval in seconds (default: from config or 30)'
+    )
+    
+    parser.add_argument(
+        '--once',
+        action='store_true',
+        help='Run once and exit (no continuous monitoring)'
+    )
+    
+    parser.add_argument(
+        '--reset-config',
+        action='store_true',
+        help='Reset configuration and re-enter credentials'
+    )
+    
+    parser.add_argument(
+        '--verbose', '-v',
+        action='store_true',
+        help='Verbose output'
+    )
+    
+    return parser.parse_args()
+
+# Parse command line arguments
+args = parse_args()
+
 # Setup paths using platformdirs
 CONFIG_DIR = Path(user_config_dir("hn-monitor"))
 STATE_DIR = Path(user_state_dir("hn-monitor"))
@@ -46,6 +89,17 @@ CACHE_FILE = STATE_DIR / "cache.yml"
 
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Handle reset config option
+if args.reset_config:
+    if CONFIG_FILE.exists():
+        CONFIG_FILE.unlink()
+        if args.verbose:
+            print(f"Removed config file: {CONFIG_FILE}")
+    if CACHE_FILE.exists():
+        CACHE_FILE.unlink()
+        if args.verbose:
+            print(f"Removed cache file: {CACHE_FILE}")
 
 # Load or create config
 if CONFIG_FILE.exists():
@@ -68,7 +122,7 @@ if CONFIG_FILE.exists():
         config = {
             "username": username,
             "password": password,
-            "interval": 30
+            "interval": args.interval if args.interval else 30
         }
 
         with open(CONFIG_FILE, 'w') as f:
@@ -82,13 +136,17 @@ else:
     config = {
         "username": username,
         "password": password,
-        "interval": 30
+        "interval": args.interval if args.interval else 30
     }
 
     with open(CONFIG_FILE, 'w') as f:
         yaml.dump(config, f)
 
     CONFIG_FILE.chmod(0o600)
+
+# Override interval from command line if provided
+if args.interval:
+    config['interval'] = args.interval
 
 # Load cache
 if CACHE_FILE.exists():
@@ -370,13 +428,26 @@ def check_hn():
     return current_state
 
 # Run the first check
+if args.verbose:
+    print(f"Running initial check for user: {config['username']}")
 check_hn()
 
-# Run in daemon mode (always)
-print(f"Monitoring HN every {config['interval']} seconds...")
+if args.once:
+    if args.verbose:
+        print("Single check completed, exiting")
+    sys.exit(0)
+
+# Run in daemon mode
+if args.verbose:
+    print(f"Monitoring HN every {config['interval']} seconds...")
+else:
+    print(f"Monitoring HN every {config['interval']} seconds...")
 
 while True:
     time.sleep(config['interval'])
-
+    
+    if args.verbose:
+        print(f"Checking at {datetime.now().strftime('%H:%M:%S')}")
+    
     # Run the check function
     check_hn()

@@ -1,0 +1,385 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = [
+#     "arrow~=1.3.0",  # Humanize timestamps
+#     "rich~=13.0",    # Terminal formatting
+# ]
+# ///
+
+import argparse
+import subprocess
+import os
+import json
+import secrets
+import arrow
+from datetime import datetime
+from pathlib import Path
+from rich.console import Console
+from rich.text import Text
+from rich.table import Table
+
+SESSIONS_DIR = Path.home() / "drive" / "browser-sessions"
+
+def save_session(name=None, overwrite=False):
+    SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    session_id = secrets.token_hex(4)
+    timestamp = arrow.utcnow().isoformat()
+
+    # Use name as filename if provided, otherwise use session_id
+    base_name = name.replace(" ", "_").replace("/", "_") if name else session_id
+    filename = f"{base_name}.json"
+    filepath = SESSIONS_DIR / filename
+
+    # Check if file exists and overwrite not allowed
+    if filepath.exists() and not overwrite:
+        print(f"Session '{base_name}' already exists. Use --overwrite to replace it.")
+        return
+
+    result = subprocess.run(["bt", "list"], capture_output=True, text=True)
+    lines = result.stdout.strip().split('\n')
+
+    tabs = []
+    for line in lines:
+        if not line.strip():
+            continue
+        parts = line.split('\t')
+        if len(parts) >= 3:
+            tab_id, title, url = parts[0], parts[1], parts[2]
+            window_id = '.'.join(tab_id.split('.')[:-1])
+            tabs.append({
+                "tab_id": tab_id,
+                "window_id": window_id,
+                "title": title,
+                "url": url
+            })
+
+    session_data = {
+        "session_id": session_id,
+        "name": name,
+        "created": timestamp,
+        "url_count": len(tabs),
+        "tabs": tabs
+    }
+
+    with open(filepath, 'w') as f:
+        json.dump(session_data, f, indent=2)
+
+    display_name = name or session_id
+    action = "overwritten" if filepath.exists() and overwrite else "saved"
+    print(f"Session {action} as {filename} ({display_name})")
+
+def restore_session(filename=None):
+    if filename is None:
+        # Use fzf to select session
+        display_lines, session_map = get_sessions_data()
+
+        if not display_lines:
+            print("No sessions found")
+            return
+
+
+        # Create preview script
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as f:
+            f.write(f"""#!/bin/bash
+name=$(echo "$1" | sed 's/ •.*//' | sed 's/^ *//' | sed 's/ *$//')
+{__file__} show "$name"
+""")
+            preview_script = f.name
+
+        import os
+        os.chmod(preview_script, 0o755)
+
+        try:
+            result = subprocess.run([
+                "fzf",
+                "--prompt=Select session: ",
+                "--preview", preview_script + " {}",
+                "--preview-window", "right:50%"
+            ], input="\n".join(display_lines), text=True, capture_output=True, check=True)
+            selected = result.stdout.strip()
+            if not selected:
+                return
+
+            # Get filename from session map
+            filename = session_map.get(selected)
+            if not filename:
+                print(f"Could not find session file")
+                return
+        except subprocess.CalledProcessError:
+            return
+        except FileNotFoundError:
+            print("fzf not found. Please install fzf or provide a filename.")
+            return
+        finally:
+            # Clean up temp script
+            try:
+                os.unlink(preview_script)
+            except:
+                pass
+
+    filepath = SESSIONS_DIR / filename
+    if not filepath.exists():
+        print(f"Session file not found: {filename}")
+        return
+
+    with open(filepath, 'r') as f:
+        session_data = json.load(f)
+
+    windows = {}
+    for tab in session_data["tabs"]:
+        window_id = tab["window_id"]
+        if window_id not in windows:
+            windows[window_id] = []
+        windows[window_id].append(tab["url"])
+
+    # Open each window with its tabs
+    for window_id, urls in windows.items():
+        if urls:
+            # Open first URL in new window
+            subprocess.run(["open", "-na", "Google Chrome", "--args", "--new-window", urls[0]])
+            # Open remaining URLs as new tabs in same window
+            for url in urls[1:]:
+                subprocess.run(["open", "-na", "Google Chrome", "--args", url])
+
+    print(f"Restored {len(windows)} windows with {sum(len(urls) for urls in windows.values())} total tabs")
+
+def show_session(name_or_filename):
+    # Try exact filename first
+    filepath = SESSIONS_DIR / name_or_filename
+    if not filepath.exists():
+        filepath = SESSIONS_DIR / f"{name_or_filename}.json"
+
+    if not filepath.exists():
+        # Search by session name in metadata
+        for json_file in SESSIONS_DIR.glob("*.json"):
+            with open(json_file, 'r') as f:
+                session_data = json.load(f)
+                if session_data.get("name") == name_or_filename:
+                    filepath = json_file
+                    break
+        else:
+            return
+
+    with open(filepath, 'r') as f:
+        session_data = json.load(f)
+
+    console = Console(force_terminal=True)
+    for tab in session_data["tabs"]:
+        title = Text(tab['title'], style="bold cyan")
+        url = Text(tab['url'], style="dim")
+        console.print(title)
+        console.print(url)
+        console.print()
+
+def delete_session(name_or_filename=None):
+    if name_or_filename is None:
+        # Use fzf to select session
+        display_lines, session_map = get_sessions_data()
+
+        if not display_lines:
+            print("No sessions found")
+            return
+
+        # Create preview script
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as f:
+            f.write(f"""#!/bin/bash
+name=$(echo "$1" | sed 's/ •.*//' | sed 's/^ *//' | sed 's/ *$//')
+{__file__} show "$name"
+""")
+            preview_script = f.name
+
+        import os
+        os.chmod(preview_script, 0o755)
+
+        try:
+            result = subprocess.run([
+                "fzf",
+                "--prompt=Select session to delete: ",
+                "--preview", preview_script + " {}",
+                "--preview-window", "right:50%"
+            ], input="\n".join(display_lines), text=True, capture_output=True, check=True)
+            selected = result.stdout.strip()
+            if not selected:
+                return
+
+            # Get filename from session map
+            filename = session_map.get(selected)
+            if not filename:
+                print(f"Could not find session file")
+                return
+
+            # Delete the file
+            filepath = SESSIONS_DIR / filename
+            filepath.unlink()
+            session_name = selected.split(" • ")[0]
+            print(f"Session {filename} ({session_name}) deleted")
+            return
+        except subprocess.CalledProcessError:
+            return
+        except FileNotFoundError:
+            print("fzf not found. Please install fzf or provide a filename.")
+            return
+        finally:
+            # Clean up temp script
+            try:
+                os.unlink(preview_script)
+            except:
+                pass
+
+    # Try exact filename first
+    filepath = SESSIONS_DIR / name_or_filename
+    if filepath.exists():
+        filepath.unlink()
+        print(f"Session {name_or_filename} deleted")
+        return
+
+    # Try with .json extension
+    filepath = SESSIONS_DIR / f"{name_or_filename}.json"
+    if filepath.exists():
+        filepath.unlink()
+        print(f"Session {name_or_filename}.json deleted")
+        return
+
+    # Search by session name in metadata
+    for json_file in SESSIONS_DIR.glob("*.json"):
+        with open(json_file, 'r') as f:
+            session_data = json.load(f)
+            if session_data.get("name") == name_or_filename:
+                json_file.unlink()
+                print(f"Session {json_file.name} ({name_or_filename}) deleted")
+                return
+
+    print(f"Session not found: {name_or_filename}")
+
+def get_sessions_data():
+    """Get session data as list of formatted strings and filename mapping"""
+    if not SESSIONS_DIR.exists():
+        return [], {}
+
+    sessions = []
+    for filepath in SESSIONS_DIR.glob("*.json"):
+        with open(filepath, 'r') as f:
+            session_data = json.load(f)
+            # Count unique windows
+            window_ids = set(tab["window_id"] for tab in session_data.get("tabs", []))
+            sessions.append({
+                "filepath": filepath,
+                "filename": filepath.name,
+                "name": session_data.get("name"),
+                "created": session_data.get("created"),
+                "url_count": session_data.get("url_count", 0),
+                "window_count": len(window_ids)
+            })
+
+    # Sort by creation date, newest first
+    sessions.sort(key=lambda x: x["created"], reverse=True)
+
+    display_lines = []
+    session_map = {}
+
+    for session in sessions:
+        name = session["name"] or session["filepath"].stem
+        urls = session["url_count"]
+        windows = session["window_count"]
+
+        if session["created"]:
+            date_obj = arrow.get(session["created"])
+            created = date_obj.humanize()
+        else:
+            created = "unknown"
+
+        display_line = f"{name} • {urls} URLs in {windows} windows • {created}"
+        display_lines.append(display_line)
+        session_map[display_line] = session["filename"]
+
+    return display_lines, session_map
+
+def list_sessions():
+    if not SESSIONS_DIR.exists():
+        print("No sessions directory found")
+        return
+
+    sessions = []
+    for filepath in SESSIONS_DIR.glob("*.json"):
+        with open(filepath, 'r') as f:
+            session_data = json.load(f)
+            # Count unique windows
+            window_ids = set(tab["window_id"] for tab in session_data.get("tabs", []))
+            sessions.append({
+                "filepath": filepath,
+                "name": session_data.get("name"),
+                "created": session_data.get("created"),
+                "url_count": session_data.get("url_count", 0),
+                "window_count": len(window_ids)
+            })
+
+    if not sessions:
+        print("No sessions found")
+        return
+
+    # Sort by creation date, newest first
+    sessions.sort(key=lambda x: x["created"], reverse=True)
+
+    console = Console()
+
+    for session in sessions:
+        name = session["name"] or session["filepath"].stem
+        urls = session["url_count"]
+        windows = session["window_count"]
+
+        if session["created"]:
+            date_obj = arrow.get(session["created"])
+            created = date_obj.humanize()
+        else:
+            created = "unknown"
+
+        # Format: name • 45 URLs in 3 windows • 2 hours ago
+        name_text = Text(name, style="bold cyan")
+        stats_text = Text(f" • {urls} URLs in {windows} windows • ", style="dim")
+        time_text = Text(created, style="yellow")
+
+        line = Text()
+        line.append_text(name_text)
+        line.append_text(stats_text)
+        line.append_text(time_text)
+
+        console.print(line)
+
+def main():
+    parser = argparse.ArgumentParser(description="Browser session manager")
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
+
+    save_parser = subparsers.add_parser("save", help="Save current browser session")
+    save_parser.add_argument("--name", help="Name for the session")
+    save_parser.add_argument("--overwrite", action="store_true", help="Overwrite existing session with same name")
+
+    restore_parser = subparsers.add_parser("restore", help="Restore browser session")
+    restore_parser.add_argument("filename", nargs="?", help="Session file to restore (optional - will use fzf if not provided)")
+
+    delete_parser = subparsers.add_parser("delete", help="Delete browser session")
+    delete_parser.add_argument("name", nargs="?", help="Session name or filename to delete (optional - will use fzf if not provided)")
+
+    show_parser = subparsers.add_parser("show", help="Show session details (title and URL)")
+    show_parser.add_argument("name", help="Session name or filename")
+
+    subparsers.add_parser("list", help="List saved sessions")
+
+    args = parser.parse_args()
+
+    if args.command == "save":
+        save_session(args.name, args.overwrite)
+    elif args.command == "restore":
+        restore_session(args.filename)
+    elif args.command == "delete":
+        delete_session(args.name)
+    elif args.command == "show":
+        show_session(args.name)
+    elif args.command == "list":
+        list_sessions()
+    else:
+        parser.print_help()
+
+if __name__ == "__main__":
+    main()

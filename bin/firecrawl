@@ -1,6 +1,10 @@
 #!/usr/bin/env -S uv run --script --quiet
 # /// script
-# dependencies = ["click", "firecrawl-py", "pydantic"]
+# dependencies = [
+#     "click",
+#     "firecrawl-py>=1.5,<2",  # Use stable v1.x, avoid breaking changes in v2
+#     "pydantic",
+# ]
 # ///
 import os
 import click

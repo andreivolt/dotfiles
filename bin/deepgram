@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # dependencies = [
-#    "requests>=2.31.0",
+#    "requests>=2.31",
 # ]
 # ///
 import argparse
@@ -74,22 +74,7 @@ def parse_extra(value):
 def main():
     parser = argparse.ArgumentParser(
         description="Transcribe audio using Deepgram API with smart defaults",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Smart defaults enabled:
-  - model: nova-3 (best accuracy, 5-40x faster than Whisper)
-  - smart_format: true (includes punctuation, formatting)
-  - diarize: true (speaker identification)
-  - paragraphs: true (logical paragraph breaks)
-  - utterances: true (semantic segmentation)
-  
-For meetings/calls: --model nova-2-meeting
-For multilingual: --model whisper-large (slower but supports many languages)
-For quick/cheap: --model whisper-base --no-smart-format --no-diarize
-
-Note: Nova-3 uses 'keyterms' instead of 'keywords'
-Note: Whisper models don't support --search option
-        """
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
     parser.add_argument("input", help="Audio file path or URL to transcribe")
@@ -180,6 +165,10 @@ Note: Whisper models don't support --search option
                        help="Extra parameters (format: key=value)")
     parser.add_argument("--version", default="latest",
                        help="Model version (default: latest)")
+    
+    # Output options
+    parser.add_argument("--json", action="store_true", default=False,
+                       help="Output full JSON response")
     
     args = parser.parse_args()
     
@@ -308,21 +297,85 @@ Note: Whisper models don't support --search option
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         print(f"Request failed: {e}", file=sys.stderr)
-        if response.status_code == 400:
-            try:
-                error_data = response.json()
-                print(f"Error details: {error_data}", file=sys.stderr)
-            except:
-                print(f"Response body: {response.text}", file=sys.stderr)
+        if hasattr(e, 'response') and e.response is not None:
+            if e.response.status_code == 400:
+                try:
+                    error_data = e.response.json()
+                    print(f"Error details: {error_data}", file=sys.stderr)
+                except:
+                    print(f"Response body: {e.response.text}", file=sys.stderr)
         sys.exit(1)
     
     # Parse response
     result = response.json()
     
-    # Output based on diarization
+    # If JSON output requested, print and exit
+    if args.json:
+        print(json.dumps(result, indent=2))
+        sys.exit(0)
+    
+    # Extract channels data
+    channels = result.get('results', {}).get('channels', [])
+    if not channels:
+        print("No transcription results found", file=sys.stderr)
+        sys.exit(1)
+    
+    # Get the first channel (or handle multichannel if needed)
+    channel = channels[0]
+    alternatives = channel.get('alternatives', [])
+    if not alternatives:
+        print("No alternatives found", file=sys.stderr)
+        sys.exit(1)
+    
+    alternative = alternatives[0]
+    
+    # First, check if diarization is enabled and count unique speakers
+    unique_speakers = set()
     if args.diarize:
-        # Print with speaker labels
-        words = result.get('results', {}).get('channels', [{}])[0].get('alternatives', [{}])[0].get('words', [])
+        if 'paragraphs' in alternative and 'paragraphs' in alternative.get('paragraphs', {}):
+            for para in alternative.get('paragraphs', {}).get('paragraphs', []):
+                speaker = para.get('speaker')
+                if speaker is not None:
+                    unique_speakers.add(speaker)
+        elif 'words' in alternative:
+            for word in alternative.get('words', []):
+                speaker = word.get('speaker')
+                if speaker is not None:
+                    unique_speakers.add(speaker)
+    
+    # Determine if we should show speaker labels
+    show_speakers = args.diarize and len(unique_speakers) > 1
+    
+    # Check if we have paragraphs in the response
+    if args.paragraphs and 'paragraphs' in alternative:
+        # Use the paragraph-formatted output
+        paragraphs = alternative.get('paragraphs', {})
+        
+        if 'paragraphs' in paragraphs:
+            # Output with paragraph structure
+            for para in paragraphs.get('paragraphs', []):
+                speaker = para.get('speaker')
+                if speaker is not None and show_speakers:
+                    print(f"\nSpeaker {speaker}:")
+                
+                # Get sentences for this paragraph
+                sentences = para.get('sentences', [])
+                for sentence in sentences:
+                    print(sentence.get('text', ''), end=' ')
+                print()  # New line after paragraph
+        else:
+            # Just paragraphs without speaker labels
+            transcript = paragraphs.get('transcript', '')
+            if transcript:
+                # The transcript with paragraphs is already formatted with newlines
+                print(transcript)
+            else:
+                # Fallback to basic transcript
+                print(alternative.get('transcript', ''))
+    
+    elif show_speakers and 'words' in alternative:
+        # Diarization without paragraphs - show speaker changes
+        words = alternative.get('words', [])
         current_speaker = None
         
         for word in words:
@@ -330,14 +383,42 @@ Note: Whisper models don't support --search option
             if speaker != current_speaker:
                 if current_speaker is not None:
                     print()  # New line between speakers
-                print(f"Speaker {speaker}: ", end='')
+                print(f"\nSpeaker {speaker}: ", end='')
                 current_speaker = speaker
             print(word.get('word', ''), end=' ')
         print()  # Final newline
+    
     else:
-        # Just print transcript
-        transcript = result.get('results', {}).get('channels', [{}])[0].get('alternatives', [{}])[0].get('transcript', '')
+        # Just print basic transcript
+        transcript = alternative.get('transcript', '')
         print(transcript)
+    
+    # Print additional information if requested
+    if args.summarize and 'summary' in result.get('results', {}):
+        print("\n--- Summary ---")
+        summary = result['results'].get('summary', {})
+        if isinstance(summary, dict) and 'short' in summary:
+            print(summary.get('short', ''))
+        else:
+            print(summary)
+    
+    if args.topics and 'topics' in result.get('results', {}):
+        print("\n--- Topics ---")
+        topics = result['results'].get('topics', {})
+        if 'segments' in topics:
+            for segment in topics['segments']:
+                topics_list = segment.get('topics', [])
+                if topics_list:
+                    print(f"Topics: {', '.join([t.get('topic', '') for t in topics_list])}")
+    
+    if args.intents and 'intents' in result.get('results', {}):
+        print("\n--- Intents ---")
+        intents = result['results'].get('intents', {})
+        if 'segments' in intents:
+            for segment in intents['segments']:
+                intent = segment.get('intent', '')
+                if intent:
+                    print(f"Intent: {intent}")
 
 if __name__ == "__main__":
     main()

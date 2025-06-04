@@ -1,4 +1,10 @@
-#!/usr/bin/env -S uv run --quiet --script --with yt_dlp ffmpeg-python
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# dependencies = [
+#   "yt-dlp>=2024.1,<2026",  # Major version for compatibility
+#   "ffmpeg-python==0.2.0",   # Stable release
+# ]
+# ///
 
 import argparse
 import sys

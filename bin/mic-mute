@@ -1,4 +1,5 @@
 #!/usr/bin/env scriptisto
+# Claude: use better icons or mute/unmute
 
 // scriptisto-begin
 // script_src: script.swift
