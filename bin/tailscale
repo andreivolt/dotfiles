@@ -1,0 +1,1 @@
+exec "/Applications/Tailscale.localized/Tailscale.app/Contents/MacOS/Tailscale" "$@"

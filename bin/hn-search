@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 import argparse
+import html
 import json
+import re
 import sys
 import time
 from datetime import datetime, timedelta
@@ -20,16 +22,18 @@ Examples:
   %(prog)s "startup" --tags=story --num-comments=20 --page=2
   %(prog)s "Show HN" --author=dang --sort=date
   %(prog)s "" --author=pg --points=100
+  %(prog)s "rust" -l 100  # Get 100 results instead of paginating
+  %(prog)s "AI" --sort=date -l 50 --pretty  # Get 50 latest AI posts
         '''
     )
-    
+
     parser.add_argument('query', nargs='?', default='', help='Search query (optional if using filters)')
     parser.add_argument('--sort', choices=['relevance', 'date'], default='relevance',
                         help='Sort results by relevance or date (default: relevance)')
     parser.add_argument('--tags', help='Filter by tags (story, comment, show_hn, ask_hn, poll)')
     parser.add_argument('--author', help='Filter by author username')
     parser.add_argument('--page', type=int, default=0, help='Page number (default: 0)')
-    parser.add_argument('--hits-per-page', type=int, default=20, 
+    parser.add_argument('--hits-per-page', type=int, default=20,
                         help='Results per page (default: 20, max: 1000)')
     parser.add_argument('--points', type=int, help='Minimum points filter')
     parser.add_argument('--num-comments', type=int, help='Minimum comments filter')
@@ -39,7 +43,8 @@ Examples:
                         help='Time range shortcut')
     parser.add_argument('--raw', action='store_true', help='Output raw JSON response')
     parser.add_argument('--pretty', action='store_true', help='Formatted output')
-    
+    parser.add_argument('-l', '--limit', type=int, help='Maximum number of results to fetch (fetches multiple pages if needed)')
+
     return parser.parse_args()
 
 
@@ -56,13 +61,13 @@ def date_to_timestamp(date_str):
 def build_numeric_filters(args):
     """Build numeric filters string for API"""
     filters = []
-    
+
     if args.points:
         filters.append(f"points>={args.points}")
-    
+
     if args.num_comments:
         filters.append(f"num_comments>={args.num_comments}")
-    
+
     # Handle time filtering
     if args.before or args.after:
         if args.before:
@@ -82,20 +87,20 @@ def build_numeric_filters(args):
         elif args.time_range == 'year':
             cutoff = now - 31536000
         filters.append(f"created_at_i>{cutoff}")
-    
+
     return ','.join(filters) if filters else None
 
 
 def build_tags(args):
     """Build tags parameter including author filter"""
     tags = []
-    
+
     if args.tags:
         tags.extend(args.tags.split(','))
-    
+
     if args.author:
         tags.append(f"author_{args.author}")
-    
+
     return ','.join(tags) if tags else None
 
 
@@ -106,31 +111,45 @@ def build_query_params(args):
         'page': args.page,
         'hitsPerPage': min(args.hits_per_page, 1000)
     }
-    
+
     tags = build_tags(args)
     if tags:
         params['tags'] = tags
-    
+
     numeric_filters = build_numeric_filters(args)
     if numeric_filters:
         params['numericFilters'] = numeric_filters
-    
+
     return params
+
+
+def strip_html_tags(text):
+    """Remove HTML tags and clean up text"""
+    # Replace paragraph and break tags with newlines
+    text = re.sub(r'<p>', '\n\n', text)
+    text = re.sub(r'</p>', '', text)
+    text = re.sub(r'<br\s*/?>', '\n', text)
+    # Remove all other HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
+    # Clean up excessive whitespace while preserving paragraph breaks
+    text = re.sub(r' +', ' ', text)  # Multiple spaces to single space
+    text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)  # Multiple newlines to double
+    return text.strip()
 
 
 def format_hit(hit, pretty=False):
     """Format a single search result for display"""
     hit_type = 'story' if 'story_text' in hit or 'title' in hit else 'comment'
     hn_url = f"https://news.ycombinator.com/item?id={hit.get('objectID', '')}"
-    
+
     if hit_type == 'story':
-        title = hit.get('title', 'No title')
+        title = html.unescape(hit.get('title', 'No title'))
         url = hit.get('url', '')
         author = hit.get('author', 'unknown')
         points = hit.get('points', 0)
         comments = hit.get('num_comments', 0)
         created = hit.get('created_at', '')
-        
+
         if pretty:
             result = f"📰 {title}"
             if url:
@@ -142,27 +161,28 @@ def format_hit(hit, pretty=False):
             result = f"[STORY] {title} | {author} | {points}pts | {comments}cmt | {created} | {hn_url}"
             if url:
                 result += f" | {url}"
-        
+
     else:  # comment
         author = hit.get('author', 'unknown')
-        story_title = hit.get('story_title', 'Unknown story')
-        comment_text = hit.get('comment_text', '').replace('\n', ' ')[:200]
-        if len(hit.get('comment_text', '')) > 200:
-            comment_text += '...'
+        story_title = html.unescape(hit.get('story_title', 'Unknown story'))
+        comment_text = strip_html_tags(html.unescape(hit.get('comment_text', '')))
         created = hit.get('created_at', '')
-        
+
         if pretty:
             result = f"💬 Comment by {author} on: {story_title}"
             if comment_text:
-                result += f"\n   {comment_text}"
+                # Indent each line of the comment
+                indented_text = '\n   '.join(comment_text.split('\n'))
+                result += f"\n   {indented_text}"
             result += f"\n   🔗 {hn_url}"
             result += f"\n   📅 {created}"
         else:
-            # Greppable format: one line per result
+            # Greppable format: one line per result (collapse newlines for grep)
             result = f"[COMMENT] {author} on \"{story_title}\" | {created} | {hn_url}"
             if comment_text:
-                result += f" | {comment_text}"
-    
+                single_line_text = comment_text.replace('\n', ' ')
+                result += f" | {single_line_text}"
+
     return result
 
 
@@ -171,7 +191,7 @@ def search_hn(args):
     base_url = 'https://hn.algolia.com/api/v1/search_by_date' if args.sort == 'date' else 'https://hn.algolia.com/api/v1/search'
     params = build_query_params(args)
     url = f"{base_url}?{urlencode(params)}"
-    
+
     try:
         with urlopen(url) as response:
             data = json.loads(response.read().decode())
@@ -184,40 +204,72 @@ def search_hn(args):
         sys.exit(1)
 
 
-def main():
-    args = parse_args()
-    
-    if args.hits_per_page > 1000:
-        print("Warning: hits-per-page capped at 1000", file=sys.stderr)
-    
+args = parse_args()
+
+if args.hits_per_page > 1000:
+    print("Warning: hits-per-page capped at 1000", file=sys.stderr)
+
+# Handle --limit flag with multiple page fetches
+if args.limit:
+    all_hits = []
+    total_fetched = 0
+    current_page = args.page
+
+    while total_fetched < args.limit:
+        args.page = current_page
+        results = search_hn(args)
+        hits = results.get('hits', [])
+        nb_hits = results.get('nbHits', 0)
+
+        if not hits:
+            break
+
+        # Add hits up to the requested count
+        remaining = args.limit - total_fetched
+        all_hits.extend(hits[:remaining])
+        total_fetched += len(hits[:remaining])
+
+        # Check if we've fetched everything or reached the last page
+        if len(hits) < args.hits_per_page or total_fetched >= args.limit or total_fetched >= nb_hits:
+            break
+
+        current_page += 1
+
+    # Create a synthetic results object for display
+    results = {
+        'hits': all_hits,
+        'nbHits': results.get('nbHits', 0),
+        'page': args.page,
+        'nbPages': results.get('nbPages', 0)
+    }
+else:
     results = search_hn(args)
-    
-    if args.raw:
-        print(json.dumps(results, indent=2))
-        return
-    
-    hits = results.get('hits', [])
-    nb_hits = results.get('nbHits', 0)
-    page = results.get('page', 0)
-    nb_pages = results.get('nbPages', 0)
-    
-    if args.pretty:
-        print(f"Found {nb_hits} results (page {page + 1}/{nb_pages})")
-        print("=" * 80)
-    
-    if not hits:
-        print("No results found.")
-        return
-    
-    if args.pretty:
-        for i, hit in enumerate(hits, 1):
-            print(f"{i}. {format_hit(hit, pretty=True)}")
-            print()
+
+if args.raw:
+    print(json.dumps(results, indent=2))
+    sys.exit(0)
+
+hits = results.get('hits', [])
+nb_hits = results.get('nbHits', 0)
+page = results.get('page', 0)
+nb_pages = results.get('nbPages', 0)
+
+if args.pretty:
+    if args.limit:
+        print(f"Fetched {len(hits)} of {args.limit} requested results (total available: {nb_hits})")
     else:
-        # Greppable format: one result per line
-        for hit in hits:
-            print(format_hit(hit, pretty=False))
+        print(f"Found {nb_hits} results (page {page + 1}/{nb_pages})")
+    print("=" * 80)
 
+if not hits:
+    print("No results found.")
+    sys.exit(0)
 
-if __name__ == '__main__':
-    main()
+if args.pretty:
+    for i, hit in enumerate(hits, 1):
+        print(f"{i}. {format_hit(hit, pretty=True)}")
+        print()
+else:
+    # Greppable format: one result per line
+    for hit in hits:
+        print(format_hit(hit, pretty=False))

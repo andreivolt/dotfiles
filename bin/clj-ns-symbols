@@ -22,11 +22,11 @@
 
 (let [parsed (cli/parse-opts *command-line-args* cli-options)
       {:keys [options arguments]} parsed]
-  
+
   (cond
     (:help options) (do (println (usage)) (System/exit 0))
     (empty? arguments) (do (println (usage)) (System/exit 1)))
-  
+
   (let [lib-arg (first arguments)
         lib-prefix (if (str/includes? lib-arg "/")
                      (str/replace lib-arg "/" ".")

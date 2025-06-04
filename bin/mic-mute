@@ -1,5 +1,4 @@
 #!/usr/bin/env scriptisto
-# Claude: use better icons or mute/unmute
 
 // scriptisto-begin
 // script_src: script.swift
@@ -60,7 +59,7 @@ func toggleDefaultInputDeviceMute() {
         &newMuteValue)
 
     if setMuteStatus == noErr {
-        let message = newMuteValue == 0 ? "🎤 Microphone unmuted" : "🔇 Microphone muted"
+        let message = newMuteValue == 0 ? "🎤 Unmuted" : "🔇 Muted"
         showMessage(message)
     } else {
         showMessage("❌ Failed to toggle microphone")

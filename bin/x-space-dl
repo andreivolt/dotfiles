@@ -31,20 +31,20 @@ except subprocess.CalledProcessError:
 
 with tempfile.TemporaryDirectory() as tmp_dir:
     os.chdir(tmp_dir)
-    
+
     def cleanup():
         files_to_remove = ['stream.m3u8', 'modified.m3u8']
         for file in files_to_remove:
             if os.path.exists(file):
                 os.remove(file)
-        
+
         for aac_file in [f for f in os.listdir('.') if f.endswith('.aac')]:
             os.remove(aac_file)
-        
+
         os.chdir(original_dir)
-    
+
     atexit.register(cleanup)
-    
+
     # Get stream URL
     try:
         stream = subprocess.check_output([
@@ -53,20 +53,20 @@ with tempfile.TemporaryDirectory() as tmp_dir:
     except subprocess.CalledProcessError:
         print("Failed to get stream URL")
         sys.exit(1)
-    
+
     # Extract stream path
     stream_path_match = re.match(r'^.*/', stream)
     if not stream_path_match:
         print("Failed to extract stream path")
         sys.exit(1)
     stream_path = stream_path_match.group(0)
-    
+
     # Download stream manifest
     result = subprocess.run(['wget', '-q', '-O', 'stream.m3u8', stream])
     if result.returncode != 0:
         print("Failed to download the stream.")
         sys.exit(1)
-    
+
     # Modify m3u8 file
     with open('stream.m3u8', 'r') as stream_file, open('modified.m3u8', 'w') as modified_file:
         for line in stream_file:
@@ -75,11 +75,11 @@ with tempfile.TemporaryDirectory() as tmp_dir:
                 modified_file.write(f"{stream_path}{line}\n")
             else:
                 modified_file.write(f"{line}\n")
-    
+
     # Download segments and convert
     subprocess.run(['aria2c', '-i', 'modified.m3u8'])
     subprocess.run(['ffmpeg', '-i', 'stream.m3u8', '-c', 'copy', file_name])
-    
+
     # Move file to original directory
     shutil.move(file_name, original_dir)
 

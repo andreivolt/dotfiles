@@ -49,6 +49,7 @@
   # last prompt line gets hidden if it would overlap with left prompt.
   typeset -g POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(
     vcs                     # git status
+    gitdir                  # git status when using GIT_DIR
   )
 
   # Defines character set used by powerlevel10k. It's best to let `p10k configure` set it for you.
@@ -1394,6 +1395,113 @@
         p10k segment -t "$host_display"
       fi
     fi
+  }
+
+
+  # Custom gitdir segment that shows git info when GIT_DIR is set
+  function prompt_gitdir() {
+    # Only process if GIT_DIR is set
+    [[ -n "$GIT_DIR" ]] || return 1
+    
+    # Check if we're in a regular git repo (gitstatus would handle this)
+    [[ ! -d ".git" && ! -f ".git" ]] || return 1
+    
+    local work_tree="${GIT_WORK_TREE:-$PWD}"
+    
+    # Get branch/tag/commit info
+    local branch=$(GIT_DIR="$GIT_DIR" GIT_WORK_TREE="$work_tree" git symbolic-ref --short HEAD 2>/dev/null)
+    local tag=""
+    local commit=""
+    
+    if [[ -z "$branch" ]]; then
+      tag=$(GIT_DIR="$GIT_DIR" GIT_WORK_TREE="$work_tree" git describe --tags --exact-match 2>/dev/null)
+      if [[ -z "$tag" ]]; then
+        commit=$(GIT_DIR="$GIT_DIR" GIT_WORK_TREE="$work_tree" git rev-parse --short HEAD 2>/dev/null)
+        [[ -z "$commit" ]] && return 1
+      fi
+    fi
+    
+    # Get status counts
+    local status_output=$(GIT_DIR="$GIT_DIR" GIT_WORK_TREE="$work_tree" git status --porcelain 2>/dev/null)
+    local staged=0
+    local unstaged=0
+    local untracked=0
+    local conflicted=0
+    
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      local xy="${line:0:2}"
+      case "$xy" in
+        '??') ((untracked++)) ;;
+        'UU'|'AA'|'DD') ((conflicted++)) ;;
+        ?[MADRC]) ((unstaged++)) ;;
+        [MADRC]?) ((staged++)) ;;
+        [MADRC][MADRC]) ((staged++)); ((unstaged++)) ;;
+      esac
+    done <<< "$status_output"
+    
+    # Get commits ahead/behind
+    local remote_branch=$(GIT_DIR="$GIT_DIR" GIT_WORK_TREE="$work_tree" git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
+    local commits_ahead=0
+    local commits_behind=0
+    if [[ -n "$remote_branch" ]]; then
+      local counts=$(GIT_DIR="$GIT_DIR" GIT_WORK_TREE="$work_tree" git rev-list --left-right --count HEAD...$remote_branch 2>/dev/null)
+      if [[ -n "$counts" ]]; then
+        commits_ahead="${counts%	*}"
+        commits_behind="${counts#*	}"
+      fi
+    fi
+    
+    # Get stash count
+    local stashes=$(GIT_DIR="$GIT_DIR" GIT_WORK_TREE="$work_tree" git stash list 2>/dev/null | wc -l)
+    
+    # Build the display string similar to my_git_formatter
+    local clean='%2F'    # green foreground
+    local modified='%3F' # yellow foreground
+    local untracked_color='%4F' # blue foreground
+    local conflicted_color='%1F' # red foreground
+    local meta='%f'      # default foreground
+    
+    local res=""
+    
+    # Branch/tag/commit
+    if [[ -n "$branch" ]]; then
+      (( $#branch > 32 )) && branch[13,-13]="…"
+      res+="${clean}${branch//\%/%%}"
+    elif [[ -n "$tag" ]]; then
+      (( $#tag > 32 )) && tag[13,-13]="…"
+      res+="${meta}#${clean}${tag//\%/%%}"
+    else
+      res+="${meta}@${clean}${commit}"
+    fi
+    
+    # Remote tracking (only show if different from local branch)
+    if [[ -n "$remote_branch" ]]; then
+      local remote_name="${remote_branch##*/}"
+      if [[ "$remote_name" != "$branch" ]]; then
+        res+="${meta}:${clean}${remote_name}"
+      fi
+    fi
+    
+    # Commits ahead/behind
+    if (( commits_behind > 0 )); then
+      res+=" ${clean}⇣${commits_behind}"
+    fi
+    if (( commits_ahead > 0 )); then
+      [[ $commits_behind -eq 0 ]] && res+=" "
+      res+="${clean}⇡${commits_ahead}"
+    fi
+    
+    # Stashes
+    (( stashes > 0 )) && res+=" ${clean}*${stashes}"
+    
+    # Status indicators
+    (( conflicted > 0 )) && res+=" ${conflicted_color}~${conflicted}"
+    (( staged > 0 )) && res+=" ${modified}+${staged}"
+    (( unstaged > 0 )) && res+=" ${modified}!${unstaged}"
+    (( untracked > 0 )) && res+=" ${untracked_color}?${untracked}"
+    
+    p10k segment -t "[${res}]"
   }
 
   # Custom nix_shell segment that shows packages

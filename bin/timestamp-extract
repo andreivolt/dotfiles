@@ -12,10 +12,10 @@ def main():
         print("Usage: timestamp-extract <prompt>", file=sys.stderr)
         print("Reads timestamped content from stdin and extracts timestamp range for the given prompt", file=sys.stderr)
         sys.exit(1)
-    
+
     prompt = ' '.join(sys.argv[1:])
     content = sys.stdin.read()
-    
+
     llm_prompt = f"""Extract the timestamp range when: {prompt}
 
 Find where this topic is discussed and output a JSON object wrapped in a code block like:
@@ -31,7 +31,7 @@ Rules:
 
 Content:
 {content}"""
-    
+
     # Run llm with --extract flag to extract first code block
     result = subprocess.run(
         ['sh', '-c', 'llm -x'],
@@ -39,18 +39,18 @@ Content:
         capture_output=True,
         text=True
     )
-    
+
     if result.returncode != 0:
         print(f"Error running llm: {result.stderr}", file=sys.stderr)
         sys.exit(1)
-    
+
     # Parse and validate the JSON response
     try:
         output = result.stdout.strip()
         if not output:
             print("Empty response from llm", file=sys.stderr)
             sys.exit(1)
-        
+
         data = json.loads(output)
         if "error" in data:
             print(data["error"], file=sys.stderr)

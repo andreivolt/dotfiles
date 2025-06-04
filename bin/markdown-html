@@ -1,24 +1,83 @@
 #!/usr/bin/env -S deno run --allow-read
-
+import { parseArgs } from "https://deno.land/std@0.208.0/cli/parse_args.ts";
 import { marked } from "https://esm.sh/marked@12.0.0";
+import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
+import { exists } from "https://deno.land/std@0.208.0/fs/exists.ts";
+import { extname } from "https://deno.land/std@0.208.0/path/mod.ts";
+
+const args = parseArgs(Deno.args, {
+    string: ["title"],
+    alias: { t: "title" },
+    default: { title: "Document" }
+});
 
 const markdown = await new Response(Deno.stdin.readable).text();
-const content = marked(markdown);
+let content = marked(markdown);
+
+function getMimeType(filePath: string): string {
+    const ext = extname(filePath).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
+        '.webp': 'image/webp',
+        '.bmp': 'image/bmp',
+        '.ico': 'image/x-icon',
+        '.css': 'text/css',
+        '.js': 'application/javascript',
+        '.json': 'application/json',
+    };
+    return mimeTypes[ext] || 'application/octet-stream';
+}
+
+async function embedLocalResources(html: string): Promise<string> {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    if (!doc) return html;
+
+    const images = doc.querySelectorAll('img[src]');
+    for (const img of images) {
+        const src = img.getAttribute('src');
+        if (src && !src.startsWith('http') && !src.startsWith('data:')) {
+            try {
+                if (await exists(src)) {
+                    const data = await Deno.readFile(src);
+                    const mimeType = getMimeType(src);
+
+                    const uint8Array = new Uint8Array(data);
+                    let binaryString = '';
+                    for (let i = 0; i < uint8Array.length; i++) {
+                        binaryString += String.fromCharCode(uint8Array[i]);
+                    }
+                    const base64 = btoa(binaryString);
+
+                    img.setAttribute('src', `data:${mimeType};base64,${base64}`);
+                }
+            } catch (error) {
+                console.error(`Failed to embed image ${src}:`, error.message);
+            }
+        }
+    }
+
+    return doc.documentElement?.outerHTML || html;
+}
+
+content = await embedLocalResources(content);
 
 const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>${args.title}</title>
     <style>
         :root {
-            --text-color: #1a1a1a;
-            --bg-color: #fdfcfa;
+            --text-color: #2a2a2a;
             --link-color: #0066cc;
-            --quote-color: #555;
-            --code-bg: #f4f4f4;
-            --border-color: #e0e0e0;
+            --quote-color: #666;
+            --border-color: rgba(224, 224, 224, 0.6);
+            --font-family: 'Tahoma', 'Segoe UI', 'Helvetica Neue', sans-serif;
         }
 
         * {
@@ -26,100 +85,128 @@ const html = `<!DOCTYPE html>
         }
 
         body {
-            font-family: Georgia, 'Times New Roman', serif;
-            font-size: 18px;
-            line-height: 1.6;
+            font-family: var(--font-family);
+            font-size: 16px;
+            line-height: 1.5;
             color: var(--text-color);
-            background-color: var(--bg-color);
             margin: 0;
             padding: 20px;
+            background: #fafbfc;
         }
 
         article {
             max-width: 780px;
             margin: 0 auto;
-            padding: 0 20px;
+            padding: 40px;
         }
 
         h1, h2, h3, h4, h5, h6 {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-            line-height: 1.2;
-            margin-top: 1.2em;
-            margin-bottom: 0.5em;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            line-height: 1.15;
+            margin-top: 2.5em;
+            margin-bottom: 0.75em;
+            font-weight: 600;
+            letter-spacing: -0.03em;
+            position: relative;
         }
 
         h1 {
-            font-size: 2.5em;
-            margin-top: 0.5em;
+            font-size: 2.2em;
+            margin-top: 0;
+            margin-bottom: 1em;
+            font-weight: 700;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+            padding-bottom: 0.5em;
         }
 
         h2 {
-            font-size: 1.8em;
+            font-size: 1.6em;
+            margin-top: 3em;
+            position: relative;
+        }
+
+        h2::before {
+            content: '';
+            position: absolute;
+            left: -20px;
+            top: 0.3em;
+            width: 4px;
+            height: 1.2em;
+            background: linear-gradient(135deg, #2a2a2a, #666);
+            border-radius: 2px;
         }
 
         h3 {
-            font-size: 1.4em;
+            font-size: 1.2em;
+            font-weight: 700;
+            margin-top: 2em;
+            color: #2a2a2a;
         }
 
         h4 {
-            font-size: 1.2em;
+            font-size: 0.9em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-top: 2em;
+            color: var(--quote-color);
+            border-left: 2px solid var(--quote-color);
+            padding-left: 0.8em;
         }
 
         p {
-            margin: 1em 0;
-            text-align: justify;
-            hyphens: auto;
+            margin: 0.8em 0;
+            overflow-wrap: break-word;
         }
 
         a {
             color: var(--link-color);
-            text-decoration: underline;
-            text-decoration-thickness: 1px;
-            text-underline-offset: 2px;
+            text-decoration: none;
         }
 
         a:hover {
-            text-decoration-thickness: 2px;
+            text-decoration: underline;
         }
 
         blockquote {
-            margin: 2em 0;
-            padding: 0 0 0 1.5em;
-            border-left: 4px solid var(--border-color);
+            margin: 1.5em 0;
+            padding: 0 0 0 1.2em;
+            border-left: 2px solid var(--quote-color);
             color: var(--quote-color);
             font-style: italic;
+            font-size: 0.95em;
         }
 
         code {
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-family: 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
             font-size: 0.9em;
-            background-color: var(--code-bg);
-            padding: 2px 6px;
-            border-radius: 3px;
+            background: rgba(0, 0, 0, 0.04);
+            padding: 2px 4px;
+            border-radius: 2px;
         }
 
         pre {
-            background-color: var(--code-bg);
+            background: rgba(0, 0, 0, 0.04);
             padding: 1.5em;
-            border-radius: 5px;
             overflow-x: auto;
             line-height: 1.4;
             margin: 2em 0;
+            border-radius: 4px;
         }
 
         pre code {
-            background-color: transparent;
+            background: none;
             padding: 0;
             font-size: 0.85em;
         }
 
         ul, ol {
-            margin: 1.5em 0;
-            padding-left: 2em;
+            margin: 1.2em 0;
+            padding-left: 1.8em;
         }
 
         li {
-            margin: 0.5em 0;
+            margin: 0.3em 0;
         }
 
         table {
@@ -136,8 +223,7 @@ const html = `<!DOCTYPE html>
         }
 
         th {
-            font-weight: bold;
-            background-color: var(--code-bg);
+            font-weight: 600;
         }
 
         img {
@@ -147,33 +233,53 @@ const html = `<!DOCTYPE html>
             margin: 2em auto;
         }
 
-        figure {
-            margin: 2em 0;
-        }
-
-        figcaption {
-            font-size: 0.9em;
-            color: var(--quote-color);
-            text-align: center;
-            margin-top: 0.5em;
-            font-style: italic;
-        }
-
         hr {
             border: none;
             border-top: 1px solid var(--border-color);
             margin: 3em 0;
         }
 
+        strong {
+            font-weight: 600;
+        }
+
+        em {
+            font-style: italic;
+        }
+
+
         @media (prefers-color-scheme: dark) {
             :root {
-                --text-color: #e0e0e0;
-                --bg-color: #1a1a1a;
+                --text-color: #d0d0d0;
                 --link-color: #66b3ff;
-                --quote-color: #aaa;
-                --code-bg: #2a2a2a;
-                --border-color: #444;
+                --quote-color: #999;
+                --border-color: rgba(68, 68, 68, 0.6);
             }
+
+            body {
+                background: #1a1b1e;
+            }
+
+            h1 {
+                border-bottom-color: rgba(255, 255, 255, 0.1);
+            }
+
+            h2::before {
+                background: linear-gradient(135deg, #d0d0d0, #999);
+            }
+
+            h3 {
+                color: #d0d0d0;
+            }
+
+            code {
+                background: rgba(255, 255, 255, 0.08);
+            }
+
+            pre {
+                background: rgba(255, 255, 255, 0.08);
+            }
+
         }
     </style>
 </head>

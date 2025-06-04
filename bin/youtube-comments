@@ -1,174 +1,230 @@
-#!/usr/bin/env ruby
-require 'bundler/inline'
-gemfile(quiet: true) do
-  source :rubygems
-  gem 'httparty'
-end
-require 'cgi'
-require 'json'
-require 'optparse'
+#!/usr/bin/env -S PYTHONPATH=/Users/andrei/bin/lib uv run --script --quiet
+# /// script
+# dependencies = [
+#     "requests",
+#     "rich>=13.0",
+# ]
+# ///
 
-api_key = ENV['GOOGLE_API_KEY']
-video_id = ARGV[0]
+import os
+import sys
+import argparse
+import html
+import re
+import requests
+from typing import List, Dict, Optional, Any
+from urllib.parse import urlparse, parse_qs
+from comment_tree import print_comment_tree
 
-abort "Usage: #{__FILE__} VIDEO_ID [--json]" if video_id.nil?
-abort "Ensure GOOGLE_API_KEY is set in your environment variables." if api_key.nil?
 
-def clean_username(username)
-  username.to_s.gsub(/^@@?/, '')
-end
+def extract_video_id(input_str: str) -> str:
+    """Extract video ID from YouTube URL or return as-is if already an ID."""
+    # If it looks like a video ID (11 chars, alphanumeric with - and _), return as is
+    if re.match(r'^[a-zA-Z0-9_-]{11}$', input_str):
+        return input_str
 
-def clean_text(text)
-  return '' if text.nil?
+    # Try to parse as URL
+    parsed = urlparse(input_str)
 
-  # First unescape HTML entities
-  text = CGI.unescapeHTML(text.to_s)
+    # Handle youtu.be URLs
+    if parsed.netloc in ('youtu.be', 'www.youtu.be'):
+        return parsed.path.lstrip('/')
 
-  # Replace <br> tags with newlines
-  text = text.gsub('<br><br>', "\n\n").gsub('<br>', "\n")
+    # Handle youtube.com URLs
+    if parsed.netloc in ('youtube.com', 'www.youtube.com', 'm.youtube.com'):
+        if parsed.path == '/watch':
+            # Extract from query parameter
+            video_id = parse_qs(parsed.query).get('v')
+            if video_id:
+                return video_id[0]
+        elif parsed.path.startswith('/embed/'):
+            # Extract from embed URL
+            return parsed.path.replace('/embed/', '')
+        elif parsed.path.startswith('/v/'):
+            # Extract from /v/ URL
+            return parsed.path.replace('/v/', '')
 
-  # Remove @ mentions at the start of the text
-  text = text.gsub(/^@@?\w+\s+/, '')
+    # If we couldn't extract, return the original input
+    return input_str
 
-  text.strip
-end
 
-def organize_replies(replies)
-  conversation = []
-  reply_map = {}
+def clean_username(username: str) -> str:
+    """Remove @ symbols from username."""
+    return re.sub(r'^@@?', '', username or '')
 
-  # First pass: Create a map of replies and initialize conversation
-  replies.each do |reply|
-    reply_map[reply['id']] = {
-      'author' => clean_username(reply['author']),
-      'date' => reply['date'],
-      'text' => clean_text(reply['text']),
-      'replies' => [],
-      'parent_author' => nil
+
+def clean_text(text: str) -> str:
+    """Clean and format comment text."""
+    if not text:
+        return ''
+
+    # Unescape HTML entities
+    text = html.unescape(text)
+
+    # Replace <br> tags with newlines
+    text = text.replace('<br><br>', '\n\n').replace('<br>', '\n')
+
+    # Remove @ mentions at the start of the text
+    text = re.sub(r'^@@?\w+\s+', '', text)
+
+    return text.strip()
+
+
+def organize_replies(replies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Organize replies into a conversation tree for tree rendering."""
+    conversation = []
+    reply_map = {}
+
+    # First pass: Create a map of replies and initialize conversation
+    for reply in replies:
+        reply_map[reply['id']] = {
+            'id': reply['id'],
+            'author': clean_username(reply['author']),
+            'time': reply['date'][:10],  # Extract date part only
+            'text': clean_text(reply['text']),
+            'children': [],
+            'parent_author': None
+        }
+
+    # Second pass: Build the conversation tree
+    for reply in replies:
+        text = reply['text'] or ''
+        parent_match = re.match(r'^@@?(\w+)', text)
+
+        if parent_match:
+            parent_author = parent_match.group(1)
+            # Find the most recent comment by this author
+            parent_reply = None
+            for r in reversed(list(reply_map.values())):
+                if r['author'] == parent_author:
+                    parent_reply = r
+                    break
+
+            if parent_reply:
+                parent_reply['children'].append(reply_map[reply['id']])
+                reply_map[reply['id']]['parent_author'] = parent_author
+                continue
+
+        # If no parent found or no @ mention, add to top level
+        if not reply_map[reply['id']]['parent_author']:
+            conversation.append(reply_map[reply['id']])
+
+    return conversation
+
+
+def youtube_to_tree_format(comment: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert YouTube comment to tree format expected by comment_tree library"""
+    return {
+        'id': str(hash(comment['author'] + comment['date'])),  # Create a unique ID
+        'author': comment['author'],
+        'time': comment['date'][:10],  # Extract date part only
+        'text': comment['text'],
+        'children': comment.get('children', [])
     }
-  end
 
-  # Second pass: Build the conversation tree
-  replies.each do |reply|
-    text = reply['text'].to_s
-    parent_match = text.match(/^@@?(\w+)/)
 
-    if parent_match
-      parent_author = parent_match[1]
-      # Find the most recent comment by this author
-      parent_reply = reply_map.values.reverse.find { |r| r['author'] == parent_author }
+def fetch_comments(video_id: str, api_key: str) -> List[Dict[str, Any]]:
+    """Fetch comments from YouTube API."""
+    comments = []
+    page_token = None
 
-      if parent_reply
-        parent_reply['replies'] << reply_map[reply['id']]
-        reply_map[reply['id']]['parent_author'] = parent_author
-        next
-      end
-    end
+    while True:
+        params = {
+            'part': 'snippet',
+            'videoId': video_id,
+            'maxResults': 100,
+            'key': api_key
+        }
+        if page_token:
+            params['pageToken'] = page_token
 
-    # If no parent found or no @ mention, add to top level
-    conversation << reply_map[reply['id']] unless reply_map[reply['id']]['parent_author']
-  end
+        response = requests.get(
+            'https://www.googleapis.com/youtube/v3/commentThreads',
+            params=params
+        )
 
-  conversation
-end
+        if not response.ok:
+            break
 
-def print_comment_tree(comment, options, level = 0, is_last = false, prefix = '')
-  return if comment.nil?
+        data = response.json()
+        if 'error' in data:
+            break
 
-  current_prefix = prefix + (is_last ? '└─ ' : '├─ ')
+        for item in data.get('items', []):
+            top_level_comment = item.get('snippet', {}).get('topLevelComment', {}).get('snippet')
+            if not top_level_comment:
+                continue
 
-  author = comment['author']
-  date = comment['date']
-  text = clean_text(comment['text'])
+            replies = []
+            if item.get('snippet', {}).get('totalReplyCount', 0) > 0:
+                replies_response = requests.get(
+                    'https://www.googleapis.com/youtube/v3/comments',
+                    params={
+                        'part': 'snippet',
+                        'parentId': item['snippet']['topLevelComment']['id'],
+                        'maxResults': 100,
+                        'key': api_key
+                    }
+                )
 
-  # Skip empty comments
-  return if author.empty? || text.empty?
+                if replies_response.ok:
+                    replies_data = replies_response.json()
+                    if 'error' not in replies_data:
+                        replies = [
+                            {
+                                'id': reply['id'],
+                                'author': reply['snippet']['authorDisplayName'].strip(),
+                                'date': reply['snippet']['publishedAt'],
+                                'text': reply['snippet']['textDisplay']
+                            }
+                            for reply in replies_data.get('items', [])
+                        ]
 
-  formatted_text = text.gsub("\n", "\n#{prefix}#{is_last ? ' ' : '│ '}")
+                        if replies:
+                            organized_replies = organize_replies(replies)
+                            if organized_replies:
+                                comments.append({
+                                    'author': clean_username(top_level_comment['authorDisplayName']),
+                                    'date': top_level_comment['publishedAt'],
+                                    'text': clean_text(top_level_comment['textDisplay']),
+                                    'children': organized_replies
+                                })
 
-  puts "#{current_prefix}#{author} (#{date}):"
-  puts "#{prefix}#{is_last ? ' ' : '│ '}#{formatted_text}"
-  puts "#{prefix}#{is_last ? ' ' : '│'}"
+        page_token = data.get('nextPageToken')
+        if not page_token:
+            break
 
-  if comment['replies'] && !comment['replies'].empty?
-    last_index = comment['replies'].length - 1
-    comment['replies'].each_with_index do |reply, index|
-      print_comment_tree(reply, options, level + 1, index == last_index, prefix + (is_last ? ' ' : '│ '))
-    end
-  end
-end
+    return comments
 
-begin
-  options = { json: false }
-  OptionParser.new do |opts|
-    opts.banner = "Usage: #{__FILE__} VIDEO_ID [options]"
-    opts.on("--json", "Output comments in JSON format")
-  end.parse!(into: options)
 
-  comments = []
-  page_token = nil
+def main():
+    parser = argparse.ArgumentParser(description='Fetch YouTube comments')
+    parser.add_argument('video_input', help='YouTube video ID or URL')
+    parser.add_argument('--json', action='store_true', help='Output comments in JSON format')
 
-  loop do
-    response = HTTParty.get('https://www.googleapis.com/youtube/v3/commentThreads', query: {
-      part: 'snippet',
-      videoId: video_id,
-      maxResults: 100,
-      pageToken: page_token,
-      key: api_key
-    }).parsed_response
+    args = parser.parse_args()
 
-    break if response['error']
+    api_key = os.environ.get('GOOGLE_API_KEY')
+    if not api_key:
+        print("Error: GOOGLE_API_KEY environment variable is required", file=sys.stderr)
+        sys.exit(1)
 
-    response['items'].each do |item|
-      top_level_comment = item.dig('snippet', 'topLevelComment', 'snippet')
-      next if top_level_comment.nil?
+    video_id = extract_video_id(args.video_input)
 
-      replies = []
-      if (item['snippet']['totalReplyCount'] || 0) > 0
-        replies_response = HTTParty.get('https://www.googleapis.com/youtube/v3/comments', query: {
-          part: 'snippet',
-          parentId: item['snippet']['topLevelComment']['id'],
-          maxResults: 100,
-          key: api_key
-        }).parsed_response
+    try:
+        comments = fetch_comments(video_id, api_key)
 
-        unless replies_response['error']
-          replies = replies_response['items'].map do |reply|
-            snippet = reply['snippet']
-            {
-              'id' => reply['id'],
-              'author' => snippet['authorDisplayName'].to_s.strip,
-              'date' => snippet['publishedAt'],
-              'text' => snippet['textDisplay']
-            }
-          end
+        if args.json:
+            import json
+            print(json.dumps(comments, indent=2))
+        else:
+            tree_comments = [youtube_to_tree_format(comment) for comment in comments]
+            print_comment_tree(tree_comments)
 
-          # Organize replies into conversations
-          if replies.length > 0
-            organized_replies = organize_replies(replies)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
-            # Add the organized conversation to comments
-            if organized_replies.any?
-              comments << {
-                'author' => clean_username(top_level_comment['authorDisplayName']),
-                'date' => top_level_comment['publishedAt'],
-                'text' => clean_text(top_level_comment['textDisplay']),
-                'replies' => organized_replies
-              }
-            end
-          end
-        end
-      end
-    end
 
-    page_token = response['nextPageToken']
-    break unless page_token
-  end
-
-  comments.each do |comment|
-    print_comment_tree(comment, options)
-  end
-
-rescue => e
-  abort "Error: #{e.message}"
-end
+if __name__ == '__main__':
+    main()

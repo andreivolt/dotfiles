@@ -1,80 +1,253 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S PYTHONPATH=/Users/andrei/bin/lib uv run --script --quiet
+# /// script
+# dependencies = [
+#   "beautifulsoup4",
+#   "requests",
+#   "rich>=13.0",
+#   "markdownify",
+# ]
+# ///
 
-$VERBOSE = nil
-require 'bundler/inline'
+import argparse
+import hashlib
+import json
+import os
+import re
+import sys
+import time
+from pathlib import Path
+from urllib.parse import urljoin
 
-gemfile(true, quiet: true) do
-  source 'https://rubygems.org'
-  gem 'nokogiri'
-end
+import requests
+from bs4 import BeautifulSoup
+from markdownify import markdownify as md
+from comment_tree import print_comment_tree
 
-$VERBOSE = false
 
-require 'open-uri'
-require 'nokogiri'
-require 'json'
+def get_cache_dir():
+    """Get cache directory, creating it if necessary."""
+    cache_dir = Path.home() / ".cache" / "hn-comments"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
 
-if ARGV.empty?
-  puts "Usage: #{$0} ITEM_ID|ITEM_URL"
-  exit
-end
 
-input = ARGV[0]
+def get_cache_key(url, limit):
+    """Generate cache key from URL and limit."""
+    return hashlib.md5(f"{url}:{limit}".encode()).hexdigest()
 
-if input =~ /^\d+$/
-  base_url = 'https://news.ycombinator.com/'
-  url = "#{base_url}item?id=#{input}"
-elsif input =~ /^https?:\/\//
-  url = input
-else
-  puts "Invalid input. Provide a numeric item ID or a full URL."
-  exit
-end
 
-comments = []
-stack = []
+def load_from_cache(cache_key, max_age_hours=1):
+    """Load comments from cache if available and not too old."""
+    cache_file = get_cache_dir() / f"{cache_key}.json"
+    if cache_file.exists():
+        cache_data = json.loads(cache_file.read_text())
+        age_hours = (time.time() - cache_data["timestamp"]) / 3600
+        if age_hours < max_age_hours:
+            return cache_data["comments"]
+    return None
 
-while url
-  html = URI.open(url).read
-  doc = Nokogiri::HTML(html)
 
-  doc.css('tr.comtr').each do |comment|
-    comment_id = comment['id']
-    author = comment.at_css('a.hnuser')&.text || '[deleted]'
-    time = comment.at_css('span.age')&.text || ''
-    text = comment.at_css('div.comment > span.commtext, div.comment > div.commtext')&.inner_html || '[deleted]'
-
-    ind_img = comment.at_css('td.ind img')
-    indentation = ind_img ? ind_img['width'].to_i / 40 : 0
-
-    comment_hash = {
-      id: comment_id,
-      author: author,
-      time: time,
-      text: text,
-      children: []
+def save_to_cache(cache_key, comments):
+    """Save comments to cache."""
+    cache_file = get_cache_dir() / f"{cache_key}.json"
+    cache_data = {
+        "timestamp": time.time(),
+        "comments": comments
     }
+    cache_file.write_text(json.dumps(cache_data))
 
-    while stack.length > indentation
-      stack.pop
-    end
 
-    if stack.empty?
-      comments << comment_hash
-    else
-      stack.last[:children] << comment_hash
-    end
+def process_comment_html(commtext_elem):
+    """Process HN comment HTML to proper markdown using markdownify."""
+    if not commtext_elem:
+        return '[deleted]'
+    
+    # Get the inner HTML content
+    html_content = commtext_elem.decode_contents()
+    
+    # Fix HN's mixed content: wrap any text before first <p> tag
+    if '<p>' in html_content:
+        # Split at first <p> tag
+        parts = html_content.split('<p>', 1)
+        if len(parts) == 2 and parts[0].strip():
+            before_p = parts[0].strip()
+            # Always wrap in paragraph - let markdownify handle blockquote formatting
+            html_content = f'<p>{before_p}</p><p>{parts[1]}'
+    
+    # First, convert links to plain text format before markdownify
+    def convert_links_to_text(match):
+        href = match.group(1)
+        text = match.group(2)
+        if href.startswith('/'):
+            href = 'https://news.ycombinator.com' + href
+        # Show URL as plain text
+        if text.strip() and text.strip() != href:
+            return f"{text} - {href}"
+        else:
+            return href
+    
+    html_content = re.sub(r'<a href="([^"]*)"[^>]*>(.*?)</a>', convert_links_to_text, html_content)
+    
+    # Escape square brackets to prevent markdownify from treating them as reference links
+    html_content = html_content.replace('[', '&#91;').replace(']', '&#93;')
+    
+    # Use markdownify to convert HTML to markdown
+    markdown_text = md(html_content)
+    
+    # Restore square brackets
+    markdown_text = markdown_text.replace('&#91;', '[').replace('&#93;', ']')
+    
+    # Clean up extra whitespace
+    markdown_text = re.sub(r'\n{3,}', '\n\n', markdown_text)
+    markdown_text = markdown_text.strip()
+    
+    return markdown_text if markdown_text else '[deleted]'
 
-    stack << comment_hash
-  end
 
-  more_link = doc.at_css('a.morelink')
-  if more_link
-    next_url = more_link['href']
-    url = URI.join('https://news.ycombinator.com/', next_url).to_s
-  else
-    url = nil
-  end
-end
+def prune_thread_tree(comments, target_user):
+    """Prune comment tree to only show target user's comments and their direct parents."""
+    def has_target_user(comment):
+        """Check if this comment or any descendant is by the target user."""
+        if comment['author'] == target_user:
+            return True
+        return any(has_target_user(child) for child in comment['children'])
 
-puts JSON.pretty_generate(comments)
+    def prune_comment(comment):
+        """Prune a comment tree, keeping only relevant branches."""
+        if comment['author'] == target_user:
+            # Keep this comment and prune its children
+            comment['children'] = [
+                pruned for child in comment['children']
+                if (pruned := prune_comment(child)) is not None
+            ]
+            return comment
+        else:
+            # Only keep this comment if it has a descendant by target user
+            relevant_children = [
+                pruned for child in comment['children']
+                if (pruned := prune_comment(child)) is not None
+            ]
+            if relevant_children:
+                comment['children'] = relevant_children
+                return comment
+            return None
+
+    # Filter top-level comments and prune each tree
+    return [
+        pruned for comment in comments
+        if has_target_user(comment) and (pruned := prune_comment(comment)) is not None
+    ]
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Extract HackerNews comments")
+    parser.add_argument("input", help="Item ID, URL, or username")
+    parser.add_argument("-n", "--limit", type=int, default=100, help="Maximum number of comments to fetch (default: 100)")
+    parser.add_argument("-r", "--reset-cache", action="store_true", help="Reset cache for this specific item")
+    args = parser.parse_args()
+
+    is_user_threads = False
+    target_user = None
+
+    if re.match(r'^\d+$', args.input):
+        url = f"https://news.ycombinator.com/item?id={args.input}"
+    elif re.match(r'^https?://', args.input):
+        url = args.input
+        # Check if it's a threads URL
+        if 'threads?id=' in url:
+            is_user_threads = True
+            target_user = url.split('threads?id=')[-1].split('&')[0]
+    else:
+        # Assume it's a username
+        url = f"https://news.ycombinator.com/threads?id={args.input}"
+        is_user_threads = True
+        target_user = args.input
+
+    # Handle cache
+    cache_key = get_cache_key(url, args.limit)
+
+    if args.reset_cache:
+        # Reset cache for this specific item
+        cache_file = get_cache_dir() / f"{cache_key}.json"
+        if cache_file.exists():
+            cache_file.unlink()
+    else:
+        # Try to load from cache
+        cached_comments = load_from_cache(cache_key)
+        if cached_comments:
+            # Prune the tree if it's a user threads page
+            if is_user_threads and target_user:
+                cached_comments = prune_thread_tree(cached_comments, target_user)
+            print_comment_tree(cached_comments)
+            return
+
+    # Fetch fresh data
+    comments = []
+    stack = []
+    comment_count = 0
+    initial_url = url
+
+    while url and comment_count < args.limit:
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        for comment in soup.find_all('tr', class_='comtr'):
+            if comment_count >= args.limit:
+                break
+
+            comment_id = comment.get('id')
+            author_elem = comment.find('a', class_='hnuser')
+            author = author_elem.text if author_elem else '[deleted]'
+
+            time_elem = comment.find('span', class_='age')
+            time = time_elem.text if time_elem else ''
+
+            text_elem = comment.find('div', class_='comment')
+            if text_elem:
+                commtext = text_elem.find(['span', 'div'], class_='commtext')
+                text = process_comment_html(commtext) if commtext else '[deleted]'
+            else:
+                text = '[deleted]'
+
+            ind_img = comment.find('td', class_='ind').find('img') if comment.find('td', class_='ind') else None
+            indentation = int(ind_img.get('width', 0)) // 40 if ind_img else 0
+
+            comment_data = {
+                'id': comment_id,
+                'author': author,
+                'time': time,
+                'text': text,
+                'children': []
+            }
+
+            # Adjust stack to match indentation level
+            while len(stack) > indentation:
+                stack.pop()
+
+            if not stack:
+                comments.append(comment_data)
+            else:
+                stack[-1]['children'].append(comment_data)
+
+            stack.append(comment_data)
+            comment_count += 1
+
+        more_link = soup.find('a', class_='morelink')
+        if more_link and comment_count < args.limit:
+            url = urljoin('https://news.ycombinator.com/', more_link.get('href'))
+        else:
+            url = None
+
+    # Save to cache before pruning
+    save_to_cache(cache_key, comments)
+
+    # Prune the tree if it's a user threads page
+    if is_user_threads and target_user:
+        comments = prune_thread_tree(comments, target_user)
+
+    # Render the tree using the library
+    print_comment_tree(comments)
+
+
+if __name__ == '__main__':
+    main()

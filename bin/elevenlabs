@@ -169,16 +169,16 @@ if args.list_voices:
     for voice in voices.voices:
         desc = getattr(voice, 'description', '') or ''
         labels = getattr(voice, 'labels', {}) or {}
-        
+
         # Extract language info if available
         lang_info = []
         if 'language' in labels:
             lang_info.append(f"Primary: {labels['language']}")
         if 'accent' in labels:
             lang_info.append(f"Accent: {labels['accent']}")
-        
+
         lang_str = f" [{', '.join(lang_info)}]" if lang_info else ""
-        
+
         if desc:
             print(f"{voice.voice_id}: {voice.name}{lang_str} - {desc}")
         else:
@@ -241,7 +241,7 @@ if args.language:
 
 try:
     audio_stream = client.text_to_speech.stream(**kwargs)
-    
+
     if sys.stdout.isatty():
         stream(audio_stream)
     else:
@@ -249,7 +249,7 @@ try:
             if isinstance(chunk, bytes):
                 sys.stdout.buffer.write(chunk)
                 sys.stdout.buffer.flush()
-        
+
 except Exception as e:
     print(f"Error: {e}", file=sys.stderr)
     sys.exit(1)

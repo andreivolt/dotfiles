@@ -28,3 +28,6 @@ path=(
 [[ "$OSTYPE" == darwin* ]] && source ~/.zsh.d/homebrew.sh
 source ~/.config/env 2>/dev/null
 [[ "$OSTYPE" == darwin* ]] && source ~/.orbstack/shell/init.zsh
+
+export PYTHONDONTWRITEBYTECODE=1 # prevent Python from creating __pycache__ directories
+export PYTHONWARNINGS=ignore

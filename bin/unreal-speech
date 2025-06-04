@@ -107,8 +107,7 @@ def synthesize_speech(client, text, options):
         voice_id=options.voice_id,
         bitrate=options.bitrate,
         speed=options.speed,
-        pitch=options.pitch,
-        temperature=options.temperature
+        pitch=options.pitch
     )
     return response.get('OutputUri')
 
@@ -143,6 +142,21 @@ def main():
 
     client = unrealspeech.UnrealSpeechAPI(api_key=os.getenv('UNREAL_SPEECH_API_KEY'))
 
+    # Check if stdout is a pipe (not a TTY)
+    is_piped = not sys.stdout.isatty()
+
+    if is_piped:
+        # Output raw audio to stdout when piped
+        try:
+            audio_data = synthesize_stream(client, text, args)
+            sys.stdout.buffer.write(audio_data)
+            sys.stdout.buffer.flush()
+        except Exception as e:
+            print(f"Error synthesizing audio: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    # Original streaming playback behavior for TTY
     # Split text into immediate stream part and remaining chunks
     first_chunk, remaining_text = split_at_sentence_boundary(text, 500)
 

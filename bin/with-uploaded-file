@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --quiet --script
+#!/usr/bin/env -S uv run --script --quiet
 # /// script
 # dependencies = [
 #    "b2sdk>=1.17",
@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import shlex
 import boto3
 from b2sdk.v2 import B2Api, InMemoryAccountInfo
 
@@ -98,8 +99,11 @@ try:
     else:
         # Join arguments into a single command string
         cmd_string = ' '.join(remaining_args)
-        # Replace placeholder with URL
-        cmd_string = cmd_string.replace('{}', download_url)
+        # If no {} placeholder found, append it
+        if '{}' not in cmd_string:
+            cmd_string += ' {}'
+        # Replace placeholder with properly escaped URL
+        cmd_string = cmd_string.replace('{}', shlex.quote(download_url))
         # Execute with shell=True to properly handle the command
         subprocess.run(cmd_string, shell=True)
 

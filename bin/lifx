@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run -qs
 # /// script
 # dependencies = [
-#     "lifxlan==1.2",    # LIFX LAN protocol library
+#     "lifxlan",         # LIFX LAN protocol library
 #     "click==8.1",      # Command-line interface creation kit
 # ]
 # ///
@@ -152,13 +152,13 @@ def kelvin_to_hsbk(kelvin):
         return None
     if kelvin > 9000:
         kelvin = 9000
-    
+
     if kelvin < 1500:
         # Emulate warmer temperatures with red hue and saturation
         # Map 1000K-1499K to increasing saturation and red hue
         virtual_temp = max(1000, kelvin)
         temp_factor = (1500 - virtual_temp) / 500.0  # 0 to 1 as we go from 1500K to 1000K
-        
+
         hue = 0  # Red
         saturation = min(100, temp_factor * 80)  # Up to 80% saturation at 1000K
         brightness = 100
@@ -200,7 +200,7 @@ def get_virtual_kelvin(current_color):
     current_kelvin = current_color[3]
     current_saturation = current_color[1] / 65535 * 100
     current_hue = current_color[0] / 65535 * 360
-    
+
     if current_kelvin == 1500 and current_saturation > 5 and abs(current_hue) < 30:
         # Likely emulating sub-1500K temperature
         # Map saturation back to virtual kelvin: 80% sat = 1000K, 0% sat = 1500K
@@ -219,7 +219,7 @@ def set_virtual_kelvin(light, virtual_kelvin, current_color, duration_ms):
         saturation = min(100, temp_factor * 80)
         brightness = current_color[2] / 65535 * 100
         actual_kelvin = 1500
-        
+
         new_color = intuitive_to_lifx_hsbk(hue, saturation, brightness, actual_kelvin)
         light.set_color(new_color, duration=duration_ms)
         return f"{virtual_kelvin}K (emulated)"
@@ -259,7 +259,7 @@ def add_target_options(f):
     )(f)
     return f
 
-@click.group()
+@click.group(invoke_without_command=True)
 @add_target_options
 @click.pass_context
 def cli(ctx, all_lights, group, name):
@@ -268,7 +268,21 @@ def cli(ctx, all_lights, group, name):
     ctx.obj['group'] = group
     ctx.obj['name'] = name
 
-@cli.command(name='list', short_help='List all discovered LIFX lights.')
+    # Check if script was called as 'on' or 'off' (via symlink or argv[0])
+    script_name = os.path.basename(sys.argv[0])
+    if script_name in ['on', 'off']:
+        power_command(all_lights=all_lights, group=group, name=name, duration=0.0, state=script_name)
+        return
+
+    # Check if first argument is 'on' or 'off'
+    if len(sys.argv) > 1 and sys.argv[1] in ['on', 'off'] and not any(arg.startswith('-') for arg in sys.argv[1:]):
+        # Remove the on/off argument from sys.argv and invoke power command
+        action = sys.argv[1]
+        sys.argv.pop(1)  # Remove 'on'/'off' from argv
+        power_command(all_lights=all_lights, group=group, name=name, duration=0.0, state=action)
+        return
+
+@cli.command(name='list', short_help='List lights.')
 @click.option('--rescan', '-r',
               is_flag=True,
               default=False,
@@ -342,44 +356,35 @@ def list_lights(rescan, json_output):
             label = light.get_label()
             power = "On" if light.get_power() > 0 else "Off"
             color = light.get_color()
-            
+
             if color and power == "On":
                 h = color[0]/65535*360
                 s = color[1]/65535*100
                 b = color[2]/65535*100
                 k = color[3]
-                
+
                 # Generate color preview
                 r, g, b_rgb = hsbk_to_rgb(h, s, b, k)
                 color_preview = rgb_to_ansi(r, g, b_rgb)
-                
+
                 # Format color info concisely
                 if s < 5:  # Essentially white
                     color_info = f"{k}K white"
                 else:
                     color_info = f"{h:.0f}°, {s:.0f}%, {k}K"
-                
+
                 brightness_str = f"{b:.0f}%"
             else:
                 color_preview = "  "  # No color preview when off
                 color_info = "Off" if power == "Off" else "Unknown"
                 brightness_str = "0%" if power == "Off" else "?"
-            
+
             print(f"{color_preview} {label:<20} {power:<3} {brightness_str:<4} {color_info}")
         except:
             print(f"   {label:<20} ?   ?    Connection failed")
 
-cli.add_command(list_lights, name='l')
 
-@cli.command(name='power', short_help='Set power state of LIFX lights.')
-@add_target_options
-@add_duration_option
-@click.argument('state', type=click.Choice(['on', 'off']))
-@click.pass_context
-def power(ctx, all_lights, group, name, duration, state):
-    all_lights = all_lights or ctx.obj.get('all_lights')
-    group = group or ctx.obj.get('group')
-    name = name or ctx.obj.get('name')
+def power_command(all_lights, group, name, duration, state):
     lifx, lights = get_lights(all_lights, group, name)
     duration_ms = int(duration * 1000)  # Convert seconds to milliseconds
     try:
@@ -391,9 +396,7 @@ def power(ctx, all_lights, group, name, duration, state):
         print("Failed to set power.")
     print("\nAll specified actions have been executed.")
 
-cli.add_command(power, name='p')
-
-@cli.command(name='color', short_help='Set color of LIFX lights.')
+@cli.command(name='color', short_help='Set color.')
 @add_target_options
 @add_duration_option
 @click.argument('color_arg', type=str, required=False)
@@ -403,7 +406,7 @@ def color(ctx, all_lights, group, name, duration, color_arg):
     group = group or ctx.obj.get('group')
     name = name or ctx.obj.get('name')
     lifx, lights = get_lights(all_lights, group, name)
-    
+
     if not color_arg:
         # Use fzf to select from predefined HSBK colors
         options = []
@@ -414,7 +417,7 @@ def color(ctx, all_lights, group, name, duration, color_arg):
             color_preview = rgb_to_ansi(r, g, b_rgb)
             formatted_hsbk = f"{h:>3.0f},{s:>3.0f},{b:>3.0f},{k:>4.0f}"
             options.append(f"{color_preview} {name:<{max_name_len}} - {formatted_hsbk}")
-        
+
         try:
             proc = subprocess.run(
                 ['fzf', '--prompt=Select color: ', '--height=20', '--ansi'],
@@ -439,7 +442,7 @@ def color(ctx, all_lights, group, name, duration, color_arg):
         except Exception as e:
             print(f"Error during color selection: {e}")
             sys.exit(1)
-    
+
     if color_arg.endswith('k'):
         color_value = kelvin_to_hsbk(color_arg)
         if not color_value:
@@ -476,9 +479,8 @@ def color(ctx, all_lights, group, name, duration, color_arg):
         print("Failed to set color.")
     print("\nAll specified actions have been executed.")
 
-cli.add_command(color, name='c')
 
-@cli.command(name='brightness', short_help='Set brightness of LIFX lights.')
+@cli.command(name='brightness', short_help='Set brightness.')
 @add_target_options
 @add_duration_option
 @click.argument('level', type=click.IntRange(0, 100))
@@ -504,9 +506,8 @@ def brightness(ctx, all_lights, group, name, duration, level):
         print("Failed to set brightness.")
     print("\nAll specified actions have been executed.")
 
-cli.add_command(brightness, name='b')
 
-@cli.command(name='brighter', short_help='Increase brightness by percentage.')
+@cli.command(name='brighter', short_help='Increase brightness.')
 @add_target_options
 @add_duration_option
 @click.argument('amount', type=int, default=10)
@@ -534,7 +535,7 @@ def brighter(ctx, all_lights, group, name, duration, amount):
         print("Failed to adjust brightness.")
     print("\nAll specified actions have been executed.")
 
-@cli.command(name='dimmer', short_help='Decrease brightness by percentage.')
+@cli.command(name='dimmer', short_help='Decrease brightness.')
 @add_target_options
 @add_duration_option
 @click.argument('amount', type=int, default=10)
@@ -562,7 +563,7 @@ def dimmer(ctx, all_lights, group, name, duration, amount):
         print("Failed to adjust brightness.")
     print("\nAll specified actions have been executed.")
 
-@cli.command(name='warmer', short_help='Make lights warmer (lower kelvin, including sub-1500K emulation).')
+@cli.command(name='warmer', short_help='Make warmer.')
 @add_target_options
 @add_duration_option
 @click.argument('amount', type=int, default=100)
@@ -579,7 +580,7 @@ def warmer(ctx, all_lights, group, name, duration, amount):
             if current_color:
                 virtual_kelvin = get_virtual_kelvin(current_color)
                 new_virtual_kelvin = max(1000, virtual_kelvin - amount)
-                
+
                 temp_display = set_virtual_kelvin(light, new_virtual_kelvin, current_color, duration_ms)
                 print(f"Made '{light.get_label()}' warmer ({temp_display}).")
             else:
@@ -589,7 +590,7 @@ def warmer(ctx, all_lights, group, name, duration, amount):
         print("Failed to adjust temperature.")
     print("\nAll specified actions have been executed.")
 
-@cli.command(name='cooler', short_help='Make lights cooler (higher kelvin, including from sub-1500K emulation).')
+@cli.command(name='cooler', short_help='Make cooler.')
 @add_target_options
 @add_duration_option
 @click.argument('amount', type=int, default=100)
@@ -606,7 +607,7 @@ def cooler(ctx, all_lights, group, name, duration, amount):
             if current_color:
                 virtual_kelvin = get_virtual_kelvin(current_color)
                 new_virtual_kelvin = min(9000, virtual_kelvin + amount)
-                
+
                 temp_display = set_virtual_kelvin(light, new_virtual_kelvin, current_color, duration_ms)
                 print(f"Made '{light.get_label()}' cooler ({temp_display}).")
             else:

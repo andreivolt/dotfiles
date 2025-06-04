@@ -34,7 +34,7 @@ vim.opt.cmdwinheight = 10
 vim.opt.completeopt = "menu,menuone,noselect"
 vim.opt.confirm = true
 vim.opt.fillchars = { eob = " " }
-vim.opt.guifont = "Iosevka Nerd Font Mono:h24:w-3:#h-none"
+vim.opt.guifont = "Iosevka Nerd Font Mono:h20:w-2:#h-none"
 vim.opt.ignorecase = true
 vim.opt.infercase = true
 vim.opt.laststatus = 0

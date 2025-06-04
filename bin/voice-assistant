@@ -1,0 +1,103 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = [
+#     "pvporcupine>=3.0",
+#     "sounddevice>=0.4",
+#     "google-generativeai>=0.8",
+#     "numpy>=1.24",
+#     "openai>=1.54",
+#     "scipy>=1.11",
+# ]
+# ///
+
+import os
+import sys
+import pvporcupine
+import sounddevice as sd
+import numpy as np
+import tempfile
+import openai
+import google.generativeai as genai
+from scipy.io.wavfile import write
+
+# Configuration
+WAKE_WORD = "picovoice"
+ACCESS_KEY = os.getenv("PORCUPINE_ACCESS_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+SAMPLE_RATE = 16000
+
+def configure_apis():
+    if not GEMINI_API_KEY:
+        print("Error: GEMINI_API_KEY environment variable is required")
+        sys.exit(1)
+    if not OPENAI_API_KEY:
+        print("Error: OPENAI_API_KEY environment variable is required")
+        sys.exit(1)
+    genai.configure(api_key=GEMINI_API_KEY)
+    openai.api_key = OPENAI_API_KEY
+
+def initialize_porcupine():
+    if not ACCESS_KEY:
+        print("Error: PORCUPINE_ACCESS_KEY environment variable is required")
+        sys.exit(1)
+    return pvporcupine.create(keywords=[WAKE_WORD], access_key=ACCESS_KEY)
+
+def detect_wake_word(porcupine):
+    print(f"Listening for wake word '{WAKE_WORD}'...")
+    with sd.InputStream(channels=1, samplerate=porcupine.sample_rate, dtype='int16') as stream:
+        while True:
+            audio_data = stream.read(porcupine.frame_length)[0]
+            pcm = np.frombuffer(audio_data, dtype=np.int16)
+            if porcupine.process(pcm) >= 0:
+                print("Wake word detected!")
+                return True
+
+def record_audio(duration=3):
+    print("Recording audio...")
+    audio_data = sd.rec(int(duration * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=1, dtype='int16')
+    sd.wait()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+        # Save the audio data as a WAV file
+        write(f.name, SAMPLE_RATE, audio_data)
+        audio_file_path = f.name
+    return audio_file_path
+
+def transcribe_audio(file_path):
+    if not OPENAI_API_KEY:
+        print("Error: OPENAI_API_KEY environment variable is required")
+        sys.exit(1)
+    with open(file_path, "rb") as audio_file:
+        # Transcribe using OpenAI Whisper API
+        transcription = openai.audio.transcriptions.create(
+            file=audio_file,
+            model="whisper-1"
+        )
+    transcription_text = transcription.text
+    print(f"Transcription: {transcription_text}")
+    return transcription_text
+
+def generate_response(prompt, model="gemini-1.5-flash-8b"):
+    model_instance = genai.GenerativeModel(model)
+    generation_config = genai.GenerationConfig(temperature=0.7)
+    response = model_instance.generate_content(
+        [prompt],
+        generation_config=generation_config,
+        request_options={"timeout": None}
+    )
+    print("AI Response:")
+    for candidate in response.candidates:
+        print(candidate.content.parts[0].text)
+
+def main():
+    configure_apis()
+    porcupine = initialize_porcupine()
+
+    if detect_wake_word(porcupine):
+        audio_file_path = record_audio()
+        transcription_text = transcribe_audio(audio_file_path)
+        generate_response(transcription_text)
+        os.remove(audio_file_path)
+
+if __name__ == "__main__":
+    main()

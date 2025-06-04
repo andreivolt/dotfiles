@@ -1,163 +1,634 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = [
+#   "requests",
+#   "argparse",
+#   "tabulate",
+#   "azure-cognitiveservices-speech",
+# ]
+# ///
 
-require 'json'
-require 'optparse'
+import os
+import sys
+import json
+import time
+import argparse
+import subprocess
+import re
+import tempfile
+import threading
+from pathlib import Path
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any, Iterator
+from urllib.parse import urljoin
 
-require 'bundler/inline'
-gemfile(quiet: true) do
-  source :rubygems
-  gem 'httparty', '~> 0.2'
-  gem 'nokogiri'
-  gem 'terminal-table'
-end
+import requests
+import azure.cognitiveservices.speech as speechsdk
 
-class AzureSpeechSynthesizer
-  include HTTParty
 
-  CACHE_DIR = File.expand_path('~/.cache/azure-speech')
-  VOICES_CACHE_FILE = File.join(CACHE_DIR, 'voices.json')
-  TOKEN_CACHE_FILE = File.join(CACHE_DIR, 'token.json')
+class AzureSpeechSynthesizer:
+    """Azure Speech Service Text-to-Speech synthesizer with WebSocket streaming and chunking."""
 
-  def initialize(region, key)
-    @region = region
-    self.class.base_uri "https://#{@region}.tts.speech.microsoft.com"
-    @options = {
-      headers: {
-        'Ocp-Apim-Subscription-Key' => key
-      }
+    def __init__(self, region: str, key: str):
+        self.region = region
+        self.key = key
+        self.base_url = f"https://{region}.tts.speech.microsoft.com"
+        self.token_url = f"https://{region}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
+        self.cache_dir = Path.home() / ".cache" / "azure-speech"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.voices_cache = self.cache_dir / "voices.json"
+        self.token_cache = self.cache_dir / "token.json"
+
+        # Azure limits
+        self.max_ssml_size = 64 * 1024  # 64KB per WebSocket turn
+        self.max_plain_text_f0 = 3000   # Free tier
+        self.max_plain_text_s0 = 20000  # Standard tier
+
+    def get_access_token(self) -> str:
+        """Get cached access token or fetch new one."""
+        if self.token_cache.exists():
+            try:
+                token_data = json.loads(self.token_cache.read_text())
+                expiry = datetime.fromisoformat(token_data['expiry'])
+                if expiry > datetime.now():
+                    return token_data['token']
+            except (json.JSONDecodeError, KeyError, ValueError):
+                pass
+
+        response = requests.post(
+            self.token_url,
+            headers={
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Content-Length': '0',
+                'Ocp-Apim-Subscription-Key': self.key
+            }
+        )
+        response.raise_for_status()
+
+        token = response.text
+        expiry = datetime.now() + timedelta(minutes=9)  # Token valid for 10min, cache for 9
+
+        token_data = {'token': token, 'expiry': expiry.isoformat()}
+        self.token_cache.write_text(json.dumps(token_data))
+
+        return token
+
+    def get_voices(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        """Get list of available voices with caching."""
+        if not force_refresh and self.voices_cache.exists():
+            try:
+                return json.loads(self.voices_cache.read_text())
+            except json.JSONDecodeError:
+                pass
+
+        response = requests.get(
+            f"{self.base_url}/cognitiveservices/voices/list",
+            headers={'Ocp-Apim-Subscription-Key': self.key}
+        )
+        response.raise_for_status()
+
+        voices = response.json()
+        self.voices_cache.write_text(json.dumps(voices, indent=2))
+        return voices
+
+    def filter_voices(self, voices: List[Dict], locale: str = None, gender: str = None,
+                     neural_only: bool = False, styles_only: bool = False) -> List[Dict]:
+        """Filter voices by various criteria."""
+        filtered = voices
+
+        if locale:
+            filtered = [v for v in filtered if v.get('Locale', '').lower().startswith(locale.lower())]
+
+        if gender:
+            filtered = [v for v in filtered if v.get('Gender', '').lower() == gender.lower()]
+
+        if neural_only:
+            filtered = [v for v in filtered if 'Neural' in v.get('VoiceType', '')]
+
+        if styles_only:
+            filtered = [v for v in filtered if v.get('StyleList')]
+
+        return filtered
+
+    def build_ssml(self, text: str, voice_name: str, rate: str = None, pitch: str = None,
+                   volume: str = None, style: str = None, style_degree: str = None,
+                   role: str = None, emotion: str = None, locale: str = "en-US") -> str:
+        """Build SSML with advanced features."""
+
+        # Handle pre-existing SSML
+        if text.strip().startswith('<speak'):
+            return text
+
+        voice_attrs = f'name="{voice_name}"'
+
+        # Build prosody attributes
+        prosody_attrs = []
+        if rate:
+            prosody_attrs.append(f'rate="{rate}"')
+        if pitch:
+            prosody_attrs.append(f'pitch="{pitch}"')
+        if volume:
+            prosody_attrs.append(f'volume="{volume}"')
+
+        # Build expression attributes
+        express_attrs = []
+        if style:
+            express_attrs.append(f'style="{style}"')
+        if style_degree:
+            express_attrs.append(f'styledegree="{style_degree}"')
+        if role:
+            express_attrs.append(f'role="{role}"')
+
+        # Build SSML layers
+        content = text
+
+        # Wrap in prosody if needed
+        if prosody_attrs:
+            prosody_str = ' '.join(prosody_attrs)
+            content = f'<prosody {prosody_str}>{content}</prosody>'
+
+        # Wrap in expression if needed
+        if express_attrs:
+            express_str = ' '.join(express_attrs)
+            content = f'<mstts:express-as {express_str}>{content}</mstts:express-as>'
+
+        # Wrap in voice
+        content = f'<voice {voice_attrs}>{content}</voice>'
+
+        # Complete SSML document
+        ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
+xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="{locale}">
+{content}
+</speak>'''
+
+        return ssml
+
+    def chunk_text(self, text: str, max_chars: int = None) -> Iterator[str]:
+        """Chunk text on sentence boundaries to respect Azure limits."""
+        if max_chars is None:
+            max_chars = self.max_plain_text_s0  # Default to S0 limit
+
+        # If text is short enough, return as single chunk
+        if len(text) <= max_chars:
+            yield text
+            return
+
+        # Split on sentence boundaries
+        sentence_pattern = r'(?<=[.!?])\s+'
+        sentences = re.split(sentence_pattern, text)
+
+        current_chunk = ""
+        for sentence in sentences:
+            # If single sentence exceeds limit, split further
+            if len(sentence) > max_chars:
+                # Split on clause boundaries
+                clause_pattern = r'(?<=[,;:])\s+'
+                clauses = re.split(clause_pattern, sentence)
+
+                for clause in clauses:
+                    if len(current_chunk) + len(clause) + 1 > max_chars:
+                        if current_chunk:
+                            yield current_chunk.strip()
+                            current_chunk = clause
+                        else:
+                            # Even single clause too long, force split
+                            while len(clause) > max_chars:
+                                yield clause[:max_chars].strip()
+                                clause = clause[max_chars:]
+                            current_chunk = clause
+                    else:
+                        current_chunk += (" " if current_chunk else "") + clause
+            else:
+                # Normal sentence processing
+                if len(current_chunk) + len(sentence) + 1 > max_chars:
+                    if current_chunk:
+                        yield current_chunk.strip()
+                        current_chunk = sentence
+                    else:
+                        current_chunk = sentence
+                else:
+                    current_chunk += (" " if current_chunk else "") + sentence
+
+        if current_chunk:
+            yield current_chunk.strip()
+
+    def synthesize_streaming(self, text: str, voice_name: str, output_format: str = "audio-48khz-192kbitrate-mono-mp3",
+                           output_file: str = None, play_audio: bool = True, tempo: float = None,
+                           rate: str = None, pitch: str = None, volume: str = None, style: str = None,
+                           style_degree: str = None, role: str = None, locale: str = "en-US") -> List[bytes]:
+        """Synthesize speech using WebSocket streaming with chunking."""
+
+        # Create speech config
+        speech_config = speechsdk.SpeechConfig(subscription=self.key, region=self.region)
+        speech_config.speech_synthesis_output_format = self._get_sdk_format(output_format)
+
+        chunks = list(self.chunk_text(text))
+        audio_chunks = []
+        temp_files = []
+
+        for i, chunk in enumerate(chunks):
+            # Build SSML for chunk
+            ssml = self.build_ssml(
+                chunk, voice_name, rate, pitch, volume,
+                style, style_degree, role, locale
+            )
+
+            # Create synthesizer for this chunk
+            synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+
+            # Synthesize chunk
+            result = synthesizer.speak_ssml_async(ssml).get()
+
+
+            if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                audio_data = result.audio_data
+                audio_chunks.append(audio_data)
+
+                if play_audio and not output_file:
+                    # Play immediately for streaming effect
+                    self._play_audio_chunk(audio_data, tempo, i == 0)
+                else:
+                    # Save to temp file for concatenation
+                    temp_file = tempfile.NamedTemporaryFile(suffix=f'_chunk_{i}.mp3', delete=False)
+                    temp_file.write(audio_data)
+                    temp_file.close()
+                    temp_files.append(temp_file.name)
+
+            elif result.reason == speechsdk.ResultReason.Canceled:
+                cancellation = result.cancellation_details
+                print(f"Synthesis canceled: {cancellation.reason}", file=sys.stderr)
+                if cancellation.error_details:
+                    print(f"Error: {cancellation.error_details}", file=sys.stderr)
+                break
+
+        # If saving to file, concatenate all chunks  
+        if output_file:
+            if len(audio_chunks) == 1:
+                # Single chunk, save directly
+                Path(output_file).write_bytes(audio_chunks[0])
+                print(f"Audio saved to: {output_file}")
+            elif len(audio_chunks) > 1:
+                # Multiple chunks, concatenate raw audio data
+                combined_audio = b''.join(audio_chunks)
+                Path(output_file).write_bytes(combined_audio)
+                print(f"Audio saved to: {output_file}")
+            
+            # Cleanup temp files
+            for temp_file in temp_files:
+                try:
+                    os.unlink(temp_file)
+                except OSError:
+                    pass
+
+        return audio_chunks
+
+    def _get_sdk_format(self, format_string: str) -> speechsdk.SpeechSynthesisOutputFormat:
+        """Convert format string to SDK format enum."""
+        format_map = {
+            'audio-48khz-192kbitrate-mono-mp3': speechsdk.SpeechSynthesisOutputFormat.Audio48Khz192KBitRateMonoMp3,
+            'audio-48khz-96kbitrate-mono-mp3': speechsdk.SpeechSynthesisOutputFormat.Audio48Khz96KBitRateMonoMp3,
+            'audio-24khz-160kbitrate-mono-mp3': speechsdk.SpeechSynthesisOutputFormat.Audio24Khz160KBitRateMonoMp3,
+            'audio-24khz-96kbitrate-mono-mp3': speechsdk.SpeechSynthesisOutputFormat.Audio24Khz96KBitRateMonoMp3,
+            'audio-16khz-128kbitrate-mono-mp3': speechsdk.SpeechSynthesisOutputFormat.Audio16Khz128KBitRateMonoMp3,
+            'audio-16khz-64kbitrate-mono-mp3': speechsdk.SpeechSynthesisOutputFormat.Audio16Khz64KBitRateMonoMp3,
+            'riff-48khz-16bit-mono-pcm': speechsdk.SpeechSynthesisOutputFormat.Riff48Khz16BitMonoPcm,
+            'riff-24khz-16bit-mono-pcm': speechsdk.SpeechSynthesisOutputFormat.Riff24Khz16BitMonoPcm,
+            'riff-16khz-16bit-mono-pcm': speechsdk.SpeechSynthesisOutputFormat.Riff16Khz16BitMonoPcm,
+        }
+        return format_map.get(format_string, speechsdk.SpeechSynthesisOutputFormat.Audio48Khz192KBitRateMonoMp3)
+
+    def _play_audio_chunk(self, audio_data: bytes, tempo: float = None, is_first: bool = False):
+        """Play audio chunk with optional tempo adjustment."""
+        try:
+            if tempo and tempo != 1.0:
+                # Use ffmpeg for tempo adjustment, then sox for playback
+                ffmpeg_cmd = [
+                    'ffmpeg', '-i', '-', '-filter:a', f'atempo={tempo}',
+                    '-f', 'wav', '-'
+                ]
+                sox_cmd = ['sox', '-t', 'wav', '-', '-d']
+
+                ffmpeg_proc = subprocess.Popen(
+                    ffmpeg_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+                )
+                sox_proc = subprocess.Popen(
+                    sox_cmd, stdin=ffmpeg_proc.stdout, stderr=subprocess.DEVNULL
+                )
+
+                ffmpeg_proc.stdin.write(audio_data)
+                ffmpeg_proc.stdin.close()
+                ffmpeg_proc.stdout.close()
+                sox_proc.wait()
+            else:
+                # Direct playback with sox - Azure SDK returns WAV data
+                sox_proc = subprocess.Popen(
+                    ['sox', '-t', 'wav', '-', '-d'],
+                    stdin=subprocess.PIPE, stderr=subprocess.DEVNULL
+                )
+                sox_proc.communicate(audio_data)
+        except FileNotFoundError as e:
+            if is_first:  # Only show error once
+                print(f"Audio playback failed: {e}. Install sox for audio playback.", file=sys.stderr)
+
+    def _concatenate_audio_files(self, temp_files: List[str], output_file: str):
+        """Concatenate audio files using ffmpeg."""
+        try:
+            # Create concat file list
+            concat_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
+            for temp_file in temp_files:
+                concat_file.write(f"file '{temp_file}'\n")
+            concat_file.close()
+
+            # Use ffmpeg to concatenate
+            ffmpeg_cmd = [
+                'ffmpeg', '-f', 'concat', '-safe', '0', '-i', concat_file.name,
+                '-c', 'copy', '-y', output_file
+            ]
+
+            result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                print(f"Audio saved to: {output_file}")
+            else:
+                print(f"Concatenation failed: {result.stderr}", file=sys.stderr)
+
+            # Cleanup concat file
+            os.unlink(concat_file.name)
+
+        except FileNotFoundError:
+            print("ffmpeg not found. Saving first chunk only.", file=sys.stderr)
+            if temp_files:
+                Path(output_file).write_bytes(Path(temp_files[0]).read_bytes())
+
+    def synthesize(self, ssml: str, output_format: str = "audio-48khz-192kbitrate-mono-mp3",
+                   output_file: str = None, play_audio: bool = True, tempo: float = None) -> bytes:
+        """Synthesize speech from SSML."""
+        token = self.get_access_token()
+
+        headers = {
+            'Content-Type': 'application/ssml+xml',
+            'X-Microsoft-OutputFormat': output_format,
+            'Authorization': f'Bearer {token}',
+            'User-Agent': 'azure-speech-cli'
+        }
+
+        response = requests.post(
+            f"{self.base_url}/cognitiveservices/v1",
+            headers=headers,
+            data=ssml
+        )
+
+        if not response.ok:
+            print(f"Error {response.status_code}: {response.text}", file=sys.stderr)
+            sys.exit(1)
+
+        audio_data = response.content
+
+        if output_file:
+            Path(output_file).write_bytes(audio_data)
+            print(f"Audio saved to: {output_file}")
+            return audio_data
+
+        if play_audio:
+            self._play_audio(audio_data, tempo)
+
+        return audio_data
+
+    def _play_audio(self, audio_data: bytes, tempo: float = None):
+        """Play audio through ffmpeg and sox."""
+        try:
+            if tempo and tempo != 1.0:
+                # Use ffmpeg for tempo adjustment, then sox for playback
+                ffmpeg_cmd = [
+                    'ffmpeg', '-i', '-', '-filter:a', f'atempo={tempo}',
+                    '-f', 'mp3', '-'
+                ]
+                sox_cmd = ['sox', '-t', 'mp3', '-', '-d']
+
+                ffmpeg_proc = subprocess.Popen(
+                    ffmpeg_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+                )
+                sox_proc = subprocess.Popen(
+                    sox_cmd, stdin=ffmpeg_proc.stdout, stderr=subprocess.DEVNULL
+                )
+
+                ffmpeg_proc.stdin.write(audio_data)
+                ffmpeg_proc.stdin.close()
+                ffmpeg_proc.stdout.close()
+                sox_proc.wait()
+            else:
+                # Direct playback with sox
+                sox_proc = subprocess.Popen(
+                    ['sox', '-t', 'mp3', '-', '-d'],
+                    stdin=subprocess.PIPE, stderr=subprocess.DEVNULL
+                )
+                sox_proc.communicate(audio_data)
+        except FileNotFoundError as e:
+            print(f"Audio playback failed: {e}. Install ffmpeg and sox for audio playback.", file=sys.stderr)
+
+
+def get_audio_formats():
+    """Get available audio formats organized by quality."""
+    return {
+        'high_quality': [
+            'audio-48khz-192kbitrate-mono-mp3',
+            'audio-48khz-96kbitrate-mono-mp3',
+            'riff-48khz-16bit-mono-pcm',
+        ],
+        'standard': [
+            'audio-24khz-160kbitrate-mono-mp3',
+            'audio-24khz-96kbitrate-mono-mp3',
+            'riff-24khz-16bit-mono-pcm',
+        ],
+        'low_bandwidth': [
+            'audio-16khz-128kbitrate-mono-mp3',
+            'audio-16khz-64kbitrate-mono-mp3',
+            'riff-16khz-16bit-mono-pcm',
+        ]
     }
-  end
 
-  def get_access_token
-    if File.exist?(TOKEN_CACHE_FILE)
-      token_data = JSON.parse(File.read(TOKEN_CACHE_FILE))
-      expiry_time = Time.parse(token_data['expiry_time'])
-      if expiry_time > Time.now
-        return token_data['access_token']
-      end
-    end
 
-    token_uri = URI("https://#{@region}.api.cognitive.microsoft.com/sts/v1.0/issueToken")
-    token_response = HTTParty.post(token_uri,
-      headers: {
-        'Content-type' => 'application/x-www-form-urlencoded',
-        'Content-Length' => '0',
-        'Ocp-Apim-Subscription-Key' => @options[:headers]['Ocp-Apim-Subscription-Key']
-      }
-    )
-    access_token = token_response.body
-    expiry_time = Time.now + 10 * 60 # token is valid for 10 minutes
+def print_voices_table(voices: List[Dict], show_styles: bool = False):
+    """Print voices in a formatted table."""
+    try:
+        from tabulate import tabulate
+    except ImportError:
+        # Fallback to simple formatting
+        for voice in voices:
+            print(f"{voice.get('Locale', ''):<12} {voice.get('DisplayName', ''):<30} "
+                  f"{voice.get('Gender', ''):<8} {voice.get('VoiceType', '')}")
+        return
 
-    token_data = {
-      'access_token' => access_token,
-      'expiry_time' => expiry_time.to_s
-    }
-    FileUtils.mkdir_p(CACHE_DIR)
-    File.write(TOKEN_CACHE_FILE, token_data.to_json)
+    headers = ['Locale', 'Display Name', 'Gender', 'Voice Type']
+    rows = []
 
-    access_token
-  end
+    for voice in voices:
+        row = [
+            voice.get('Locale', ''),
+            voice.get('DisplayName', ''),
+            voice.get('Gender', ''),
+            voice.get('VoiceType', '')
+        ]
 
-  def voices
-    if File.exist?(VOICES_CACHE_FILE)
-      JSON.parse(File.read(VOICES_CACHE_FILE))
-    else
-      response = self.class.get('/cognitiveservices/voices/list', @options)
-      FileUtils.mkdir_p(CACHE_DIR)
-      File.write(VOICES_CACHE_FILE, response.body)
-      response.parsed_response
-    end
-  end
+        if show_styles and voice.get('StyleList'):
+            row.append(', '.join(voice['StyleList'][:3]) + ('...' if len(voice['StyleList']) > 3 else ''))
+            if 'Styles' not in headers:
+                headers.append('Styles')
 
-  def synthesize(content, voice_name, prosody_rate, format, tempo)
-    voice = voices.find { |v| v['DisplayName'] == voice_name }
+        rows.append(row)
 
-    if voice.nil?
-      puts "Voice '#{voice_name}' not found. Please provide a valid voice name."
-      return
-    end
+    print(tabulate(rows, headers=headers, tablefmt='grid'))
 
-    voice_tags = content.scan(/<voice\s+name=".*?">.*<\/voice>/m)
 
-    ssml_content =
-      if voice_tags.any?
-        voice_tags.join("\n")
-      else
-        <<~XML
-          <voice name='#{voice['ShortName']}'>
-            <prosody rate='#{prosody_rate}'>#{content}</prosody>
-          </voice>
-        XML
-      end
-
-    ssml_xml = <<~XML
-      <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">
-        #{ssml_content}
-      </speak>
-    XML
-
-    synthesize_speech(ssml_xml, format, tempo)
-  end
-
-  private
-
-  def synthesize_speech(ssml_xml, format, tempo)
-    access_token = get_access_token
-    response = self.class.post('/cognitiveservices/v1',
-      headers: {
-        'Content-Type' => 'application/ssml+xml',
-        'X-Microsoft-OutputFormat' => format,
-        'Authorization' => "Bearer #{access_token}"
-      },
-      body: ssml_xml
+def main():
+    parser = argparse.ArgumentParser(
+        description='Azure Speech Service Text-to-Speech CLI with advanced SSML support',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  %(prog)s "Hello world"
+  %(prog)s --voice "en-US-AvaMultilingualNeural" --style cheerful "I'm excited!"
+  %(prog)s --rate slow "This is sad news"
+  %(prog)s --list-voices --neural-only --locale en-US
+  %(prog)s --preview --style whispering "Secret message"
+  %(prog)s --no-streaming "Use traditional REST API"
+  %(prog)s --chunk-size 1000 "Custom chunk size for long text"
+        '''
     )
 
-    if response.success?
-      IO.popen("ffmpeg -i - -filter:a 'atempo=#{tempo}' -f mp3 - | sox -t mp3 - -d", 'wb') do |ffmpeg|
-        ffmpeg.write(response.body)
-      end
-    else
-      puts "Speech synthesis failed with status code: #{response.code}"
-      puts "Response body: #{response.body}"
-    end
-  end
-end
+    # Input options
+    parser.add_argument('text', nargs='*', help='Text to synthesize (or read from stdin)')
+    parser.add_argument('-f', '--file', help='Read text from file')
 
-options = {
-  voice_name: 'Aria',
-  prosody_rate: '-10.00%',
-  format: 'audio-48khz-192kbitrate-mono-mp3',
-  tempo: 1.4
-}
+    # Voice selection
+    parser.add_argument('-v', '--voice', default='en-US-AriaNeural',
+                       help='Voice name (default: en-US-AriaNeural)')
+    parser.add_argument('-l', '--locale', default='en-US',
+                       help='Voice locale (default: en-US)')
 
-OptionParser.new do |opts|
-  opts.banner = "Usage: #{$0} [options] [content]"
+    # SSML options
+    parser.add_argument('-r', '--rate', help='Speaking rate (e.g., slow, medium, fast, +20%%, -10%%)')
+    parser.add_argument('-p', '--pitch', help='Voice pitch (e.g., low, medium, high, +2st, -50Hz)')
+    parser.add_argument('--volume', help='Voice volume (e.g., silent, soft, medium, loud, +6dB)')
+    parser.add_argument('-s', '--style', help='Speaking style (e.g., cheerful, sad, angry, excited)')
+    parser.add_argument('--style-degree', help='Style intensity (0.01-2.0, default varies by style)')
+    parser.add_argument('--role', help='Role-play (e.g., Girl, Boy, YoungAdultFemale, OlderAdultMale)')
 
-  opts.on('-v', '--voice VOICE', "Voice name (default: #{options[:voice_name]})")
-  opts.on('-p', '--prosody RATE', "Prosody rate (default: #{options[:prosody_rate]})")
-  opts.on('-f', '--format FORMAT', "Output audio format (default: #{options[:format]})")
-  opts.on('-t', '--tempo TEMPO', Float, "Audio tempo adjustment (default: #{options[:tempo]})")
-  opts.on('-l', '--list_voices', 'List available voices')
-end.parse!(into: options)
+    # Audio options
+    parser.add_argument('--format', default='audio-48khz-192kbitrate-mono-mp3',
+                       help='Audio output format (default: high quality MP3)')
+    parser.add_argument('--quality', choices=['high', 'standard', 'low'],
+                       help='Audio quality preset (overrides --format)')
+    parser.add_argument('-t', '--tempo', type=float, default=1.0,
+                       help='Audio tempo adjustment (default: 1.0)')
+    parser.add_argument('-o', '--output', help='Save audio to file instead of playing')
+    parser.add_argument('--no-play', action='store_true', help='Don\'t play audio (useful with --output)')
 
-content = ARGV.join(' ')
+    # Streaming and chunking options
+    parser.add_argument('--streaming', action='store_true', default=True,
+                       help='Use WebSocket streaming for faster playback (default: enabled)')
+    parser.add_argument('--no-streaming', action='store_true',
+                       help='Disable streaming, use traditional REST API')
+    parser.add_argument('--chunk-size', type=int, default=None,
+                       help='Maximum characters per chunk (default: auto-detect based on tier)')
 
-if options[:list_voices].nil? && content.empty? && !$stdin.tty?
-  content = $stdin.read
-end
+    # Voice listing and filtering
+    parser.add_argument('--list-voices', action='store_true', help='List available voices')
+    parser.add_argument('--neural-only', action='store_true', help='Show only neural voices')
+    parser.add_argument('--styles-only', action='store_true', help='Show only voices with styles')
+    parser.add_argument('--gender', choices=['Male', 'Female'], help='Filter by gender')
+    parser.add_argument('--show-styles', action='store_true', help='Show available styles in voice list')
+    parser.add_argument('--refresh-voices', action='store_true', help='Refresh cached voice list')
 
-if options[:list_voices].nil? && content.empty?
-  abort "Please provide the content to synthesize either as positional parameters or through stdin."
-end
+    # Utility options
+    parser.add_argument('--preview', action='store_true', help='Show SSML without synthesis')
+    parser.add_argument('--list-formats', action='store_true', help='List available audio formats')
 
-synthesizer = AzureSpeechSynthesizer.new(ENV['AZURE_SPEECH_REGION'], ENV['AZURE_SPEECH_KEY'])
+    args = parser.parse_args()
 
-if options[:list_voices]
-  voices = synthesizer.voices
-  puts Terminal::Table.new(
-    headings: ['Language', 'Voice Name', 'Gender', 'Locale Name', 'Voice Type', 'Status'],
-    rows: voices.map { |voice| voice.values_at('Locale', 'DisplayName', 'Gender', 'LocaleName', 'VoiceType', 'Status') }
-  )
-else
-  synthesizer.synthesize(content, options[:voice_name], options[:prosody_rate], options[:format], options[:tempo])
-end
+    # Check for required environment variables
+    region = os.getenv('AZURE_SPEECH_REGION')
+    key = os.getenv('AZURE_SPEECH_KEY')
+
+    if not region or not key:
+        print("Error: AZURE_SPEECH_REGION and AZURE_SPEECH_KEY environment variables required",
+              file=sys.stderr)
+        sys.exit(1)
+
+    synthesizer = AzureSpeechSynthesizer(region, key)
+
+    # Handle utility commands
+    if args.list_formats:
+        formats = get_audio_formats()
+        for quality, format_list in formats.items():
+            print(f"\n{quality.replace('_', ' ').title()}:")
+            for fmt in format_list:
+                print(f"  {fmt}")
+        return
+
+    if args.list_voices:
+        voices = synthesizer.get_voices(args.refresh_voices)
+        filtered = synthesizer.filter_voices(
+            voices, args.locale, args.gender, args.neural_only, args.styles_only
+        )
+        print_voices_table(filtered, args.show_styles)
+        return
+
+    # Get text input
+    text = ' '.join(args.text) if args.text else ''
+
+    if args.file:
+        text = Path(args.file).read_text()
+    elif not text and not sys.stdin.isatty():
+        text = sys.stdin.read()
+
+    if not text.strip():
+        print("Error: No text provided", file=sys.stderr)
+        sys.exit(1)
+
+    # Handle quality presets
+    output_format = args.format
+    if args.quality:
+        formats = get_audio_formats()
+        quality_map = {'high': 'high_quality', 'standard': 'standard', 'low': 'low_bandwidth'}
+        output_format = formats[quality_map[args.quality]][0]
+
+    # Build SSML
+    ssml = synthesizer.build_ssml(
+        text, args.voice, args.rate, args.pitch, args.volume,
+        args.style, args.style_degree, args.role, locale=args.locale
+    )
+
+    if args.preview:
+        print(ssml)
+        return
+
+    # Determine if we should use streaming
+    use_streaming = args.streaming and not args.no_streaming
+
+    if use_streaming:
+        # Set chunk size if specified
+        if args.chunk_size:
+            original_chunk_size = synthesizer.max_plain_text_s0
+            synthesizer.max_plain_text_s0 = args.chunk_size
+
+        # Use new streaming synthesis
+        synthesizer.synthesize_streaming(
+            text, args.voice, output_format, args.output,
+            not args.no_play, args.tempo if args.tempo != 1.0 else None,
+            args.rate, args.pitch, args.volume, args.style,
+            args.style_degree, args.role, args.locale
+        )
+
+        # Restore original chunk size
+        if args.chunk_size:
+            synthesizer.max_plain_text_s0 = original_chunk_size
+    else:
+        # Use traditional SSML synthesis
+        synthesizer.synthesize(
+            ssml, output_format, args.output,
+            not args.no_play, args.tempo if args.tempo != 1.0 else None
+        )
+
+
+if __name__ == '__main__':
+    main()

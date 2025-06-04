@@ -22,7 +22,7 @@ import threading
 def parse_duration(duration_str: str) -> tuple[Optional[float], Optional[float]]:
     """Parse duration string like '5-10' or '<10' or '>5' into min/max seconds."""
     duration_str = duration_str.strip()
-    
+
     if '-' in duration_str:
         # Range: "5-10"
         parts = duration_str.split('-')
@@ -47,27 +47,27 @@ def parse_duration(duration_str: str) -> tuple[Optional[float], Optional[float]]
             return min_dur, None
         except ValueError:
             pass
-    
+
     raise ValueError(f"Invalid duration format: {duration_str}")
 
 def extract_video_info(entry: Dict, ydl_opts: Dict) -> Optional[Dict]:
     """Extract video information from a search entry."""
     if not entry:
         return None
-        
+
     video_id = entry.get('id')
     duration = entry.get('duration', 0)
-    
+
     # Skip if no duration info (might be live stream)
     if not duration:
         return None
-    
+
     # Ensure duration is numeric
     try:
         duration = float(duration)
     except (TypeError, ValueError):
         return None
-    
+
     # For more detailed info, we could extract full info here
     # but it's much slower, so we'll use the flat extraction data
     return {
@@ -87,30 +87,30 @@ def search_youtube(query: str, max_results: int = 200, max_threads: int = 0) -> 
         'default_search': 'ytsearch',
         'playlistend': max_results,
     }
-    
+
     videos = []
     entries_to_process = []
-    
+
     # First, get all entries from the search
     print(f"Searching for videos...", end='', flush=True)
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             search_query = f"ytsearch{max_results}:{query}"
             info = ydl.extract_info(search_query, download=False)
-            
+
             if 'entries' in info:
                 entries_to_process = list(info['entries'])
-                
+
         except Exception as e:
             print(f"\nError searching YouTube: {e}", file=sys.stderr)
             sys.exit(1)
-    
+
     if not entries_to_process:
         return videos
-    
+
     # Process entries in parallel
     print(f"\rProcessing {len(entries_to_process)} search results...", end='', flush=True)
-    
+
     # Use ThreadPoolExecutor for parallel processing
     if max_threads <= 0:
         max_workers = min(32, len(entries_to_process))  # Auto: up to 32 threads
@@ -118,23 +118,23 @@ def search_youtube(query: str, max_results: int = 200, max_threads: int = 0) -> 
         max_workers = min(max_threads, len(entries_to_process))  # User-specified
     processed = 0
     lock = threading.Lock()
-    
+
     def update_progress():
         nonlocal processed
         with lock:
             processed += 1
             print(f"\rProcessing {processed}/{len(entries_to_process)} videos...", end='', flush=True)
-    
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all tasks with their original index
         future_to_index = {
-            executor.submit(extract_video_info, entry, ydl_opts): i 
+            executor.submit(extract_video_info, entry, ydl_opts): i
             for i, entry in enumerate(entries_to_process)
         }
-        
+
         # Collect results maintaining order
         results = [None] * len(entries_to_process)
-        
+
         for future in as_completed(future_to_index):
             try:
                 result = future.result()
@@ -146,27 +146,27 @@ def search_youtube(query: str, max_results: int = 200, max_threads: int = 0) -> 
                 # Skip failed extractions
                 update_progress()
                 continue
-        
+
         # Filter out None values and add to videos list
         videos = [r for r in results if r is not None]
-    
+
     print(f"\rFound {len(videos)} valid videos.                    ")
     return videos
 
 def filter_by_duration(videos: List[Dict], min_duration: Optional[float], max_duration: Optional[float]) -> List[Dict]:
     """Filter videos by duration criteria."""
     filtered = []
-    
+
     for video in videos:
         duration = video.get('duration', 0)
-        
+
         if min_duration is not None and duration < min_duration:
             continue
         if max_duration is not None and duration > max_duration:
             continue
-            
+
         filtered.append(video)
-    
+
     return filtered
 
 def format_duration(seconds: float) -> str:
@@ -176,7 +176,7 @@ def format_duration(seconds: float) -> str:
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
     secs = total_seconds % 60
-    
+
     if hours > 0:
         return f"{hours}:{minutes:02d}:{secs:02d}"
     else:
@@ -184,7 +184,7 @@ def format_duration(seconds: float) -> str:
 
 def sanitize_for_playlist(text: str) -> str:
     """Sanitize text for M3U playlist format.
-    
+
     Note: We're using a simple implementation here. For more complex M3U needs,
     consider using the 'm3u8' library, though it's mainly for HLS playlists.
     """
@@ -210,7 +210,7 @@ def get_best_url(video_url: str, with_video: bool = True) -> Optional[str]:
         'no_warnings': True,
         'format': 'best' if with_video else 'bestaudio/best',
     }
-    
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(video_url, download=False)
@@ -218,39 +218,39 @@ def get_best_url(video_url: str, with_video: bool = True) -> Optional[str]:
         except:
             return None
 
-def play_with_mpv(videos: List[Dict], query: str, shuffle: bool = True, with_video: bool = False, 
+def play_with_mpv(videos: List[Dict], query: str, shuffle: bool = True, with_video: bool = False,
                   use_direct_urls: bool = False, max_threads: int = 0, output_file: Optional[str] = None):
     """Create a playlist and play with mpv."""
     if not videos:
         print("No videos found matching criteria.", file=sys.stderr)
         sys.exit(1)
-    
+
     if shuffle:
         videos = videos.copy()
         random.shuffle(videos)
-    
+
     print(f"\nPlaying {len(videos)} videos:")
     for i, video in enumerate(videos, 1):
         duration_str = format_duration(video['duration'])
         print(f"{i}. {video['title']} [{duration_str}] - {video['uploader']}")
-    
+
     # Create temporary playlist file
     with tempfile.NamedTemporaryFile(mode='w', suffix='.m3u', delete=False, encoding='utf-8') as f:
         playlist_path = f.name
-        
+
         # Write extended M3U header
         f.write("#EXTM3U\n")
         f.write(f"# YouTube playlist: {query}\n")
         f.write(f"# Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write(f"# Videos: {len(videos)}\n\n")
-        
+
         if use_direct_urls:
             # Extract direct URLs for faster loading using parallel processing
             print(f"\nExtracting {'video' if with_video else 'audio'} URLs...")
             urls = [None] * len(videos)  # Pre-allocate list with correct size
             processed = 0
             lock = threading.Lock()
-            
+
             def extract_and_update(index: int, video: Dict):
                 nonlocal processed
                 url = get_best_url(video['url'], with_video)
@@ -258,7 +258,7 @@ def play_with_mpv(videos: List[Dict], query: str, shuffle: bool = True, with_vid
                 with lock:
                     processed += 1
                     print(f"\rProcessing {processed}/{len(videos)}...", end='', flush=True)
-            
+
             # Use ThreadPoolExecutor for parallel URL extraction
             if max_threads <= 0:
                 max_workers = min(16, len(videos))  # Auto: reasonable limit for URL extraction
@@ -266,15 +266,15 @@ def play_with_mpv(videos: List[Dict], query: str, shuffle: bool = True, with_vid
                 max_workers = min(max_threads, len(videos))  # User-specified
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = [
-                    executor.submit(extract_and_update, i, video) 
+                    executor.submit(extract_and_update, i, video)
                     for i, video in enumerate(videos)
                 ]
                 # Wait for all to complete
                 for future in futures:
                     future.result()
-            
+
             print("\rExtraction complete!        ")
-            
+
             # Write URLs with metadata to playlist
             for i, (url, video) in enumerate(zip(urls, videos)):
                 duration = int(video['duration'])
@@ -295,7 +295,7 @@ def play_with_mpv(videos: List[Dict], query: str, shuffle: bool = True, with_vid
                 display_name = f"{uploader} - {title}" if uploader and uploader != "Unknown" else title
                 f.write(f"#EXTINF:{duration},{display_name}\n")
                 f.write(f"{video['url']}\n")
-    
+
     try:
         # Save playlist if requested
         if output_file:
@@ -304,21 +304,21 @@ def play_with_mpv(videos: List[Dict], query: str, shuffle: bool = True, with_vid
                     out.write(inp.read())
             print(f"\nPlaylist saved to: {output_file}")
             print(f"Play it later with: mpv {output_file}")
-        
+
         # Play with mpv
         mpv_cmd = [
             'mpv',
             '--playlist=' + playlist_path,
         ]
-        
+
         if not use_direct_urls:
             # Let mpv use yt-dlp for extraction
             mpv_cmd.append('--ytdl-format=bestvideo[height<=?1080]+bestaudio/best')
-        
+
         if not with_video:
             mpv_cmd.append('--no-video')
             mpv_cmd.append('--force-window=no')
-        
+
         # Add some useful mpv options
         mpv_cmd.extend([
             '--really-quiet',
@@ -327,9 +327,9 @@ def play_with_mpv(videos: List[Dict], query: str, shuffle: bool = True, with_vid
             '--osd-duration=3000',  # Show OSD for 3 seconds
             '--playlist-start=0',  # Start from beginning
         ])
-        
+
         subprocess.run(mpv_cmd)
-        
+
         # Show playlist navigation tips
         if len(videos) > 1:
             print("\nmpv playlist controls:")
@@ -339,7 +339,7 @@ def play_with_mpv(videos: List[Dict], query: str, shuffle: bool = True, with_vid
             print("  o / O     - Show progress/time and title")
             print("  i / I     - Show statistics")
             print("  Shift+L   - Loop playlist")
-        
+
     except KeyboardInterrupt:
         print("\n\nPlayback interrupted by user.")
     finally:
@@ -355,20 +355,20 @@ def main():
         description='Search YouTube and play videos in random order with mpv',
         epilog='Duration examples: "5-10" (5 to 10 minutes), "<10" (less than 10 min), ">5" (more than 5 min)'
     )
-    
+
     parser.add_argument('query', help='YouTube search query')
     parser.add_argument('-d', '--duration', help='Duration filter in minutes (e.g., "5-10", "<10", ">5")')
     parser.add_argument('-n', '--number', type=int, default=100, help='Max number of results (default: 100)')
     parser.add_argument('-s', '--no-shuffle', action='store_true', help='Do not shuffle playlist')
     parser.add_argument('-a', '--audio-only', action='store_true', help='Play audio only (default plays video)')
-    parser.add_argument('-u', '--direct-urls', action='store_true', 
+    parser.add_argument('-u', '--direct-urls', action='store_true',
                        help='Extract direct URLs before playback (slower start, smoother playback)')
-    parser.add_argument('-t', '--threads', type=int, default=0, 
+    parser.add_argument('-t', '--threads', type=int, default=0,
                        help='Number of threads for parallel processing (0=auto)')
     parser.add_argument('-o', '--output', help='Save playlist to file (M3U format)')
-    
+
     args = parser.parse_args()
-    
+
     # Parse duration if provided
     min_duration = None
     max_duration = None
@@ -378,30 +378,30 @@ def main():
         except ValueError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
-    
+
     print(f"Searching YouTube for: {args.query}")
     if args.duration:
         print(f"Duration filter: {args.duration} minutes")
-    
+
     # Search YouTube with parallelization
     start_time = time.time()
-    videos = search_youtube(args.query, 
+    videos = search_youtube(args.query,
                           max_results=min(args.number * 3, 300),
                           max_threads=args.threads)  # Get extra to account for filtering
     search_time = time.time() - start_time
-    
+
     if search_time > 2:  # Only show timing for longer searches
         print(f"Search completed in {search_time:.1f} seconds")
-    
+
     # Filter by duration if specified
     if min_duration is not None or max_duration is not None:
         videos = filter_by_duration(videos, min_duration, max_duration)
-    
+
     # Limit to requested number
     videos = videos[:args.number]
-    
+
     # Play the videos
-    play_with_mpv(videos, args.query, shuffle=not args.no_shuffle, with_video=not args.audio_only, 
+    play_with_mpv(videos, args.query, shuffle=not args.no_shuffle, with_video=not args.audio_only,
                   use_direct_urls=args.direct_urls, max_threads=args.threads,
                   output_file=args.output)
 

@@ -56,6 +56,8 @@ bindkey -M menuselect 'u' undo
 bindkey -M menuselect 'n' vi-forward-blank-word
 bindkey -M menuselect 'b' vi-backward-blank-word
 
+bindkey -M viins "${terminfo[kcbt]:-^[[Z}" reverse-menu-complete
+
 bindkey '^G' push-line-or-edit
 bindkey -M vicmd '^G' push-line-or-edit
 bindkey -M viins '^G' push-line-or-edit

@@ -1,0 +1,231 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.8"
+# dependencies = [
+#     "requests",
+# ]
+# ///
+
+import argparse
+import os
+import sys
+import subprocess
+import tempfile
+import requests
+import re
+import io
+
+
+def split_text(text, max_length):
+    """Split text into chunks on sentence boundaries, respecting max_length."""
+    if len(text) <= max_length:
+        return [text]
+
+    # Split on sentence boundaries
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    chunks = []
+    current_chunk = ""
+
+    for sentence in sentences:
+        # If single sentence is too long, split on other boundaries
+        if len(sentence) > max_length:
+            # Split long sentence on clause boundaries
+            clauses = re.split(r'(?<=[,;])\s+', sentence)
+            for clause in clauses:
+                if len(clause) > max_length:
+                    # Final fallback: split on word boundaries
+                    words = clause.split()
+                    temp_chunk = ""
+                    for word in words:
+                        if len(temp_chunk + " " + word) <= max_length:
+                            temp_chunk += (" " if temp_chunk else "") + word
+                        else:
+                            if temp_chunk:
+                                chunks.append(temp_chunk)
+                            temp_chunk = word
+                    if temp_chunk:
+                        if len(current_chunk + " " + temp_chunk) <= max_length:
+                            current_chunk += (" " if current_chunk else "") + temp_chunk
+                        else:
+                            if current_chunk:
+                                chunks.append(current_chunk)
+                            current_chunk = temp_chunk
+                else:
+                    if len(current_chunk + " " + clause) <= max_length:
+                        current_chunk += (" " if current_chunk else "") + clause
+                    else:
+                        if current_chunk:
+                            chunks.append(current_chunk)
+                        current_chunk = clause
+        else:
+            if len(current_chunk + " " + sentence) <= max_length:
+                current_chunk += (" " if current_chunk else "") + sentence
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                current_chunk = sentence
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
+
+
+def clean_markdown(text):
+    """Remove markdown formatting that might cause issues with TTS."""
+    # Remove code blocks
+    text = re.sub(r'```[^`]*```', '', text)
+    text = re.sub(r'`[^`]+`', lambda m: m.group(0)[1:-1], text)
+    # Remove markdown links but keep the text
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+    # Remove bold/italic markers
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+    text = re.sub(r'\*([^*]+)\*', r'\1', text)
+    text = re.sub(r'__([^_]+)__', r'\1', text)
+    text = re.sub(r'_([^_]+)_', r'\1', text)
+    # Remove headers
+    text = re.sub(r'^#+\s+', '', text, flags=re.MULTILINE)
+    # Clean up excessive whitespace
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Convert text to speech using Deepgram TTS")
+    parser.add_argument("text", nargs="?", help="Text to convert to speech (or read from stdin)")
+    parser.add_argument("-o", "--output", help="Output audio file (default: stdout if piped, play directly if not)")
+    parser.add_argument("-m", "--model", default="aura-2-thalia-en", help="Voice model (default: aura-2-thalia-en)")
+    parser.add_argument("--list-models", action="store_true", help="List available voice models")
+    parser.add_argument("--no-clean", action="store_true", help="Don't clean markdown formatting")
+
+    args = parser.parse_args()
+
+    # Get API key from environment
+    api_key = os.getenv("DEEPGRAM_API_KEY")
+    if not api_key:
+        print("Error: DEEPGRAM_API_KEY environment variable not set", file=sys.stderr)
+        sys.exit(1)
+
+    if args.list_models:
+        models = [
+            "aura-2-thalia-en", "aura-2-andromeda-en", "aura-2-helena-en", "aura-2-apollo-en",
+            "aura-2-arcas-en", "aura-2-aries-en", "aura-2-amalthea-en", "aura-2-asteria-en",
+            "aura-2-athena-en", "aura-2-atlas-en", "aura-2-aurora-en", "aura-2-callista-en",
+            "aura-2-cora-en", "aura-2-cordelia-en", "aura-2-delia-en", "aura-2-draco-en",
+            "aura-2-electra-en", "aura-2-harmonia-en", "aura-2-hera-en", "aura-2-hermes-en",
+            "aura-2-hyperion-en", "aura-2-iris-en", "aura-2-janus-en", "aura-2-juno-en",
+            "aura-2-jupiter-en", "aura-2-luna-en", "aura-2-mars-en", "aura-2-minerva-en",
+            "aura-2-neptune-en", "aura-2-odysseus-en", "aura-2-ophelia-en", "aura-2-orion-en",
+            "aura-2-orpheus-en", "aura-2-pandora-en", "aura-2-phoebe-en", "aura-2-pluto-en",
+            "aura-2-saturn-en", "aura-2-selene-en", "aura-2-theia-en", "aura-2-vesta-en",
+            "aura-2-zeus-en"
+        ]
+        print("Available voice models:")
+        for model in models:
+            print(f"  {model}")
+        return
+
+    # Get text input
+    if args.text:
+        text = args.text
+    else:
+        text = sys.stdin.read().strip()
+
+    if not text:
+        print("Error: No text provided", file=sys.stderr)
+        sys.exit(1)
+
+    # Clean markdown formatting unless disabled
+    if not args.no_clean:
+        text = clean_markdown(text)
+
+    # Split text into chunks if needed
+    chunks = split_text(text, 1500)
+
+    if len(chunks) > 1:
+        print(f"Splitting text into {len(chunks)} chunks", file=sys.stderr)
+
+    # Determine output mode
+    is_piped = not sys.stdout.isatty()
+
+    try:
+        # Process each chunk
+        audio_chunks = []
+
+        for i, chunk_text in enumerate(chunks):
+            if len(chunks) > 1:
+                print(f"Processing chunk {i+1}/{len(chunks)}", file=sys.stderr)
+
+            url = f"https://api.deepgram.com/v1/speak?model={args.model}"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {api_key}"
+            }
+            data = {"text": chunk_text}
+
+            # Debug: print first 100 chars of chunk
+            print(f"Sending text (first 100 chars): {chunk_text[:100]}...", file=sys.stderr)
+            print(f"Text length: {len(chunk_text)}", file=sys.stderr)
+
+            response = requests.post(url, headers=headers, json=data, stream=True)
+            response.raise_for_status()
+
+            # Collect audio data
+            chunk_audio = io.BytesIO()
+            for data_chunk in response.iter_content(chunk_size=8192):
+                chunk_audio.write(data_chunk)
+            audio_chunks.append(chunk_audio.getvalue())
+
+        # Combine all audio chunks
+        combined_audio = b''.join(audio_chunks)
+
+        if args.output:
+            # Save to specified file
+            with open(args.output, "wb") as f:
+                f.write(combined_audio)
+            print(f"Audio saved to {args.output}", file=sys.stderr)
+        elif is_piped:
+            # Output to stdout
+            sys.stdout.buffer.write(combined_audio)
+        else:
+            # Play directly
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
+                temp_file.write(combined_audio)
+                temp_path = temp_file.name
+
+            try:
+                # Try to play with available players
+                players = ["afplay", "mpv", "ffplay", "paplay"]
+                for player in players:
+                    try:
+                        subprocess.run([player, temp_path], check=True, capture_output=True)
+                        break
+                    except (subprocess.CalledProcessError, FileNotFoundError):
+                        continue
+                else:
+                    print(f"No audio player found. Audio saved to {temp_path}", file=sys.stderr)
+            finally:
+                if os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
+
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error: {e.response.status_code}", file=sys.stderr)
+        if e.response.status_code == 429:
+            print("Rate limit exceeded. Please try again later.", file=sys.stderr)
+        elif e.response.status_code == 422:
+            try:
+                error_detail = e.response.json()
+                print(f"Request validation error: {error_detail}", file=sys.stderr)
+            except:
+                print(f"Request validation error: {e.response.text}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
