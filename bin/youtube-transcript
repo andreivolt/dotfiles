@@ -1,4 +1,11 @@
-#!/usr/bin/env -S uv run --quiet --script --with youtube_transcript_api --with lxml
+#!/usr/bin/env -S uv run --quiet --script
+# Claude: does youtube provide a formatted version of the tarnscript? currently it all shows up one line
+# /// script
+# dependencies = [
+#   "youtube-transcript-api~=0.6.2",  # YouTube transcript fetching
+#   "lxml",  # XML parsing support for transcripts
+# ]
+# ///
 import sys
 import re
 from urllib.parse import urlparse, parse_qs

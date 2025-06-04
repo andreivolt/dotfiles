@@ -1,9 +1,9 @@
 #!/usr/bin/env -S uv run --script --quiet
 # /// script
 # dependencies = [
-#     "unrealspeech",
-#     "pydub",
-#     "simpleaudio"
+#     "unrealspeech>=0.1,<0.2",  # Use 0.1.x for compatibility
+#     "pydub",                   # Audio processing library
+#     "simpleaudio"              # Simple audio playback
 # ]
 # ///
 

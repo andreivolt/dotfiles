@@ -1,4 +1,9 @@
-#!/usr/bin/env uv run -qs --with pyobjc-framework-Cocoa
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = [
+#     "pyobjc-framework-Cocoa>=10.0,<11",  // macOS framework bindings
+# ]
+# ///
 
 import sys, os
 from AppKit import NSPasteboard, NSPasteboardTypeFileURL

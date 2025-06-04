@@ -1,8 +1,8 @@
 #!/usr/bin/env -S uv run --script --quiet
 # /// script
 # dependencies = [
-#     "exa_py",
-#     "click",
+#     "exa-py>=1.14,<2",  # API client for Exa search
+#     "click>=8,<9",      # Command line interface
 # ]
 # ///
 

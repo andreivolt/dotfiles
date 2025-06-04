@@ -1,0 +1,346 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = [
+#     "sentence-transformers>=4.0",
+#     "torch>=2.5",
+#     "click>=8.1",
+#     "tqdm>=4.66",
+# ]
+# ///
+
+import sqlite3
+import click
+from pathlib import Path
+from sentence_transformers import SentenceTransformer
+import torch
+from tqdm import tqdm
+import json
+import struct
+import os
+import time
+import threading
+
+# Fix tokenizers warning
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
+def spinner(message, done_event):
+    """Show a spinning animation while processing"""
+    chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    i = 0
+    while not done_event.is_set():
+        print(f"\r{chars[i % len(chars)]} {message}", end="", flush=True)
+        time.sleep(0.1)
+        i += 1
+    print(f"\r✓ {message}", flush=True)
+
+DB_PATH = Path.home() / "drive" / "telegram-archive" / "telegram.db"
+
+def float_to_blob(vector):
+    """Convert numpy array to SQLite blob format"""
+    return struct.pack('f' * len(vector), *vector)
+
+def blob_to_float(blob):
+    """Convert SQLite blob back to numpy array"""
+    return list(struct.unpack('f' * (len(blob) // 4), blob))
+
+@click.group()
+def cli():
+    """Generate and search vector embeddings for Telegram messages."""
+    pass
+
+@cli.command()
+@click.option('--model', default='all-mpnet-base-v2', help='Sentence transformer model to use')
+@click.option('--batch-size', default=1000, help='Batch size for processing messages')
+@click.option('--limit', help='Limit number of messages to process (for testing)')
+def generate(model, batch_size, limit):
+    """Generate embeddings for all Telegram messages."""
+    
+    device = 'mps' if torch.backends.mps.is_available() else 'cpu'
+    model_obj = SentenceTransformer(model, device=device)
+    
+    db = sqlite3.connect(DB_PATH)
+    
+    # Create embeddings table
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS embeddings (
+        message_id INTEGER,
+        chat_id INTEGER,
+        embedding BLOB,
+        model_name TEXT,
+        PRIMARY KEY (message_id, chat_id)
+    )
+    """)
+    
+    # Get messages with text content
+    query = """
+    SELECT m.id, m.chat_id, m.message, m.date, c.title as chat_title,
+           COALESCE(
+               CASE 
+                   WHEN u.first_name IS NOT NULL AND u.last_name IS NOT NULL THEN u.first_name || ' ' || u.last_name
+                   WHEN u.first_name IS NOT NULL THEN u.first_name
+                   WHEN u.last_name IS NOT NULL THEN u.last_name
+                   ELSE u.username
+               END, 
+               'Unknown'
+           ) as sender_name
+    FROM messages m
+    LEFT JOIN chats c ON m.chat_id = c.id
+    LEFT JOIN users u ON m.sender_id = u.id
+    WHERE m.message IS NOT NULL AND LENGTH(m.message) > 0
+    ORDER BY m.date DESC
+    """
+    
+    if limit:
+        query += f" LIMIT {limit}"
+    
+    cursor = db.execute(query)
+    messages = cursor.fetchall()
+    
+    # Process in batches
+    for i in tqdm(range(0, len(messages), batch_size), desc=f"Processing {len(messages)} messages"):
+        batch = messages[i:i + batch_size]
+        
+        # Prepare texts for embedding (message + context)
+        texts = []
+        batch_data = []
+        
+        for msg_id, chat_id, message, date, chat_title, sender_name in batch:
+            # Include some context in the embedding
+            text = f"From {sender_name} in {chat_title}: {message}"
+            texts.append(text)
+            batch_data.append((msg_id, chat_id))
+        
+        # Generate embeddings
+        embeddings = model_obj.encode(texts, convert_to_numpy=True)
+        
+        # Store in database
+        for (msg_id, chat_id), embedding in zip(batch_data, embeddings):
+            db.execute("""
+            INSERT OR REPLACE INTO embeddings (message_id, chat_id, embedding, model_name)
+            VALUES (?, ?, ?, ?)
+            """, (msg_id, chat_id, float_to_blob(embedding), model))
+        
+        db.commit()
+
+@cli.command()
+@click.argument('query')
+@click.option('--limit', default=10, help='Number of results to return')
+@click.option('--model', default='all-mpnet-base-v2', help='Model used for embeddings')
+@click.option('--threshold', default=0.3, help='Similarity threshold (0-1)')
+def search(query, limit, model, threshold):
+    """Search messages using vector similarity."""
+    
+    done_event = threading.Event()
+    spinner_thread = threading.Thread(target=spinner, args=("loading model", done_event))
+    spinner_thread.start()
+    
+    device = 'mps' if torch.backends.mps.is_available() else 'cpu'
+    model_obj = SentenceTransformer(model, device=device)
+    
+    # Generate query embedding
+    query_embedding = model_obj.encode([query], convert_to_numpy=True)[0]
+    query_blob = float_to_blob(query_embedding)
+    
+    done_event.set()
+    spinner_thread.join()
+    
+    done_event = threading.Event()
+    spinner_thread = threading.Thread(target=spinner, args=("searching messages", done_event))
+    spinner_thread.start()
+    
+    db = sqlite3.connect(DB_PATH)
+    
+    # Manual similarity search
+    
+    cursor = db.execute("""
+    SELECT e.message_id, e.chat_id, e.embedding, m.message, m.date,
+           c.title as chat_title,
+           COALESCE(
+               CASE 
+                   WHEN u.first_name IS NOT NULL AND u.last_name IS NOT NULL THEN u.first_name || ' ' || u.last_name
+                   WHEN u.first_name IS NOT NULL THEN u.first_name
+                   WHEN u.last_name IS NOT NULL THEN u.last_name
+                   ELSE u.username
+               END, 
+               'Unknown'
+           ) as sender_name
+    FROM embeddings e
+    JOIN messages m ON e.message_id = m.id AND e.chat_id = m.chat_id
+    LEFT JOIN chats c ON m.chat_id = c.id
+    LEFT JOIN users u ON m.sender_id = u.id
+    WHERE e.model_name = ?
+    """, (model,))
+    
+    results = []
+    for row in cursor.fetchall():
+        msg_id, chat_id, embedding_blob, message, date, chat_title, sender_name = row
+        embedding = blob_to_float(embedding_blob)
+        
+        # Calculate cosine similarity
+        import numpy as np
+        similarity = np.dot(query_embedding, embedding) / (np.linalg.norm(query_embedding) * np.linalg.norm(embedding))
+        
+        if similarity >= threshold:
+            results.append((similarity, msg_id, chat_id, message, date, chat_title, sender_name))
+    
+    # Sort by similarity and take top results
+    results.sort(reverse=True)
+    results = results[:limit]
+    
+    done_event.set()
+    spinner_thread.join()
+    
+    if not results:
+        print("no messages found")
+        return
+    
+    print(f"found {len(results)} messages")
+    print()
+    
+    for similarity, msg_id, chat_id, message, date, chat_title, sender_name in results:
+        print(f"{chat_title} | {sender_name} | {date[:16]} | {similarity:.3f}")
+        print(f"{message}")
+        print()
+
+@cli.command()
+@click.argument('question')
+@click.option('--limit', default=100, help='Number of messages to retrieve for context')
+@click.option('--model', default='all-mpnet-base-v2', help='Model used for embeddings')
+@click.option('--threshold', default=0.15, help='Similarity threshold (0-1)')
+def ask(question, limit, model, threshold):
+    """Ask a question about your Telegram history using AI."""
+    
+    # Use llm tool to generate search queries
+    import subprocess
+    import json
+    
+    done_event = threading.Event()
+    spinner_thread = threading.Thread(target=spinner, args=("generating search queries", done_event))
+    spinner_thread.start()
+    
+    llm_prompt = f"""Given this question about someone's Telegram chat history, generate 5-6 diverse search queries that would help find relevant messages to answer it.
+
+Question: {question}
+
+Generate search queries that cover different aspects or angles of the question. Return as a JSON array of strings.
+
+Example:
+Question: "What did I discuss about my job interviews?"
+Response: ["job interview preparation", "interview feedback and results", "career opportunities discussion", "work applications", "salary negotiations", "company research"]
+"""
+    
+    result = subprocess.run([
+        'llm', 'prompt', llm_prompt, 
+        '--model', '4o'
+    ], capture_output=True, text=True, check=True)
+    
+    done_event.set()
+    spinner_thread.join()
+    
+    # Parse the JSON response (handle markdown code blocks)
+    output = result.stdout.strip()
+    if output.startswith('```json'):
+        output = output.replace('```json\n', '').replace('\n```', '')
+    elif output.startswith('```'):
+        output = output.replace('```\n', '').replace('\n```', '')
+    
+    queries = json.loads(output)
+    
+    done_event = threading.Event()
+    spinner_thread = threading.Thread(target=spinner, args=(f"searching {len(queries)} queries", done_event))
+    spinner_thread.start()
+    
+    # Perform searches and collect results
+    all_results = []
+    seen_messages = set()
+    
+    for query in queries:
+        # Load model and generate query embedding
+        device = 'mps' if torch.backends.mps.is_available() else 'cpu'
+        model_obj = SentenceTransformer(model, device=device)
+        query_embedding = model_obj.encode([query], convert_to_numpy=True)[0]
+        
+        db = sqlite3.connect(DB_PATH)
+        
+        cursor = db.execute("""
+        SELECT e.message_id, e.chat_id, e.embedding, m.message, m.date,
+               c.title as chat_title,
+               COALESCE(
+                   CASE 
+                       WHEN u.first_name IS NOT NULL AND u.last_name IS NOT NULL THEN u.first_name || ' ' || u.last_name
+                       WHEN u.first_name IS NOT NULL THEN u.first_name
+                       WHEN u.last_name IS NOT NULL THEN u.last_name
+                       ELSE u.username
+                   END, 
+                   'Unknown'
+               ) as sender_name
+        FROM embeddings e
+        JOIN messages m ON e.message_id = m.id AND e.chat_id = m.chat_id
+        LEFT JOIN chats c ON m.chat_id = c.id
+        LEFT JOIN users u ON m.sender_id = u.id
+        WHERE e.model_name = ?
+        """, (model,))
+        
+        query_results = []
+        for row in cursor.fetchall():
+            msg_id, chat_id, embedding_blob, message, date, chat_title, sender_name = row
+            
+            # Skip if we've already seen this message
+            msg_key = (msg_id, chat_id)
+            if msg_key in seen_messages:
+                continue
+                
+            embedding = blob_to_float(embedding_blob)
+            
+            # Calculate cosine similarity
+            import numpy as np
+            similarity = np.dot(query_embedding, embedding) / (np.linalg.norm(query_embedding) * np.linalg.norm(embedding))
+            
+            if similarity >= threshold:
+                query_results.append((similarity, msg_id, chat_id, message, date, chat_title, sender_name))
+                seen_messages.add(msg_key)
+        
+        # Sort by similarity and add to all results
+        query_results.sort(reverse=True)
+        all_results.extend(query_results[:limit])
+    
+    # Sort all results by similarity and take top messages
+    all_results.sort(reverse=True)
+    top_results = all_results[:limit]
+    
+    done_event.set()
+    spinner_thread.join()
+    
+    if not top_results:
+        print("no relevant messages found")
+        return
+    
+    done_event = threading.Event()
+    spinner_thread = threading.Thread(target=spinner, args=(f"found {len(top_results)} messages, generating answer", done_event))
+    spinner_thread.start()
+    
+    # Prepare context for LLM
+    context = "Here are relevant messages from the user's Telegram history:\n\n"
+    for i, (similarity, msg_id, chat_id, message, date, chat_title, sender_name) in enumerate(top_results):
+        context += f"{i+1}. [{date[:16]}] {sender_name} in {chat_title}: {message}\n"
+    
+    context += f"\n\nQuestion: {question}"
+    
+    # Use llm tool to answer the question
+    answer_prompt = f"""{context}
+
+Based on the Telegram messages above, please answer the user's question. Be specific and reference relevant messages when possible. If the messages don't contain enough information to answer the question, say so clearly."""
+    
+    result = subprocess.run([
+        'llm', 'prompt', answer_prompt,
+        '--model', '4o'
+    ], capture_output=True, text=True, check=True)
+    
+    done_event.set()
+    spinner_thread.join()
+    
+    print()
+    print(result.stdout.strip())
+
+if __name__ == '__main__':
+    cli()

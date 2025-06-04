@@ -1,6 +1,9 @@
 #!/usr/bin/env -S uv run -qs
 # /// script
-# dependencies = ["lifxlan", "click"]
+# dependencies = [
+#     "lifxlan==1.2",    # LIFX LAN protocol library
+#     "click==8.1",      # Command-line interface creation kit
+# ]
 # ///
 
 import os

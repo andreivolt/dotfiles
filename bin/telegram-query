@@ -1,0 +1,276 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = [
+#     "click>=8.1",       # Command line interface creation kit
+#     "tabulate>=0.9",    # Pretty-print tabular data
+#     "colorama>=0.4",    # Cross-platform colored terminal text
+# ]
+# ///
+
+import sqlite3
+import click
+from pathlib import Path
+from tabulate import tabulate
+from colorama import init, Fore, Style
+import hashlib
+
+init(autoreset=True)  # Initialize colorama
+
+DB_PATH = Path.home() / "drive" / "telegram-archive" / "telegram.db"
+
+def get_db():
+    return sqlite3.connect(DB_PATH)
+
+def get_user_color(username):
+    """Generate consistent color for each user based on username hash"""
+    if not username or username == 'Unknown':
+        return Fore.WHITE
+    
+    # Hash username to get consistent color
+    hash_val = int(hashlib.md5(username.encode()).hexdigest()[:8], 16)
+    colors = [Fore.RED, Fore.GREEN, Fore.YELLOW, Fore.BLUE, Fore.MAGENTA, Fore.CYAN]
+    return colors[hash_val % len(colors)]
+
+@click.group()
+def cli():
+    """Query Telegram archive database with convenient options."""
+    pass
+
+@cli.command()
+@click.option('--chat', help='Chat ID, username, or title to filter by')
+@click.option('--limit', default=None, help='Number of messages to show (default: all)')
+@click.option('--since', help='Show messages since date (YYYY-MM-DD)')
+@click.option('--from', 'from_user', help='Filter by sender username/name')
+@click.option('--search', help='Search in message text')
+@click.option('--media', is_flag=True, help='Only show messages with media')
+@click.option('--thread', is_flag=True, help='Show replies as threaded conversations')
+@click.option('--reverse', is_flag=True, help='Show messages in chronological order (oldest first)')
+def messages(chat, limit, since, from_user, search, media, thread, reverse):
+    """Show recent messages formatted as chat."""
+    db = get_db()
+    
+    # First get messages without reactions for speed
+    query = """
+    SELECT m.id, m.date, c.title as chat_title, 
+           COALESCE(
+               CASE 
+                   WHEN u.first_name IS NOT NULL AND u.last_name IS NOT NULL THEN u.first_name || ' ' || u.last_name
+                   WHEN u.first_name IS NOT NULL THEN u.first_name
+                   WHEN u.last_name IS NOT NULL THEN u.last_name
+                   ELSE u.username
+               END, 
+               'Unknown'
+           ) as sender_name,
+           m.message, m.media_type, m.reply_to_msg_id, m.has_media, m.chat_id
+    FROM messages m
+    LEFT JOIN chats c ON m.chat_id = c.id
+    LEFT JOIN users u ON m.sender_id = u.id
+    WHERE 1=1
+    """
+    params = []
+    
+    if chat:
+        if chat.isdigit():
+            query += " AND m.chat_id = ?"
+            params.append(int(chat))
+        else:
+            query += " AND (c.username LIKE ? OR c.title LIKE ?)"
+            params.extend([f'%{chat}%', f'%{chat}%'])
+    
+    if from_user:
+        query += " AND (u.username LIKE ? OR u.first_name LIKE ? OR u.last_name LIKE ?)"
+        params.extend([f'%{from_user}%', f'%{from_user}%', f'%{from_user}%'])
+    
+    if search:
+        query += " AND m.message LIKE ?"
+        params.append(f'%{search}%')
+    
+    if media:
+        query += " AND m.has_media = 1"
+    
+    if since:
+        query += " AND date(m.date) >= ?"
+        params.append(since)
+    
+    query += " ORDER BY m.date DESC"
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+    
+    cursor = db.execute(query, params)
+    results = cursor.fetchall()
+    
+    if not results:
+        print("No messages found.")
+        return
+    
+    # Get reactions for the selected messages
+    message_ids = [str(row[0]) for row in results]
+    chat_ids = [str(row[8]) for row in results]
+    
+    reactions_query = f"""
+    SELECT r.message_id, r.chat_id, r.reaction, 
+           COUNT(*) as count,
+           GROUP_CONCAT(
+               CASE 
+                   WHEN r.user_id = 0 THEN NULL
+                   ELSE COALESCE(u.first_name || ' ' || u.last_name, u.username, 'User' || r.user_id)
+               END,
+               ', '
+           ) as reactors
+    FROM reactions r
+    LEFT JOIN users u ON r.user_id = u.id
+    WHERE (r.message_id, r.chat_id) IN ({','.join([f'({mid},{cid})' for mid, cid in zip(message_ids, chat_ids)])})
+    GROUP BY r.message_id, r.chat_id, r.reaction
+    ORDER BY r.message_id, count DESC
+    """
+    
+    reactions_dict = {}
+    if message_ids:
+        try:
+            reactions_cursor = db.execute(reactions_query)
+            for msg_id, chat_id, reaction, count, reactors in reactions_cursor.fetchall():
+                key = (msg_id, chat_id)
+                if key not in reactions_dict:
+                    reactions_dict[key] = []
+                reactions_dict[key].append({
+                    'reaction': reaction,
+                    'count': count,
+                    'reactors': reactors.strip(', ') if reactors else None
+                })
+        except:
+            pass  # Skip reactions if query fails
+    
+    # Build message tree for replies
+    messages_by_id = {}
+    all_messages = []
+    
+    for row in results:
+        msg_id, date, chat_title, sender_name, message, media_type, reply_to_msg_id, has_media, chat_id = row
+        
+        msg_data = {
+            'id': msg_id,
+            'date': date,
+            'chat_title': chat_title,
+            'sender_name': sender_name,
+            'message': message,
+            'media_type': media_type,
+            'reply_to_msg_id': reply_to_msg_id,
+            'has_media': has_media,
+            'reactions': reactions_dict.get((msg_id, chat_id)),
+            'replies': []
+        }
+        
+        messages_by_id[msg_id] = msg_data
+        all_messages.append(msg_data)
+    
+    # Build reply tree - process all messages to link replies
+    root_messages = []
+    if thread:
+        for msg_data in all_messages:
+            if msg_data['reply_to_msg_id'] and msg_data['reply_to_msg_id'] in messages_by_id:
+                # This is a reply to a message in our result set
+                messages_by_id[msg_data['reply_to_msg_id']]['replies'].append(msg_data)
+            else:
+                # This is a root message (or reply to message not in result set)
+                root_messages.append(msg_data)
+        
+    else:
+        # No threading - treat all as root messages
+        root_messages = all_messages
+    
+    # Print chat format with collapsed threading for same two-user conversations
+    def print_message(msg, indent=0, conversation_users=None, is_two_person_thread=False):
+        prefix = "  " * indent
+        timestamp = msg['date'][:16] if msg['date'] else ''
+        sender_name = msg['sender_name']
+        
+        # Get colors
+        user_color = get_user_color(sender_name)
+        timestamp_color = Fore.LIGHTBLACK_EX
+        
+        # Format message content
+        content = msg['message'] or ''
+        if msg['has_media'] and msg['media_type'] and msg['media_type'] != 'webpage':
+            content += f" {Fore.LIGHTBLUE_EX}[{msg['media_type']}]{Style.RESET_ALL}"
+        
+        # Add reactions with counts and reactors
+        if msg['reactions']:
+            reaction_parts = []
+            for r in msg['reactions']:
+                reaction_str = r['reaction']
+                if r['count'] > 1:
+                    reaction_str += f"{Fore.LIGHTMAGENTA_EX}({r['count']}){Style.RESET_ALL}"
+                if r['reactors']:
+                    # Color each reactor name
+                    reactor_names = r['reactors'].split(', ')
+                    colored_reactors = []
+                    for reactor in reactor_names:
+                        reactor_color = get_user_color(reactor)
+                        colored_reactors.append(f"{reactor_color}{reactor}{Style.RESET_ALL}")
+                    reaction_str += f":{','.join(colored_reactors)}"
+                reaction_parts.append(reaction_str)
+            content += f" {Fore.LIGHTYELLOW_EX}[{', '.join(reaction_parts)}]{Style.RESET_ALL}"
+        
+        # Print with colors
+        print(f"{prefix}{timestamp_color}[{timestamp}]{Style.RESET_ALL} {user_color}{sender_name}{Style.RESET_ALL}: {content}")
+        
+        # Print replies with collapsed threading for same two-user conversations
+        if thread and msg['replies']:
+            # Get all participants in this thread (including the root message sender)
+            thread_participants = set([msg['sender_name']])
+            for reply in msg['replies']:
+                thread_participants.add(reply['sender_name'])
+                # Also add participants from nested replies
+                def collect_participants(r):
+                    thread_participants.add(r['sender_name'])
+                    for nested in r['replies']:
+                        collect_participants(nested)
+                collect_participants(reply)
+            
+            # Check if this is a two-person conversation
+            is_two_person = len(thread_participants) <= 2
+            
+            for reply in msg['replies']:
+                if is_two_person:
+                    # Two-person thread - only indent once, then stay at that level
+                    if is_two_person_thread:
+                        # Already in a two-person thread, don't increase indent further
+                        print_message(reply, indent, thread_participants, is_two_person_thread=True)
+                    else:
+                        # First level of two-person thread
+                        print_message(reply, indent + 1, thread_participants, is_two_person_thread=True)
+                else:
+                    # Multiple people - use normal deep threading
+                    print_message(reply, indent + 1, thread_participants, is_two_person_thread=False)
+    
+    current_chat = None
+    display_messages = root_messages if reverse else reversed(root_messages)
+    for msg in display_messages:
+        if msg['chat_title'] != current_chat:
+            if current_chat is not None:
+                print()
+            print(f"{Fore.LIGHTCYAN_EX}=== {msg['chat_title']} ==={Style.RESET_ALL}")
+            current_chat = msg['chat_title']
+        
+        print_message(msg)
+
+@cli.command()
+def chats():
+    """List all chats."""
+    db = get_db()
+    query = """
+    SELECT c.id, c.title, c.username, c.type
+    FROM chats c
+    LEFT JOIN messages m ON c.id = m.chat_id
+    GROUP BY c.id
+    ORDER BY MAX(m.date) DESC NULLS LAST
+    """
+    cursor = db.execute(query)
+    results = cursor.fetchall()
+    
+    headers = ['ID', 'Title', 'Username', 'Type']
+    print(tabulate(results, headers=headers, tablefmt='simple'))
+
+if __name__ == '__main__':
+    cli()

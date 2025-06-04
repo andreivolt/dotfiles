@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script --quiet
 # /// script
 # dependencies = [
-#   "boto3",
+#   "boto3~=1.38.0",  # AWS SDK for Python
 # ]
 # ///
 
