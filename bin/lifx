@@ -1,15 +1,18 @@
-#!/usr/bin/env -S uv run -qs
+#!/usr/bin/env -S uv run --script --quiet
+"""Control LIFX smart lights via LAN protocol."""
 # /// script
 # dependencies = [
-#     "lifxlan==1.2",    # LIFX LAN protocol library
-#     "click==8.1",      # Command-line interface creation kit
+#     "click",
+#     "lifxlan",
+#     "sh",
 # ]
 # ///
+
 
 import os
 import sys
 import json
-import subprocess
+import sh
 import colorsys
 from pathlib import Path
 from lifxlan import LifxLAN, Light, BLUE, GREEN, RED, YELLOW, ORANGE, PURPLE, CYAN, WHITE
@@ -152,13 +155,13 @@ def kelvin_to_hsbk(kelvin):
         return None
     if kelvin > 9000:
         kelvin = 9000
-    
+
     if kelvin < 1500:
         # Emulate warmer temperatures with red hue and saturation
         # Map 1000K-1499K to increasing saturation and red hue
         virtual_temp = max(1000, kelvin)
         temp_factor = (1500 - virtual_temp) / 500.0  # 0 to 1 as we go from 1500K to 1000K
-        
+
         hue = 0  # Red
         saturation = min(100, temp_factor * 80)  # Up to 80% saturation at 1000K
         brightness = 100
@@ -200,7 +203,7 @@ def get_virtual_kelvin(current_color):
     current_kelvin = current_color[3]
     current_saturation = current_color[1] / 65535 * 100
     current_hue = current_color[0] / 65535 * 360
-    
+
     if current_kelvin == 1500 and current_saturation > 5 and abs(current_hue) < 30:
         # Likely emulating sub-1500K temperature
         # Map saturation back to virtual kelvin: 80% sat = 1000K, 0% sat = 1500K
@@ -219,7 +222,7 @@ def set_virtual_kelvin(light, virtual_kelvin, current_color, duration_ms):
         saturation = min(100, temp_factor * 80)
         brightness = current_color[2] / 65535 * 100
         actual_kelvin = 1500
-        
+
         new_color = intuitive_to_lifx_hsbk(hue, saturation, brightness, actual_kelvin)
         light.set_color(new_color, duration=duration_ms)
         return f"{virtual_kelvin}K (emulated)"
@@ -236,7 +239,7 @@ def add_duration_option(f):
         type=float,
         default=0.0,
         show_default=True,
-        help='Set transition duration in seconds (default: 0).'
+        help='Transition duration in seconds'
     )(f)
 
 def add_target_options(f):
@@ -259,7 +262,7 @@ def add_target_options(f):
     )(f)
     return f
 
-@click.group()
+@click.group(invoke_without_command=True)
 @add_target_options
 @click.pass_context
 def cli(ctx, all_lights, group, name):
@@ -268,25 +271,22 @@ def cli(ctx, all_lights, group, name):
     ctx.obj['group'] = group
     ctx.obj['name'] = name
 
-@cli.command(name='list', short_help='List all discovered LIFX lights.')
+    # Check if script was called as 'on' or 'off' (via symlink or argv[0])
+    script_name = os.path.basename(sys.argv[0])
+    if script_name in ['on', 'off']:
+        power_command(all_lights=all_lights, group=group, name=name, duration=0.0, state=script_name)
+        return
+
+@cli.command(name='list', short_help='List lights.')
 @click.option('--rescan', '-r',
               is_flag=True,
               default=False,
               help='Invalidate cache and rescan for devices.')
-@click.option('--json', '-j',
-              'json_output',
-              is_flag=True,
-              default=False,
-              help='Output in JSON format.')
-def list_lights(rescan, json_output):
+def list_lights(rescan):
     lifx = LifxLAN()
     cache_file = get_cache_file_path()
     if rescan or not cache_file.exists():
-        if not json_output:
-            print("Scanning for LIFX devices on the network...")
         lights = lifx.get_lights()
-        if not json_output:
-            print(f"Discovered {len(lights)} light(s).\n")
         save_cache(cache_file, lights)
     else:
         cached_lights = load_cache(cache_file)
@@ -299,42 +299,11 @@ def list_lights(rescan, json_output):
                 except:
                     pass
             if not lights:
-                if not json_output:
-                    print("Cache is empty or corrupted. Rescanning...")
                 lights = lifx.get_lights()
                 save_cache(cache_file, lights)
-                if not json_output:
-                    print(f"Discovered {len(lights)} light(s).\n")
 
     if not lights:
-        if json_output:
-            click.echo(json.dumps({"lights": []}))
-        else:
-            print("No LIFX lights found on the network.")
-        return
-
-    if json_output:
-        light_list = []
-        for light in lights:
-            try:
-                color = light.get_color()
-                light_data = {
-                    "label": light.get_label(),
-                    "ip_address": light.get_ip_addr(),
-                    "mac_address": light.get_mac_addr(),
-                    "power": "On" if light.get_power() > 0 else "Off",
-                    "color": {
-                        "hue": round(color[0]/65535*360, 1),
-                        "saturation": round(color[1]/65535*100, 1),
-                        "brightness": round(color[2]/65535*100, 1),
-                        "kelvin": color[3]
-                    } if color else None,
-                    "brightness": round(color[2]/65535*100 if color else 0, 1)
-                }
-                light_list.append(light_data)
-            except:
-                pass
-        click.echo(json.dumps(light_list, indent=2))
+        print("No LIFX lights found on the network.")
         return
 
     for light in lights:
@@ -342,58 +311,85 @@ def list_lights(rescan, json_output):
             label = light.get_label()
             power = "On" if light.get_power() > 0 else "Off"
             color = light.get_color()
-            
+
             if color and power == "On":
                 h = color[0]/65535*360
                 s = color[1]/65535*100
                 b = color[2]/65535*100
                 k = color[3]
-                
+
                 # Generate color preview
                 r, g, b_rgb = hsbk_to_rgb(h, s, b, k)
                 color_preview = rgb_to_ansi(r, g, b_rgb)
-                
+
                 # Format color info concisely
                 if s < 5:  # Essentially white
                     color_info = f"{k}K white"
                 else:
                     color_info = f"{h:.0f}°, {s:.0f}%, {k}K"
-                
+
                 brightness_str = f"{b:.0f}%"
             else:
                 color_preview = "  "  # No color preview when off
                 color_info = "Off" if power == "Off" else "Unknown"
                 brightness_str = "0%" if power == "Off" else "?"
-            
+
             print(f"{color_preview} {label:<20} {power:<3} {brightness_str:<4} {color_info}")
         except:
             print(f"   {label:<20} ?   ?    Connection failed")
 
-cli.add_command(list_lights, name='l')
+@cli.command(name='clear-cache', short_help='Clear device cache.')
+def clear_cache():
+    """Clear the device cache to force a fresh scan on next use."""
+    cache_file = get_cache_file_path()
+    last_used_file = get_last_used_file_path()
 
-@cli.command(name='power', short_help='Set power state of LIFX lights.')
+    files_removed = []
+    if cache_file.exists():
+        cache_file.unlink()
+        files_removed.append("device cache")
+
+    if last_used_file.exists():
+        last_used_file.unlink()
+        files_removed.append("last used lights")
+
+    if files_removed:
+        print(f"Cleared: {', '.join(files_removed)}")
+    else:
+        print("No cache files found to clear")
+
+@cli.command(name='on', short_help='Turn lights on.')
 @add_target_options
 @add_duration_option
-@click.argument('state', type=click.Choice(['on', 'off']))
 @click.pass_context
-def power(ctx, all_lights, group, name, duration, state):
+def on(ctx, all_lights, group, name, duration):
     all_lights = all_lights or ctx.obj.get('all_lights')
     group = group or ctx.obj.get('group')
     name = name or ctx.obj.get('name')
+    power_command(all_lights=all_lights, group=group, name=name, duration=duration, state='on')
+
+@cli.command(name='off', short_help='Turn lights off.')
+@add_target_options
+@add_duration_option
+@click.pass_context
+def off(ctx, all_lights, group, name, duration):
+    all_lights = all_lights or ctx.obj.get('all_lights')
+    group = group or ctx.obj.get('group')
+    name = name or ctx.obj.get('name')
+    power_command(all_lights=all_lights, group=group, name=name, duration=duration, state='off')
+
+def power_command(all_lights, group, name, duration, state):
     lifx, lights = get_lights(all_lights, group, name)
     duration_ms = int(duration * 1000)  # Convert seconds to milliseconds
     try:
         for light in lights:
             light.set_power(state, duration=duration_ms)
-            print(f"Set power of '{light.get_label()}' to '{state}'.")
+            print(f"{light.get_label()}: {state}")
         save_last_used_lights(lights)
     except:
         print("Failed to set power.")
-    print("\nAll specified actions have been executed.")
 
-cli.add_command(power, name='p')
-
-@cli.command(name='color', short_help='Set color of LIFX lights.')
+@cli.command(name='color', short_help='Set color.')
 @add_target_options
 @add_duration_option
 @click.argument('color_arg', type=str, required=False)
@@ -403,7 +399,7 @@ def color(ctx, all_lights, group, name, duration, color_arg):
     group = group or ctx.obj.get('group')
     name = name or ctx.obj.get('name')
     lifx, lights = get_lights(all_lights, group, name)
-    
+
     if not color_arg:
         # Use fzf to select from predefined HSBK colors
         options = []
@@ -414,32 +410,28 @@ def color(ctx, all_lights, group, name, duration, color_arg):
             color_preview = rgb_to_ansi(r, g, b_rgb)
             formatted_hsbk = f"{h:>3.0f},{s:>3.0f},{b:>3.0f},{k:>4.0f}"
             options.append(f"{color_preview} {name:<{max_name_len}} - {formatted_hsbk}")
-        
+
         try:
-            proc = subprocess.run(
-                ['fzf', '--prompt=Select color: ', '--height=20', '--ansi'],
-                input='\n'.join(options),
-                text=True,
-                capture_output=True
-            )
-            if proc.returncode != 0:
-                print("Color selection cancelled.")
-                sys.exit(0)
-            selected = proc.stdout.strip()
+            # Use sh library for fzf interaction
+            fzf = sh.fzf('--prompt=Select color: ', '--height=20', '--ansi', _in='\n'.join(options))
+            selected = fzf.strip()
             if selected:
                 # Extract HSBK values from selection (after the last ' - ')
                 color_arg = selected.split(' - ')[-1]
             else:
                 print("No color selected.")
                 sys.exit(1)
-        except FileNotFoundError:
+        except sh.ErrorReturnCode:
+            print("Color selection cancelled.")
+            sys.exit(0)
+        except sh.CommandNotFound:
             print("Error: fzf is required for interactive color selection.")
             print("Install with: brew install fzf")
             sys.exit(1)
         except Exception as e:
             print(f"Error during color selection: {e}")
             sys.exit(1)
-    
+
     if color_arg.endswith('k'):
         color_value = kelvin_to_hsbk(color_arg)
         if not color_value:
@@ -470,15 +462,13 @@ def color(ctx, all_lights, group, name, duration, color_arg):
     try:
         for light in lights:
             light.set_color(color_value, duration=duration_ms)
-            print(f"Set color of '{light.get_label()}' to '{color_arg}'.")
+            pass  # Silently set color
         save_last_used_lights(lights)
     except:
         print("Failed to set color.")
-    print("\nAll specified actions have been executed.")
 
-cli.add_command(color, name='c')
 
-@cli.command(name='brightness', short_help='Set brightness of LIFX lights.')
+@cli.command(name='brightness', short_help='Set brightness.')
 @add_target_options
 @add_duration_option
 @click.argument('level', type=click.IntRange(0, 100))
@@ -496,17 +486,15 @@ def brightness(ctx, all_lights, group, name, duration, level):
                 new_brightness = int(level / 100 * 65535)
                 new_color = [current_color[0], current_color[1], new_brightness, current_color[3]]
                 light.set_color(new_color, duration=duration_ms)
-                print(f"Set brightness of '{light.get_label()}' to {level}%.")
+                pass  # Silently set brightness
             else:
                 print(f"Cannot set brightness for '{light.get_label()}' as color information is unavailable.")
         save_last_used_lights(lights)
     except:
         print("Failed to set brightness.")
-    print("\nAll specified actions have been executed.")
 
-cli.add_command(brightness, name='b')
 
-@cli.command(name='brighter', short_help='Increase brightness by percentage.')
+@cli.command(name='brighter', short_help='Increase brightness.')
 @add_target_options
 @add_duration_option
 @click.argument('amount', type=int, default=10)
@@ -526,15 +514,14 @@ def brighter(ctx, all_lights, group, name, duration, amount):
                 new_brightness = int(new_brightness_pct / 100 * 65535)
                 new_color = [current_color[0], current_color[1], new_brightness, current_color[3]]
                 light.set_color(new_color, duration=duration_ms)
-                print(f"Increased brightness of '{light.get_label()}' from {current_brightness:.0f}% to {new_brightness_pct:.0f}%.")
+                print(f"{light.get_label()}: {current_brightness:.0f}% → {new_brightness_pct:.0f}%")
             else:
                 print(f"Cannot adjust brightness for '{light.get_label()}' as color information is unavailable.")
         save_last_used_lights(lights)
     except:
         print("Failed to adjust brightness.")
-    print("\nAll specified actions have been executed.")
 
-@cli.command(name='dimmer', short_help='Decrease brightness by percentage.')
+@cli.command(name='dimmer', short_help='Decrease brightness.')
 @add_target_options
 @add_duration_option
 @click.argument('amount', type=int, default=10)
@@ -554,15 +541,14 @@ def dimmer(ctx, all_lights, group, name, duration, amount):
                 new_brightness = int(new_brightness_pct / 100 * 65535)
                 new_color = [current_color[0], current_color[1], new_brightness, current_color[3]]
                 light.set_color(new_color, duration=duration_ms)
-                print(f"Decreased brightness of '{light.get_label()}' from {current_brightness:.0f}% to {new_brightness_pct:.0f}%.")
+                print(f"{light.get_label()}: {current_brightness:.0f}% → {new_brightness_pct:.0f}%")
             else:
                 print(f"Cannot adjust brightness for '{light.get_label()}' as color information is unavailable.")
         save_last_used_lights(lights)
     except:
         print("Failed to adjust brightness.")
-    print("\nAll specified actions have been executed.")
 
-@cli.command(name='warmer', short_help='Make lights warmer (lower kelvin, including sub-1500K emulation).')
+@cli.command(name='warmer', short_help='Make warmer.')
 @add_target_options
 @add_duration_option
 @click.argument('amount', type=int, default=100)
@@ -579,17 +565,16 @@ def warmer(ctx, all_lights, group, name, duration, amount):
             if current_color:
                 virtual_kelvin = get_virtual_kelvin(current_color)
                 new_virtual_kelvin = max(1000, virtual_kelvin - amount)
-                
+
                 temp_display = set_virtual_kelvin(light, new_virtual_kelvin, current_color, duration_ms)
-                print(f"Made '{light.get_label()}' warmer ({temp_display}).")
+                print(f"{light.get_label()}: {temp_display}")
             else:
                 print(f"Cannot adjust temperature for '{light.get_label()}' as color information is unavailable.")
         save_last_used_lights(lights)
     except:
         print("Failed to adjust temperature.")
-    print("\nAll specified actions have been executed.")
 
-@cli.command(name='cooler', short_help='Make lights cooler (higher kelvin, including from sub-1500K emulation).')
+@cli.command(name='cooler', short_help='Make cooler.')
 @add_target_options
 @add_duration_option
 @click.argument('amount', type=int, default=100)
@@ -606,42 +591,39 @@ def cooler(ctx, all_lights, group, name, duration, amount):
             if current_color:
                 virtual_kelvin = get_virtual_kelvin(current_color)
                 new_virtual_kelvin = min(9000, virtual_kelvin + amount)
-                
+
                 temp_display = set_virtual_kelvin(light, new_virtual_kelvin, current_color, duration_ms)
-                print(f"Made '{light.get_label()}' cooler ({temp_display}).")
+                print(f"{light.get_label()}: {temp_display}")
             else:
                 print(f"Cannot adjust temperature for '{light.get_label()}' as color information is unavailable.")
         save_last_used_lights(lights)
     except:
         print("Failed to adjust temperature.")
-    print("\nAll specified actions have been executed.")
 
 def get_lights(all_lights, group, name):
     cache_file = get_cache_file_path()
-    if cache_file.exists():
-        cached_lights = load_cache(cache_file)
-    else:
-        cached_lights = None
     lifx = LifxLAN()
-    if cached_lights:
-        lights = []
-        for light_data in cached_lights:
-            try:
-                light = Light(light_data['mac_addr'], light_data['ip_addr'])
-                lights.append(light)
-            except:
-                pass
-        if not lights:
-            print("Cache is empty or corrupted. Scanning for devices...")
+
+    # Auto-scan if no cache exists
+    if not cache_file.exists():
+        lights = lifx.get_lights()
+        save_cache(cache_file, lights)
+    else:
+        cached_lights = load_cache(cache_file)
+        if cached_lights:
+            lights = []
+            for light_data in cached_lights:
+                try:
+                    light = Light(light_data['mac_addr'], light_data['ip_addr'])
+                    lights.append(light)
+                except:
+                    pass
+            if not lights:
+                lights = lifx.get_lights()
+                save_cache(cache_file, lights)
+        else:
             lights = lifx.get_lights()
             save_cache(cache_file, lights)
-            print(f"Discovered {len(lights)} light(s).\n")
-            save_cache(cache_file, lights)
-    else:
-        lights = lifx.get_lights()
-        print("Scanning for LIFX devices on the network...")
-        print(f"Discovered {len(lights)} light(s).\n")
-        save_cache(cache_file, lights)
     target_lights = []
     if all_lights:
         target_lights = lights
@@ -673,7 +655,7 @@ def get_lights(all_lights, group, name):
         last_used = load_last_used_lights()
         if last_used:
             target_lights = last_used
-            print(f"Using last used light(s): {', '.join([light.get_label() for light in target_lights])}")
+            pass  # Silently use last used lights
         else:
             print("Error: No target specified and no last used lights found.")
             print("Use --all, --group, or --name to specify target lights.")

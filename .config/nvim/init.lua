@@ -6,21 +6,9 @@ vim.g.loaded_python3_provider = 0
 vim.g.loaded_python_provider = 0
 vim.g.loaded_ruby_provider = 0
 
-vim.loader.enable()
--- vim.g.loaded_gzip = 1
--- vim.g.loaded_tar = 1
--- vim.g.loaded_tarPlugin = 1
--- vim.g.loaded_zip = 1
--- vim.g.loaded_zipPlugin = 1
--- vim.g.loaded_getscript = 1
--- vim.g.loaded_getscriptPlugin = 1
--- vim.g.loaded_vimball = 1
--- vim.g.loaded_vimballPlugin = 1
--- vim.g.loaded_matchit = 1
--- vim.g.loaded_matchparen = 1
--- vim.g.loaded_2html_plugin = 1
--- vim.g.loaded_logiPat = 1
--- vim.g.loaded_rrhelper = 1
+vim.deprecate = function() end
+
+require("user.performance")
 
 vim.g.mapleader = " "
 vim.g.maplocalleader = ","
@@ -33,8 +21,7 @@ vim.opt.clipboard = "unnamedplus"
 vim.opt.cmdwinheight = 10
 vim.opt.completeopt = "menu,menuone,noselect"
 vim.opt.confirm = true
-vim.opt.fillchars = { eob = " " }
-vim.opt.guifont = "Iosevka Nerd Font Mono:h24:w-3:#h-none"
+vim.opt.guifont = "Iosevka Nerd Font Mono:h20:w-2:#h-none"
 vim.opt.ignorecase = true
 vim.opt.infercase = true
 vim.opt.laststatus = 0
@@ -43,6 +30,7 @@ vim.opt.linebreak = true
 vim.opt.list = true
 vim.opt.listchars = { nbsp = '␣', tab = '» ', trail = '·' }
 vim.opt.mouse = "a"
+vim.opt.mousemodel = "extend" -- disable right-click popup menu
 vim.opt.path:append({ "**" })
 vim.opt.pumblend = 25
 vim.opt.pumheight = 10
@@ -85,6 +73,7 @@ vim.api.nvim_create_autocmd("VimResized", {
   end,
 })
 
+
 require("user.globals")
 require("user.plugins")
 
@@ -121,16 +110,6 @@ vim.keymap.set('c', '<S-Tab>', function()
     end
 end, { expr = true })
 
--- " command mode movement
--- cnoremap <C-a> <Home>
--- cnoremap <C-e> <End>
--- cnoremap <C-p> <Up>
--- cnoremap <C-n> <Down>
--- cnoremap <C-b> <Left>
--- cnoremap <C-f> <Right>
--- cnoremap <M-b> <S-Left>
--- cnoremap <M-f> <S-Right>
---
 -- " lisp case movement
 -- set iskeyword+=-
 --
@@ -141,17 +120,6 @@ end, { expr = true })
 --
 -- " windows
 -- nmap <silent> <C-h> :wincmd h<CR> | nmap <silent> <C-j> :wincmd j<CR> | nmap <silent> <C-k> :wincmd k<CR> | nmap <silent> <C-l> :wincmd l<CR>
--- " arglist
--- nnoremap <leader>an :next<cr> | nnoremap <leader>ap :prev<cr>
--- " quickfix
--- nnoremap <leader>cn :cnext<cr> | nnoremap <leader>cp :cprev<cr>
--- " select last inserted text
--- nnoremap gV '[V']
--- " toggle line numbers
--- map <silent> <leader>tn :set number!<CR>
--- " fuzzy find
--- nnoremap <silent> <leader>b :FuzzyBuffer<CR>
--- nnoremap <silent> <leader>f :FuzzyOpen<CR>
 vim.o.updatetime = 500
 
 vim.api.nvim_create_autocmd("CursorHold", {

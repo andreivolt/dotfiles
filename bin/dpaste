@@ -1,0 +1,47 @@
+#!/usr/bin/env -S uv run --script --quiet
+"""Upload text or files to dpaste.org pastebin service."""
+# /// script
+# dependencies = [
+#   "pyperclip",
+#   "requests",
+# ]
+# ///
+
+
+import argparse
+import sys
+import requests
+import webbrowser
+import pyperclip
+
+
+parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument('-s', '--syntax', default='text')
+parser.add_argument('-t', '--title', default='')
+parser.add_argument('-e', '--expiry', default='7', choices=['1', '7', '30', '365'])
+parser.add_argument('-f', '--file', type=argparse.FileType('r'), default=sys.stdin)
+parser.add_argument('-o', '--open', action='store_true')
+parser.add_argument('-c', '--copy', action='store_true')
+args = parser.parse_args()
+
+content = args.file.read()
+if args.file != sys.stdin:
+    args.file.close()
+
+data = {
+    'content': content,
+    'syntax': args.syntax,
+    'title': args.title,
+    'expiry_days': args.expiry
+}
+
+response = requests.post('https://dpaste.org/api/', data=data)
+url = response.text.strip().strip('"') + '/raw'
+
+print(url)
+
+if args.copy:
+    pyperclip.copy(url)
+
+if args.open:
+    webbrowser.open(url)

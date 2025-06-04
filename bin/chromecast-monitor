@@ -1,9 +1,11 @@
 #!/usr/bin/env -S uv run --script --quiet
+"""Monitor Chromecast device status and activity."""
 # /// script
 # dependencies = [
-#     "pychromecast~=14.0",  # Chromecast discovery and control library
+#   "pychromecast~=14.0",
 # ]
 # ///
+
 
 import pychromecast
 import json
@@ -80,7 +82,7 @@ else:
         }))
         sys.stdout.flush()
     discovery_browser.stop_discovery()
-    
+
     # Now start monitoring for changes
     browser.start_discovery()
     try:

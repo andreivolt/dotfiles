@@ -1,11 +1,14 @@
 #!/usr/bin/env -S uv run --script --quiet
+"""Scrape websites using Firecrawl API."""
 # /// script
 # dependencies = [
-#     "click",
-#     "firecrawl-py>=1.5,<2",  # Use stable v1.x, avoid breaking changes in v2
-#     "pydantic",
+#   "click",
+#   "firecrawl-py>=1.5,<2",
+#   "pydantic",
 # ]
 # ///
+
+
 import os
 import click
 import json
@@ -34,37 +37,53 @@ def cli(ctx, json_output):
 
 @cli.command()
 @click.argument('url')
-@click.option('--format', multiple=True, type=click.Choice(['markdown', 'html']), help='Output format')
+@click.option('--format', multiple=True, type=click.Choice(['markdown', 'html']), default=['markdown'], help='Output format')
+@click.option('--html', is_flag=True, help='Shortcut for --format html')
 @click.pass_obj
-def scrape(obj, url, format):
+def scrape(obj, url, format, html):
     """Scrape a single URL"""
     app = obj['app']
     json_output = obj['json_output']
     try:
-        if format:
-            result = app.scrape_url(url, formats=list(format))
+        params = {}
+        if html:
+            formats = ['html']
         else:
-            result = app.scrape_url(url)
-        output_result(result, json_output)
+            formats = list(format) if format else ['markdown']
+
+        if formats:
+            params['formats'] = formats
+
+        result = app.scrape_url(url, params=params if params else None)
+
+        # Handle output based on format
+        if json_output:
+            click.echo(json.dumps(result, indent=2))
+        elif 'html' in formats and isinstance(result, dict) and 'html' in result:
+            click.echo(result['html'])
+        elif isinstance(result, dict) and 'markdown' in result:
+            click.echo(result['markdown'])
+        else:
+            output_result(result, json_output)
     except Exception as e:
         click.echo(click.style(f"Error: {str(e)}", fg='red'))
 
 @cli.command()
 @click.argument('url')
-@click.option('--limit', type=int, help='Maximum number of pages to crawl')
+@click.option('--limit', type=int, help='Max pages to crawl')
 @click.option('--format', multiple=True, type=click.Choice(['markdown', 'html']), default=['markdown'], help='Output format')
 @click.pass_obj
 def crawl(obj, url, limit, format):
     """Crawl a website"""
     app = obj['app']
     json_output = obj['json_output']
-    kwargs = {}
+    params = {}
     if limit:
-        kwargs['limit'] = limit
+        params['limit'] = limit
     if format:
-        kwargs['scrapeOptions'] = {'formats': list(format)}
+        params['scrapeOptions'] = {'formats': list(format)}
     try:
-        result = app.crawl_url(url, **kwargs)
+        result = app.crawl_url(url, params=params if params else None)
         output_result(result, json_output)
     except Exception as e:
         click.echo(click.style(f"Error: {str(e)}", fg='red'))

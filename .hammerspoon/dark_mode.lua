@@ -1,5 +1,5 @@
 local function toggleDarkMode()
-    hs.osascript.applescript([[
+	hs.osascript.applescript([[
         tell application "System Events"
             tell appearance preferences
                 set dark mode to not dark mode
@@ -9,5 +9,5 @@ local function toggleDarkMode()
 end
 
 return {
-    toggleDarkMode = toggleDarkMode
+	toggleDarkMode = toggleDarkMode,
 }
