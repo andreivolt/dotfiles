@@ -1,128 +1,151 @@
-#!/usr/bin/env -S uv run --script --quiet
-# /// script
-# dependencies = [
-#   "timeago==1.0",  // Human-friendly time format (e.g., "3 days ago")
-#   "requests==2.32",  // HTTP library for Tailscale API calls
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! ureq = { version = "2.9", features = ["json"] }
+//! serde = { version = "1.0", features = ["derive"] }
+//! serde_json = "1.0"
+//! chrono = { version = "0.4", features = ["serde"] }
+//! argh = "0.1"
+//! anyhow = "1.0"
+//! chrono-human-duration = "0.1"
+//! duct = "0.13"
+//! ```
 
-import json
-import os
-import sys
-import subprocess
-import base64
-import timeago
-from datetime import datetime
-import requests
+use anyhow::{anyhow, Result};
+use argh::FromArgs;
+use chrono::{DateTime, Utc};
+use chrono_human_duration::ChronoHumanDuration;
+use duct::cmd;
+use serde::Deserialize;
+use std::env;
 
-# Check for fzf
-try:
-    subprocess.run(["which", "fzf"], check=True, capture_output=True)
-except subprocess.CalledProcessError:
-    print("Error: fzf is not installed. Please install it first.")
-    sys.exit(1)
+#[derive(FromArgs)]
+/// Delete Tailscale devices
+struct Args {
+    /// device names to delete
+    #[argh(positional)]
+    devices: Vec<String>,
+}
 
-# Environment variables
-auth_key = os.getenv('TAILSCALE_API_KEY')
-tailscale_org = os.getenv('TAILSCALE_ORG')
-tailscale_net = os.getenv('TAILSCALE_NET')
+#[derive(Deserialize)]
+struct DevicesResponse {
+    devices: Vec<Device>,
+}
 
-if not all([auth_key, tailscale_org, tailscale_net]):
-    print("Error: Required environment variables not set.")
-    print("Please set TAILSCALE_API_KEY, TAILSCALE_ORG, and TAILSCALE_NET.")
-    sys.exit(1)
+#[derive(Deserialize, Clone)]
+struct Device {
+    id: String,
+    name: String,
+    #[serde(rename = "lastSeen")]
+    last_seen: Option<DateTime<Utc>>,
+}
 
-api_base_url = "https://api.tailscale.com/api/v2"
+fn get_env_vars() -> Result<(String, String)> {
+    let api_key = env::var("TAILSCALE_API_KEY")
+        .map_err(|_| anyhow!("TAILSCALE_API_KEY environment variable not set"))?;
+    let org = env::var("TAILSCALE_ORG")
+        .map_err(|_| anyhow!("TAILSCALE_ORG environment variable not set"))?;
+    Ok((api_key, org))
+}
 
-def api_request(url, method='GET'):
-    auth_header = base64.b64encode(f"{auth_key}:".encode()).decode()
-    headers = {
-        'Authorization': f'Basic {auth_header}',
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
+fn time_ago(dt: Option<DateTime<Utc>>) -> String {
+    match dt {
+        Some(dt) => {
+            let now = Utc::now();
+            let duration = now.signed_duration_since(dt);
+            duration.format_human().to_string()
+        }
+        None => "never".to_string(),
     }
-    
-    response = requests.request(method, url, headers=headers)
-    return response.status_code, response.text
+}
 
-def time_ago_in_words(time_str):
-    if not time_str:
-        return 'Never'
-    
-    try:
-        if isinstance(time_str, str) and time_str.isdigit():
-            # Unix timestamp as string
-            timestamp = int(time_str)
-            if timestamp > 1e12:  # Likely nanoseconds
-                time_obj = datetime.fromtimestamp(timestamp / 1e9)
-            else:  # Likely seconds
-                time_obj = datetime.fromtimestamp(timestamp)
-        elif isinstance(time_str, (int, float)):
-            # Handle large timestamps (possibly nanoseconds)
-            if time_str > 1e12:  # Likely nanoseconds
-                time_obj = datetime.fromtimestamp(time_str / 1e9)
-            else:  # Likely seconds
-                time_obj = datetime.fromtimestamp(time_str)
-        else:
-            # ISO format string - convert to timezone-naive
-            time_obj = datetime.fromisoformat(str(time_str).replace('Z', '+00:00')).replace(tzinfo=None)
-        
-        return timeago.format(time_obj, datetime.now())
-    except:
-        return 'unknown'
+fn get_devices(api_key: &str, org: &str) -> Result<Vec<Device>> {
+    let url = format!("https://api.tailscale.com/api/v2/tailnet/{}/devices", org);
 
-# Get all devices
-status_code, response_body = api_request(f"{api_base_url}/tailnet/{tailscale_org}/devices")
+    let response = ureq::get(&url)
+        .set("Authorization", &format!("Bearer {}", api_key))
+        .call()
+        .map_err(|e| anyhow!("API request failed: {}", e))?;
 
-if status_code != 200:
-    print(f"Error: Failed to fetch devices. HTTP Status Code: {status_code}")
-    sys.exit(1)
+    let devices_response: DevicesResponse = response.into_json()?;
+    Ok(devices_response.devices)
+}
 
-devices = json.loads(response_body)['devices']
+fn delete_device(api_key: &str, device_id: &str) -> Result<()> {
+    let url = format!("https://api.tailscale.com/api/v2/device/{}", device_id);
 
-if not devices:
-    print("No devices found.")
-    sys.exit(0)
+    ureq::delete(&url)
+        .set("Authorization", &format!("Bearer {}", api_key))
+        .call()
+        .map_err(|e| anyhow!("Delete request failed: {}", e))?;
 
-# Prepare device list for fzf
-device_list = []
-for device in devices:
-    last_seen = time_ago_in_words(device.get('lastSeen'))
-    device_list.append(f"{device['name']} - Last seen: {last_seen} ({device['id']})")
+    Ok(())
+}
 
-# Use fzf to select devices
-fzf_input = '\n'.join(device_list)
-try:
-    result = subprocess.run(
-        ['fzf', '--multi', '--header=Select devices to delete (TAB to select multiple, ENTER to confirm)'],
-        input=fzf_input,
-        text=True,
-        capture_output=True,
-        check=True
-    )
-    selected_devices = result.stdout.strip()
-except subprocess.CalledProcessError:
-    print("No devices selected or fzf error occurred.")
-    sys.exit(1)
+fn select_devices_with_fzf(devices: &[Device]) -> Result<Vec<Device>> {
+    let max_name_len = devices.iter().map(|d| d.name.len()).max().unwrap_or(0);
+    let device_list: Vec<String> = devices
+        .iter()
+        .map(|d| format!("{:<width$} - {}", d.name, time_ago(d.last_seen), width = max_name_len))
+        .collect();
 
-if not selected_devices:
-    print("No devices selected.")
-    sys.exit(1)
+    let input = device_list.join("\n");
 
-# Process selected devices
-for device_line in selected_devices.split('\n'):
-    # Extract device name and ID from the line
-    if ' - Last seen: ' in device_line and device_line.endswith(')'):
-        device_name = device_line.split(' - Last seen: ')[0]
-        device_id = device_line.split('(')[-1].rstrip(')')
-    else:
-        print(f"Error: Could not parse device line: {device_line}")
-        continue
-    
-    print(f"Deleting device: {device_name}...")
-    status_code, _ = api_request(f"{api_base_url}/device/{device_id}", 'DELETE')
-    
-    if status_code == 200:
-        print(f"✓ Device '{device_name}' deleted successfully.")
-    else:
-        print(f"✗ Error: Failed to delete device '{device_name}'. HTTP Status Code: {status_code}")
+    let output = cmd!("fzf", "--multi", "--prompt=Select devices to delete: ", "--header=TAB to select multiple, ENTER to confirm")
+        .stdin_bytes(input)
+        .read()
+        .map_err(|_| anyhow!("No devices selected"))?;
+
+    let selected_names: Vec<String> = output
+        .lines()
+        .map(|line| line.split(" - ").next().unwrap_or("").to_string())
+        .collect();
+
+    let selected_devices: Vec<Device> = devices
+        .iter()
+        .filter(|d| selected_names.contains(&d.name))
+        .cloned()
+        .collect();
+
+    Ok(selected_devices)
+}
+
+fn main() -> Result<()> {
+    let args: Args = argh::from_env();
+    let (api_key, org) = get_env_vars()?;
+
+    let devices = get_devices(&api_key, &org)?;
+
+    if devices.is_empty() {
+        println!("No devices found");
+        return Ok(());
+    }
+
+    let selected_devices = if args.devices.is_empty() {
+        select_devices_with_fzf(&devices)?
+    } else {
+        devices
+            .into_iter()
+            .filter(|d| args.devices.contains(&d.name))
+            .collect()
+    };
+
+    if selected_devices.is_empty() {
+        println!("No matching devices found");
+        return Ok(());
+    }
+
+    println!("Deleting {} device(s):", selected_devices.len());
+    for device in &selected_devices {
+        println!("  - {}", device.name);
+    }
+
+    for device in selected_devices {
+        match delete_device(&api_key, &device.id) {
+            Ok(()) => println!("Deleted {}", device.name),
+            Err(e) => eprintln!("Error deleting {}: {}", device.name, e),
+        }
+    }
+
+    Ok(())
+}

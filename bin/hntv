@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-
-curl -s 'https://news.ycombinator.com/from?site=youtube.com' |
-  grep -Eo 'https?://www.youtube.com[^"]+' |
-  mpv --playlist=-

@@ -4,15 +4,22 @@ require 'json'
 require 'tempfile'
 require 'optparse'
 
-def detect_text(path)
-  cmd = "gcloud --project andreivolt ml vision detect-text '#{path}' --format=json"
+def detect_text(path, use_layout = false)
+  cmd = if use_layout
+    "gcloud --project andreivolt ml vision detect-document '#{path}' --format=json"
+  else
+    "gcloud --project andreivolt ml vision detect-text '#{path}' --format=json"
+  end
+
   output = `#{cmd}`
 
   if $?.success?
     result = JSON.parse(output)
     response = result['responses'][0]
 
-    if response['fullTextAnnotation'] && response['fullTextAnnotation']['text']
+    if use_layout && response['fullTextAnnotation']
+      format_with_layout(response['fullTextAnnotation'])
+    elsif response['fullTextAnnotation'] && response['fullTextAnnotation']['text']
       response['fullTextAnnotation']['text']
     elsif response['textAnnotations'] && response['textAnnotations'].length > 0
       response['textAnnotations'].map { |annotation| annotation['description'] }.join(' ')
@@ -25,12 +32,78 @@ def detect_text(path)
   end
 end
 
+def format_with_layout(annotation)
+  return annotation['text'] unless annotation['pages']
+
+  # Collect all words with their positions
+  positioned_words = []
+
+  annotation['pages'].each do |page|
+    page['blocks']&.each do |block|
+      block['paragraphs']&.each do |paragraph|
+        paragraph['words']&.each do |word|
+          word_text = word['symbols']&.map { |s| s['text'] }&.join('')
+          next if word_text.strip.empty?
+
+          # Get bounding box
+          if word['boundingBox'] && word['boundingBox']['vertices']
+            vertices = word['boundingBox']['vertices']
+            x = vertices.map { |v| v['x'] || 0 }.min
+            y = vertices.map { |v| v['y'] || 0 }.min
+
+            positioned_words << {
+              text: word_text,
+              x: x,
+              y: y
+            }
+          end
+        end
+      end
+    end
+  end
+
+  # Sort by Y position (top to bottom), then X position (left to right)
+  positioned_words.sort! { |a, b| [a[:y], a[:x]] <=> [b[:y], b[:x]] }
+
+  # Group into lines based on Y coordinate proximity
+  lines = []
+  current_line = []
+  current_y = nil
+  line_threshold = 10 # pixels
+
+  positioned_words.each do |word|
+    if current_y.nil? || (word[:y] - current_y).abs <= line_threshold
+      current_line << word
+      current_y = word[:y] if current_y.nil?
+    else
+      # Sort current line by X coordinate and add to lines
+      current_line.sort_by! { |w| w[:x] }
+      lines << current_line.map { |w| w[:text] }.join(' ')
+      current_line = [word]
+      current_y = word[:y]
+    end
+  end
+
+  # Add the last line
+  if !current_line.empty?
+    current_line.sort_by! { |w| w[:x] }
+    lines << current_line.map { |w| w[:text] }.join(' ')
+  end
+
+  lines.join("\n")
+end
+
+
 options = {}
 OptionParser.new do |opts|
   opts.banner = "Usage: gcloudocr [options] [file]"
 
   opts.on("-s", "--screenshot", "Take screenshot") do
     options[:screenshot] = true
+  end
+
+  opts.on("-l", "--layout", "Preserve layout using document detection") do
+    options[:layout] = true
   end
 end.parse!
 
@@ -39,12 +112,12 @@ if options[:screenshot]
   temp_path = temp_file.path
   temp_file.close
   `screencapture -i -s '#{temp_path}'`
-  puts detect_text(temp_path)
+  puts detect_text(temp_path, options[:layout])
 elsif ARGV[0]
-  puts detect_text(ARGV[0])
+  puts detect_text(ARGV[0], options[:layout])
 else
   Tempfile.open('input') do |f|
     f.write($stdin.read)
-    puts detect_text(f.path)
+    puts detect_text(f.path, options[:layout])
   end
 end

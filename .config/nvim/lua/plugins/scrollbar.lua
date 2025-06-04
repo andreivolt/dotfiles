@@ -1,6 +1,10 @@
 return {
   'petertriho/nvim-scrollbar',
-  config = true,
+  opts = {
+    handlers = {
+      cursor = false,
+    },
+  },
   dependencies = {
     "kevinhwang91/nvim-hlslens",
     config = function()

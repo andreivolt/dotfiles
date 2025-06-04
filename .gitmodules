@@ -16,9 +16,27 @@
 [submodule ".local/share/zsh/plugins/history-substring-search"]
 	path = .local/share/zsh/plugins/history-substring-search
 	url = https://github.com/zsh-users/zsh-history-substring-search
-[submodule ".local/share/zsh/plugins/fast-syntax-highlighting"]
-	path = .local/share/zsh/plugins/fast-syntax-highlighting
-	url = https://github.com/zdharma-continuum/fast-syntax-highlighting
 [submodule ".local/share/zsh/plugins/zummoner"]
 	path = .local/share/zsh/plugins/zummoner
 	url = https://github.com/day50-dev/zummoner.git
+[submodule ".local/share/zsh/plugins/zsh-fzf-history-search"]
+	path = .local/share/zsh/plugins/zsh-fzf-history-search
+	url = https://github.com/joshskidmore/zsh-fzf-history-search
+[submodule ".local/share/zsh/plugins/fast-syntax-highlighting"]
+	path = .local/share/zsh/plugins/fast-syntax-highlighting
+	url = https://github.com/zdharma-continuum/fast-syntax-highlighting.git
+[submodule ".config/tmux/plugins/tpm"]
+	path = .config/tmux/plugins/tpm
+	url = https://github.com/tmux-plugins/tpm.git
+[submodule ".config/tmux/plugins/tmux-sensible"]
+	path = .config/tmux/plugins/tmux-sensible
+	url = https://github.com/tmux-plugins/tmux-sensible.git
+[submodule ".config/tmux/plugins/tmux-resurrect"]
+	path = .config/tmux/plugins/tmux-resurrect
+	url = https://github.com/tmux-plugins/tmux-resurrect.git
+[submodule ".config/tmux/plugins/tmux-continuum"]
+	path = .config/tmux/plugins/tmux-continuum
+	url = https://github.com/tmux-plugins/tmux-continuum.git
+[submodule ".config/tmux/plugins/tmux-reset"]
+	path = .config/tmux/plugins/tmux-reset
+	url = https://github.com/hallazzang/tmux-reset.git

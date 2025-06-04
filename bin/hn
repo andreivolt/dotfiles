@@ -1,0 +1,181 @@
+#!/usr/bin/env -S bun run --script
+// @deps commander@^12.0.0 chalk@^5.0.0
+
+export class HackerNewsParser {
+  parseStories(html) {
+    const stories = [];
+
+    const storyMatches = html.matchAll(/<tr class='athing[^']*' id='(\d+)'[\s\S]*?(?=<tr class="spacer"|<tr class='athing|$)/g);
+
+    let rank = 1;
+    for (const match of storyMatches) {
+      const storyHtml = match[0];
+      const story = this.parseStoryHtml(storyHtml, match[1]);
+      if (story) {
+        story.rank = rank++;
+        stories.push(story);
+      }
+    }
+
+    return stories;
+  }
+
+  parseStoryHtml(storyHtml, id) {
+    try {
+      const titleMatch = storyHtml.match(/<span class="titleline"><a href="([^"]*)"[^>]*>([^<]*)</);
+      if (!titleMatch) return null;
+
+      const url = this.decodeHtml(titleMatch[1]);
+      const title = this.decodeHtml(titleMatch[2]);
+
+      const domainMatch = storyHtml.match(/<span class="sitestr">([^<]*)</);
+      const domain = domainMatch ? this.decodeHtml(domainMatch[1]) : this.extractDomain(url);
+
+      const pointsMatch = storyHtml.match(/<span[^>]*class="score"[^>]*>(\d+) points?</);
+      const points = pointsMatch ? parseInt(pointsMatch[1]) : 0;
+
+      const userMatch = storyHtml.match(/<a[^>]*class="hnuser"[^>]*>([^<]*)</);
+      const user = userMatch ? this.decodeHtml(userMatch[1]) : null;
+
+      const timeMatch = storyHtml.match(/<span class="age"[^>]*><a href="item\?id=\d+">([^<]*)<\/a><\/span>/);
+      const timeAgo = timeMatch ? this.decodeHtml(timeMatch[1]) : null;
+
+      const commentsMatch = storyHtml.match(/<a[^>]*href="item\?id=\d+"[^>]*>(\d+)&nbsp;comments?</);
+      const commentsCount = commentsMatch ? parseInt(commentsMatch[1]) : null;
+      const commentsUrl = commentsCount ? `https://news.ycombinator.com/item?id=${id}` : null;
+
+      return {
+        id: parseInt(id),
+        title: title.trim(),
+        url: url.startsWith('item?id=') ? `https://news.ycombinator.com/${url}` : url,
+        domain,
+        points,
+        user,
+        timeAgo: timeAgo ? timeAgo.trim() : null,
+        commentsCount,
+        commentsUrl
+      };
+    } catch (error) {
+      console.error('Error parsing story:', error);
+      return null;
+    }
+  }
+
+  decodeHtml(html) {
+    // Use DOMParser if available (browser), otherwise use basic entity map
+    if (typeof DOMParser !== 'undefined') {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      return doc.documentElement.textContent;
+    }
+
+    // Fallback for Node.js/Bun
+    const entities = {
+      '&amp;': '&',
+      '&lt;': '<',
+      '&gt;': '>',
+      '&quot;': '"',
+      '&#x27;': "'",
+      '&#x2F;': '/',
+      '&#39;': "'",
+      '&nbsp;': ' '
+    };
+
+    return html.replace(/&[#\w]+;/g, entity => entities[entity] || entity);
+  }
+
+  extractDomain(url) {
+    try {
+      if (!url || url.startsWith('item?id=')) return 'news.ycombinator.com';
+      const urlObj = new URL(url);
+      return urlObj.hostname.replace('www.', '');
+    } catch {
+      return null;
+    }
+  }
+
+  async fetchAndParse(url = 'https://news.ycombinator.com') {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; HN-Parser/1.0)'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const html = await response.text();
+      return this.parseStories(html);
+    } catch (error) {
+      throw new Error(`Failed to fetch HN data: ${error.message}`);
+    }
+  }
+}
+
+import { Command } from 'commander';
+import chalk from 'chalk';
+
+if (import.meta.main) {
+  const program = new Command();
+
+  const pages = ['', 'newest', 'front', 'ask', 'show', 'jobs', 'best', 'active', 'classic', 'submitted', 'upvoted'];
+
+  const getPageUrl = (page) => {
+    const baseUrl = 'https://news.ycombinator.com';
+    return page ? `${baseUrl}/${page}` : baseUrl;
+  };
+
+  program
+    .name('hn')
+    .description('Parse Hacker News pages')
+    .version('1.0.0')
+    .argument('[page]', 'HN page type (default: front page)', '')
+    .option('-j, --json', 'output as JSON')
+    .option('-v, --verbose', 'verbose output with details')
+    .addHelpText('after', `
+Pages: ${pages.map(p => p || 'front').join(', ')}`);
+
+  program.parse();
+
+  const options = program.opts();
+  const page = program.args[0] || '';
+
+  if (!pages.includes(page)) {
+    console.error(`Error: Unknown page '${page}'. Available: ${pages.join(', ')}`);
+    process.exit(1);
+  }
+
+  try {
+    const parser = new HackerNewsParser();
+    const stories = await parser.fetchAndParse(getPageUrl(page));
+
+    if (options.json) {
+      console.log(JSON.stringify(stories, null, 2));
+    } else if (options.verbose) {
+      stories.forEach(story => {
+        console.log(chalk.bold(story.title));
+        console.log(chalk.cyan(story.url));
+        console.log(
+          chalk.yellow(`${story.points || 0} points`) +
+          chalk.gray(` • ${story.user || 'unknown'} • ${story.timeAgo || 'unknown'} • ${story.commentsCount || 0} comments`)
+        );
+        console.log();
+      });
+    } else {
+      // Default: all metadata on one line
+      stories.forEach(story => {
+        const meta = [
+          chalk.yellow(`${story.points || 0}p`),
+          chalk.gray(story.user || 'unknown'),
+          chalk.gray(story.timeAgo || ''),
+          chalk.gray(`${story.commentsCount || 0}c`)
+        ].join(' ');
+        console.log(`${story.title} ${chalk.dim(story.url)} ${meta}`);
+      });
+    }
+  } catch (error) {
+    console.error('Error:', error.message);
+    process.exit(1);
+  }
+}

@@ -1,4 +1,9 @@
-#!/usr/bin/swift
+#!/usr/bin/env scriptisto
+
+// scriptisto-begin
+// script_src: script.swift
+// build_cmd: swiftc -O script.swift -o script
+// scriptisto-end
 
 import Cocoa
 

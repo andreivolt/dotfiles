@@ -44,6 +44,15 @@ vim.keymap.set("v", "<C-j>", ":m '>+1<CR>gv=gv")
 vim.keymap.set('x', 'v', require('nvim-treesitter.incremental_selection').node_incremental)
 vim.keymap.set('x', 'V', require('nvim-treesitter.incremental_selection').node_decremental)
 
+vim.keymap.set("n", "gV", "'[V']")
+
+vim.keymap.set("n", "<leader>an", vim.cmd.next)
+vim.keymap.set("n", "<leader>ap", vim.cmd.prev)
+
+vim.keymap.set("n", "<leader>cn", vim.cmd.cnext)
+vim.keymap.set("n", "<leader>cp", vim.cmd.cprev)
+
+
 vim.keymap.set("v", "y", function() return 'my"' .. vim.v.register .. "y`y" end, { expr = true })
 
 vim.keymap.set("n", "n", "nzzzv", { desc = "center search hits vertically on screen and expand folds if hit is inside" })
