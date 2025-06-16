@@ -93,6 +93,48 @@ export class HackerNewsParser {
     }
   }
 
+  async shortenUrl(url, timeout = 1000) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+      
+      const response = await fetch('http://127.0.0.1/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `url=${encodeURIComponent(url)}`,
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        return await response.text();
+      } else {
+        return url; // Fallback to original URL if shortening fails
+      }
+    } catch (error) {
+      return url; // Fallback to original URL if shortening fails
+    }
+  }
+
+  async shortenUrls(urls) {
+    // Batch shorten URLs with concurrency limit
+    const results = [];
+    const batchSize = 10; // Process 10 URLs at a time
+    
+    for (let i = 0; i < urls.length; i += batchSize) {
+      const batch = urls.slice(i, i + batchSize);
+      const batchResults = await Promise.all(
+        batch.map(url => this.shortenUrl(url, 3000))
+      );
+      results.push(...batchResults);
+    }
+    
+    return results;
+  }
+
   async fetchAndParse(url = 'https://news.ycombinator.com') {
     try {
       const response = await fetch(url, {
@@ -133,6 +175,7 @@ if (import.meta.main) {
     .argument('[page]', 'HN page type (default: front page)', '')
     .option('-j, --json', 'output as JSON')
     .option('-v, --verbose', 'verbose output with details')
+    .option('-t, --table', 'compact table output with shortened URLs')
     .addHelpText('after', `
 Pages: ${pages.map(p => p || 'front').join(', ')}`);
 
@@ -154,13 +197,89 @@ Pages: ${pages.map(p => p || 'front').join(', ')}`);
       console.log(JSON.stringify(stories, null, 2));
     } else if (options.verbose) {
       stories.forEach(story => {
-        console.log(chalk.bold(story.title));
-        console.log(chalk.cyan(story.url));
+        console.log(chalk.bold(`[${story.title}](${story.url})`));
+        const commentsUrl = story.commentsUrl || `https://news.ycombinator.com/item?id=${story.id}`;
         console.log(
           chalk.yellow(`${story.points || 0} points`) +
-          chalk.gray(` • ${story.user || 'unknown'} • ${story.timeAgo || 'unknown'} • ${story.commentsCount || 0} comments`)
+          chalk.gray(` • ${story.user || 'unknown'} • ${story.timeAgo || 'unknown'} • `) +
+          chalk.dim(`[${story.commentsCount || 0} comments](${commentsUrl})`)
         );
         console.log();
+      });
+    } else if (options.table) {
+      // Compact table with shortened URLs
+      
+      // Check if this is Ask HN page where story URL and comments URL are the same
+      const isAskHN = page === 'ask' || stories.some(story => 
+        story.url.includes('item?id=') && story.url === (story.commentsUrl || `https://news.ycombinator.com/item?id=${story.id}`)
+      );
+      
+      // Collect all URLs to shorten in one batch
+      const allUrls = [];
+      stories.forEach(story => {
+        if (!isAskHN) {
+          allUrls.push(story.url);
+        }
+        allUrls.push(story.commentsUrl || `https://news.ycombinator.com/item?id=${story.id}`);
+      });
+      
+      // Batch shorten all URLs
+      const shortenedUrls = await parser.shortenUrls(allUrls);
+      
+      // Map shortened URLs back to stories
+      const shortenedStories = stories.map((story, index) => {
+        let shortUrl, shortCommentsUrl;
+        
+        if (isAskHN) {
+          shortCommentsUrl = shortenedUrls[index];
+        } else {
+          shortUrl = shortenedUrls[index * 2];
+          shortCommentsUrl = shortenedUrls[index * 2 + 1];
+        }
+        
+        return {
+          ...story,
+          shortUrl,
+          shortCommentsUrl,
+          // Truncate title to HN's display limit (about 80 chars)
+          truncatedTitle: story.title.length > 80 ? story.title.substring(0, 77) + '...' : story.title
+        };
+      });
+      
+      // Calculate column widths
+      const titleWidth = Math.max(5, Math.min(80, Math.max(...shortenedStories.map(s => s.truncatedTitle.length))));
+      const urlWidth = isAskHN ? 0 : Math.max(3, Math.max(...shortenedStories.map(s => s.shortUrl.length)));
+      const userWidth = Math.max(4, Math.max(...shortenedStories.map(s => (s.user || '').length)));
+      const timeWidth = Math.max(4, Math.max(...shortenedStories.map(s => (s.timeAgo || '').length)));
+      const commentsWidth = Math.max(8, Math.max(...shortenedStories.map(s => s.shortCommentsUrl.length)));
+      
+      
+      // Print rows
+      shortenedStories.forEach((story, index) => {
+        const isEven = index % 2 === 0;
+        const rowParts = [
+          story.truncatedTitle.padEnd(titleWidth)
+        ];
+        
+        if (!isAskHN) {
+          rowParts.push(chalk.dim(story.shortUrl.padEnd(urlWidth)));
+        }
+        
+        rowParts.push(
+          chalk.yellow((story.points || 0).toString().padStart(4)),
+          chalk.gray((story.user || '').padEnd(userWidth)),
+          chalk.gray((story.timeAgo || '').padEnd(timeWidth)),
+          chalk.gray((story.commentsCount || 0).toString().padStart(4)),
+          chalk.dim(story.shortCommentsUrl.padEnd(commentsWidth))
+        );
+        
+        const row = rowParts.join(' ');
+        
+        if (isEven) {
+          console.log(chalk.bgRgb(40, 40, 40)(row));
+        } else {
+          console.log(row);
+        }
       });
     } else {
       // Default: all metadata on one line
@@ -171,7 +290,8 @@ Pages: ${pages.map(p => p || 'front').join(', ')}`);
           chalk.gray(story.timeAgo || ''),
           chalk.gray(`${story.commentsCount || 0}c`)
         ].join(' ');
-        console.log(`${story.title} ${chalk.dim(story.url)} ${meta}`);
+        const commentsUrl = story.commentsUrl || `https://news.ycombinator.com/item?id=${story.id}`;
+        console.log(`${story.title} ${chalk.dim(story.url)} ${meta} ${chalk.dim(commentsUrl)}`);
       });
     }
   } catch (error) {
