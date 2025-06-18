@@ -70,7 +70,7 @@ def run_llm_ocr(image_path, mode, custom_prompt=None, copy_to_clipboard=False, m
     try:
         # Capture output to determine if we should render as markdown
         llm_cmd = Command("llm")
-        cmd_args = ["--extract", "--at", str(image_path), mime_type]
+        cmd_args = ["--extract", "--at", str(image_path), mime_type, "--no-log"]
         if model:
             cmd_args.extend(["-m", model])
         cmd_args.append(prompt)

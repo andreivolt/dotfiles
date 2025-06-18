@@ -7,6 +7,7 @@ alias lla="ll -a"
 
 alias cdt='cd $(mktemp -d)'
 alias diff="diff --color"
+alias edir="edir -r"
 alias gc='git clone --depth 1'
 alias gist="gh gist"
 alias gron="fastgron"
