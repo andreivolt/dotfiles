@@ -3,18 +3,33 @@
 # /// script
 # dependencies = [
 #   "requests>=2.31",
+#   "deepgram-sdk>=3.0.0",
+#   "click>=8.0",
+#   "pyaudio>=0.2.11",
 # ]
 # ///
 
-
-import argparse
+import click
+import asyncio
 import os
 import sys
 import json
 import requests
+import subprocess
+import tempfile
 from pathlib import Path
 from urllib.parse import urlencode
 import mimetypes
+from typing import List
+
+from deepgram import (
+    DeepgramClient, 
+    DeepgramClientOptions,
+    LiveTranscriptionEvents,
+    LiveOptions,
+    Microphone,
+    PrerecordedOptions
+)
 
 # Model choices
 NOVA_MODELS = ["nova-2", "nova-2-meeting", "nova-2-phonecall", "nova-2-voicemail", "nova-2-finance", "nova-2-conversationalai", "nova-2-video", "nova-2-medical", "nova-2-drivethru", "nova-2-automotive", "nova-3"]
@@ -39,385 +54,828 @@ REDACT_CHOICES = [
     "zodiac_sign", "routing_number", "ssn"
 ]
 
-class DependencyAction(argparse.Action):
-    """Handle option dependencies"""
-    def __call__(self, parser, namespace, values, option_string=None):
-        setattr(namespace, self.dest, values)
-
-        # If paragraphs is enabled, ensure at least one dependency is met
-        if self.dest == 'paragraphs' and values:
-            if not any([namespace.punctuate, namespace.diarize, namespace.multichannel]):
-                # Auto-enable punctuate as it's the simplest option
-                namespace.punctuate = True
-
-def parse_keywords(value):
+def parse_keywords(ctx, param, value):
     """Parse keyword:boost format"""
-    try:
-        word, boost = value.split(':', 1)
-        return f"{word}:{boost}"
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"Keywords must be in 'word:boost' format, got: {value}")
+    if not value:
+        return []
+    result = []
+    for v in value:
+        try:
+            word, boost = v.split(':', 1)
+            result.append(f"{word}:{boost}")
+        except ValueError:
+            raise click.BadParameter(f"Keywords must be in 'word:boost' format, got: {v}")
+    return result
 
-def parse_replace(value):
+def parse_replace(ctx, param, value):
     """Parse from:to format"""
-    try:
-        from_word, to_word = value.split(':', 1)
-        return f"{from_word}:{to_word}"
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"Replace must be in 'from:to' format, got: {value}")
+    if not value:
+        return []
+    result = []
+    for v in value:
+        try:
+            from_word, to_word = v.split(':', 1)
+            result.append(f"{from_word}:{to_word}")
+        except ValueError:
+            raise click.BadParameter(f"Replace must be in 'from:to' format, got: {v}")
+    return result
 
-def parse_extra(value):
+def parse_extra(ctx, param, value):
     """Parse key=value format"""
+    if not value:
+        return []
+    result = []
+    for v in value:
+        try:
+            key, val = v.split('=', 1)
+            result.append({key: val})
+        except ValueError:
+            raise click.BadParameter(f"Extra must be in 'key=value' format, got: {v}")
+    return result
+
+# Chunking functions
+async def download_file(url: str, output_path: str):
+    """Download file from URL."""
+    print(f"Downloading: {url}")
+    response = requests.get(url, stream=True)
+    response.raise_for_status()
+
+    total_size = int(response.headers.get('content-length', 0))
+    downloaded = 0
+
+    with open(output_path, 'wb') as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
+                downloaded += len(chunk)
+                if total_size > 0:
+                    progress = (downloaded / total_size) * 100
+                    print(f"\rDownload progress: {progress:.1f}%", end='', flush=True)
+    print()
+
+async def get_audio_duration(file_path: str) -> float:
+    """Get audio duration in seconds using ffprobe."""
+    cmd = [
+        'ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+        '-of', 'csv=p=0', file_path
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise Exception(f"Failed to get duration: {result.stderr}")
+    return float(result.stdout.strip())
+
+async def chunk_audio(file_path: str, chunk_minutes: int = 90) -> List[str]:
+    """Split audio file into chunks using ffmpeg."""
+    print(f"Analyzing audio file: {file_path}")
+
+    # Get total duration
+    total_duration = await get_audio_duration(file_path)
+    chunk_duration = chunk_minutes * 60  # Convert to seconds
+
+    file_stem = Path(file_path).stem
+    output_dir = Path(f"{file_stem}_chunks")
+    output_dir.mkdir(exist_ok=True)
+
+    total_chunks = int(total_duration / chunk_duration) + (1 if total_duration % chunk_duration else 0)
+    print(f"Total duration: {total_duration/3600:.1f} hours")
+    print(f"Splitting into {total_chunks} chunks of {chunk_minutes} minutes each")
+
+    chunks = []
+
+    for i in range(total_chunks):
+        start_time = i * chunk_duration
+        original_ext = Path(file_path).suffix
+        chunk_path = output_dir / f"chunk_{i:03d}{original_ext}"
+
+        cmd = [
+            'ffmpeg', '-y', '-i', file_path,
+            '-ss', str(start_time),
+            '-t', str(chunk_duration),
+            '-c', 'copy',  # Copy streams without re-encoding
+            str(chunk_path)
+        ]
+
+        print(f"Creating chunk {i+1}/{total_chunks}...")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print(f"Warning: Failed to create chunk {i}: {result.stderr}")
+            continue
+
+        chunks.append(str(chunk_path))
+
+        # Get actual chunk duration
+        try:
+            actual_duration = await get_audio_duration(str(chunk_path))
+            print(f"Created chunk {i+1}/{total_chunks}: {chunk_path} ({actual_duration:.1f}s)")
+        except:
+            print(f"Created chunk {i+1}/{total_chunks}: {chunk_path}")
+
+    return chunks
+
+async def transcribe_chunk(client: DeepgramClient, chunk_path: str, chunk_index: int, **kwargs) -> dict:
+    """Transcribe a single audio chunk."""
     try:
-        key, val = value.split('=', 1)
-        return {key: val}
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"Extra must be in 'key=value' format, got: {value}")
+        # Check if file exists and has content
+        if not os.path.exists(chunk_path):
+            raise Exception(f"Chunk file does not exist: {chunk_path}")
 
-parser = argparse.ArgumentParser(description="Transcribe audio using Deepgram API with smart defaults",
-formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        file_size = os.path.getsize(chunk_path)
+        if file_size == 0:
+            raise Exception(f"Chunk file is empty: {chunk_path} (0 bytes)")
 
-parser.add_argument("input", help="Audio file path or URL to transcribe")
+        print(f"Processing chunk {chunk_index}: {chunk_path} ({file_size/1024/1024:.1f}MB)")
+
+        with open(chunk_path, "rb") as audio_file:
+            buffer_data = audio_file.read()
+
+        # Use same options as main function
+        options = PrerecordedOptions(
+            model=kwargs['model'],
+            smart_format=kwargs['smart_format'],
+            utterances=kwargs['utterances'],
+            punctuate=kwargs['punctuate'],
+            diarize=kwargs['diarize'],
+            paragraphs=kwargs['paragraphs'],
+            numerals=kwargs['numerals'],
+            profanity_filter=kwargs['profanity_filter'],
+            measurements=kwargs['measurements'],
+            dictation=kwargs['dictation'],
+            filler_words=kwargs['filler_words'],
+            detect_entities=kwargs['detect_entities'],
+            detect_language=kwargs['detect_language'],
+            detect_topics=kwargs['detect_topics'],
+            topics=kwargs['topics'],
+            intents=kwargs['intents'],
+            sentiment=kwargs['sentiment'],
+            multichannel=kwargs['multichannel'],
+            language=kwargs['language'],
+            utt_split=kwargs['utt_split'],
+            version=kwargs['version']
+        )
+
+        response = await client.listen.asyncprerecorded.v("1").transcribe_file(
+            {"buffer": buffer_data}, options
+        )
+
+        result = response.to_dict()
+        result["chunk_index"] = chunk_index
+        result["chunk_file"] = chunk_path
+
+        # Calculate time offset for this chunk
+        chunk_minutes = kwargs.get('chunk_minutes', 90)
+        time_offset_seconds = chunk_index * chunk_minutes * 60
+
+        # Adjust timestamps
+        if "results" in result and "channels" in result["results"]:
+            for channel in result["results"]["channels"]:
+                if "alternatives" in channel:
+                    for alternative in channel["alternatives"]:
+                        if "words" in alternative:
+                            for word in alternative["words"]:
+                                if "start" in word:
+                                    word["start"] += time_offset_seconds
+                                if "end" in word:
+                                    word["end"] += time_offset_seconds
+
+        transcript = result["results"]["channels"][0]["alternatives"][0]["transcript"]
+        print(f"Chunk {chunk_index} completed: {len(transcript)} characters")
+
+        return result
+
+    except Exception as e:
+        error_msg = str(e)
+        print(f"Error processing chunk {chunk_index}: {error_msg}")
+        print(f"Chunk file: {chunk_path}")
+
+        # Add more detailed error info
+        if hasattr(e, 'response') and e.response:
+            try:
+                error_details = e.response.json()
+                print(f"API Error details: {error_details}")
+                error_msg = f"{error_msg} - API Details: {error_details}"
+            except:
+                print(f"HTTP Status: {e.response.status_code}")
+                error_msg = f"{error_msg} - HTTP {e.response.status_code}"
+
+        return {"error": error_msg, "chunk_index": chunk_index, "chunk_file": chunk_path}
+
+async def process_chunks_streaming(chunks: List[str], output_file: str, **kwargs):
+    """Process chunks with controlled concurrency and maintain order."""
+    client = DeepgramClient()
+
+    output_path = Path(output_file)
+    transcript_path = output_path.with_suffix('.txt')
+
+    semaphore = asyncio.Semaphore(3)
+
+    async def process_with_semaphore(chunk_path: str, index: int):
+        async with semaphore:
+            return await transcribe_chunk(client, chunk_path, index, **kwargs)
+
+    # Process chunks and maintain order
+    with open(output_file, 'w') as json_file, open(transcript_path, 'w') as txt_file:
+        json_file.write('[\n')
+        txt_file.write(f"Transcript for {len(chunks)} audio chunks\n")
+        txt_file.write("=" * 50 + "\n\n")
+
+        tasks = [process_with_semaphore(chunk, i) for i, chunk in enumerate(chunks)]
+
+        # Process with progress updates
+        completed_count = 0
+
+        for i, task in enumerate(asyncio.as_completed(tasks)):
+            result = await task
+            completed_count += 1
+
+            # Find the chunk index from the result
+            chunk_idx = result.get('chunk_index', i) if isinstance(result, dict) else i
+
+            print(f"Progress: {completed_count}/{len(chunks)} chunks completed ({completed_count/len(chunks)*100:.1f}%)")
+
+            # Store result for later ordered processing
+            if not hasattr(process_chunks_streaming, 'results'):
+                process_chunks_streaming.results = [None] * len(chunks)
+            process_chunks_streaming.results[chunk_idx] = result
+
+        # Now process results in order
+        for i, result in enumerate(process_chunks_streaming.results):
+            if isinstance(result, Exception):
+                result = {"error": str(result), "chunk_index": i}
+
+            # Write JSON result
+            if i > 0:
+                json_file.write(',\n')
+            json.dump(result, json_file, indent=2)
+            json_file.flush()
+
+            # Write transcript if successful
+            if "error" not in result and "results" in result:
+                chunk_index = result["chunk_index"]
+                transcript = result["results"]["channels"][0]["alternatives"][0]["transcript"]
+
+                txt_file.write(f"Chunk {chunk_index + 1}:\n")
+                txt_file.write(f"{transcript}\n\n")
+                txt_file.flush()
+
+                print(f"Processed chunk {chunk_index + 1}/{len(chunks)}")
+            else:
+                chunk_idx = result.get('chunk_index', 'unknown')
+                error_msg = result.get('error', 'Unknown error')
+                print(f"Skipped chunk {chunk_idx} due to error: {error_msg}")
+                print(f"ERROR CHUNK {chunk_idx}: {error_msg}", file=sys.stderr)
+
+        json_file.write('\n]')
+
+    print(f"\nTranscription complete!")
+    print(f"JSON output: {output_file}")
+    print(f"Text transcript: {transcript_path}")
+
+async def live_transcribe(**kwargs):
+    """Perform live transcription from microphone."""
+    try:
+        # Get API key
+        api_key = os.environ.get('DEEPGRAM_API_KEY')
+        if not api_key:
+            print("Error: DEEPGRAM_API_KEY environment variable not set")
+            return
+            
+        config = DeepgramClientOptions(options={"keepalive": "true"})
+        deepgram = DeepgramClient(api_key, config)
+
+        dg_connection = deepgram.listen.asynclive.v("1")
+
+        async def on_message(self, result, **kwargs):
+            try:
+                if hasattr(result, 'channel') and result.channel and result.channel.alternatives:
+                    sentence = result.channel.alternatives[0].transcript
+                    if len(sentence) == 0:
+                        return
+                    if result.is_final:
+                        print(f"\033[92m{sentence}\033[0m")
+                    else:
+                        print(f"\033[90m{sentence}\033[0m", end='\r')
+            except Exception as e:
+                print(f"Error in transcript: {e}")
+
+        async def on_close(self, close, **kwargs):
+            print("Connection Closed")
+
+        async def on_error(self, error, **kwargs):
+            print(f"Error: {error}")
+
+        dg_connection.on(LiveTranscriptionEvents.Transcript, on_message)
+        dg_connection.on(LiveTranscriptionEvents.Close, on_close)
+        dg_connection.on(LiveTranscriptionEvents.Error, on_error)
+
+        # Convert language code to locale format for live streaming
+        lang_code = kwargs.get('language', 'en')
+        if lang_code == 'en':
+            lang_code = 'en-US'
+        
+        # For live streaming, default to nova-2 if nova-3 is selected
+        live_model = kwargs.get('model', 'nova-2')
+        if live_model == 'nova-3':
+            live_model = 'nova-2'
+            
+        options = LiveOptions(
+            model=live_model,
+            language=lang_code,
+            smart_format=kwargs.get('smart_format', True),
+            encoding="linear16",
+            channels=1,
+            sample_rate=16000,
+            interim_results=True,
+            utterance_end_ms="1000",
+            vad_events=True,
+            endpointing=300,
+            diarize=kwargs.get('diarize', False),
+        )
+
+        addons = {
+            "no_delay": "true"
+        }
+
+        print("Starting live transcription... Press Ctrl+C to stop.")
+        
+        if await dg_connection.start(options, addons=addons) is False:
+            print("Failed to connect to Deepgram")
+            return
+
+        microphone = Microphone(dg_connection.send)
+        microphone.start()
+
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except KeyboardInterrupt:
+            print("\nStopping live transcription...")
+        finally:
+            microphone.finish()
+            await dg_connection.finish()
+
+    except Exception as e:
+        print(f"Could not open socket: {e}")
+        return
+
+
+async def chunk_and_transcribe(input_file, output, chunk_minutes, **kwargs):
+    """Handle chunking workflow."""
+
+    temp_file = None
+
+    try:
+        # Handle URL vs file
+        if input_file.startswith('http'):
+            # Download to temp file
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.m4a')
+            await download_file(input_file, temp_file.name)
+            input_file = temp_file.name
+
+        # Create chunks
+        chunks = await chunk_audio(input_file, chunk_minutes)
+
+        # Process chunks with ordered output
+        await process_chunks_streaming(chunks, output, chunk_minutes=chunk_minutes, **kwargs)
+
+        print(f"\nKept audio chunks in: {Path(chunks[0]).parent}")
+
+        # Cleanup temp file
+        if temp_file:
+            os.unlink(temp_file.name)
+
+    except Exception as e:
+        print(f"Error in chunking: {str(e)}", file=sys.stderr)
+        sys.exit(1)
+
+@click.command()
+@click.argument('input_file', required=False)
 
 # Model selection
-parser.add_argument("-m", "--model",
-                   choices=ALL_MODELS,
-                   default="nova-3",
-                   help="Model to use")
+@click.option('-m', '--model', type=click.Choice(ALL_MODELS), default='nova-3',
+              help='Model to use')
 
 # Core features with smart defaults
-parser.add_argument("--no-smart-format", dest="smart_format", action="store_false", default=True,
-               help="Disable smart formatting (enabled by default)")
-parser.add_argument("--no-diarize", dest="diarize", action="store_false", default=True,
-               help="Disable speaker diarization (enabled by default)")
-parser.add_argument("--no-paragraphs", dest="paragraphs", action="store_false", default=True,
-               help="Disable paragraph detection (enabled by default)")
-parser.add_argument("--no-utterances", dest="utterances", action="store_false", default=True,
-               help="Disable utterance segmentation (enabled by default)")
+@click.option('--no-smart-format', 'smart_format', flag_value=False, default=True,
+              help='Disable smart formatting (enabled by default)')
+@click.option('--no-diarize', 'diarize', flag_value=False, default=True,
+              help='Disable speaker diarization (enabled by default)')
+@click.option('--no-paragraphs', 'paragraphs', flag_value=False, default=True,
+              help='Disable paragraph detection (enabled by default)')
+@click.option('--no-utterances', 'utterances', flag_value=False, default=True,
+              help='Disable utterance segmentation (enabled by default)')
 
 # Additional formatting
-parser.add_argument("--punctuate", action="store_true", default=False,
-               help="Add punctuation (not needed with smart_format)")
-parser.add_argument("--numerals", action="store_true", default=False,
-               help="Convert numbers to digits")
-parser.add_argument("--profanity-filter", action="store_true", default=False,
-               help="Filter profanity")
-parser.add_argument("--measurements", action="store_true", default=False,
-               help="Convert measurements to abbreviations")
-parser.add_argument("--dictation", action="store_true", default=False,
-               help="Format dictation commands")
-parser.add_argument("--filler-words", action="store_true", default=False,
-               help="Include filler words (um, uh)")
+@click.option('--punctuate', is_flag=True, default=False,
+              help='Add punctuation (not needed with smart_format)')
+@click.option('--numerals', is_flag=True, default=False,
+              help='Convert numbers to digits')
+@click.option('--profanity-filter', is_flag=True, default=False,
+              help='Filter profanity')
+@click.option('--measurements', is_flag=True, default=False,
+              help='Convert measurements to abbreviations')
+@click.option('--dictation', is_flag=True, default=False,
+              help='Format dictation commands')
+@click.option('--filler-words', is_flag=True, default=False,
+              help='Include filler words (um, uh)')
 
 # Language options
-parser.add_argument("--language", default="en",
-                   help="Language code")
-parser.add_argument("--detect-language", action="store_true", default=False,
-                   help="Auto-detect language")
+@click.option('--language', default='en', help='Language code')
+@click.option('--detect-language', is_flag=True, default=False,
+              help='Auto-detect language')
 
 # Advanced features
-parser.add_argument("--multichannel", action="store_true", default=False,
-                   help="Process channels independently")
-parser.add_argument("--channels", type=int,
-                   help="Number of independent audio channels")
-parser.add_argument("--utt-split", type=float, default=0.8,
-                   help="Utterance split duration")
+@click.option('--multichannel', is_flag=True, default=False,
+              help='Process channels independently')
+@click.option('--channels', type=int, help='Number of independent audio channels')
+@click.option('--utt-split', type=float, default=0.8,
+              help='Utterance split duration')
 
 # Entity/content detection
-parser.add_argument("--detect-entities", action="store_true", default=False,
-                   help="Detect entities")
-parser.add_argument("--detect-topics", action="store_true", default=False,
-                   help="Detect topics")
-parser.add_argument("--topics", action="store_true", default=False,
-                   help="Identify topics")
-parser.add_argument("--intents", action="store_true", default=False,
-                   help="Detect speaker intents")
-parser.add_argument("--sentiment", action="store_true", default=False,
-                   help="Analyze sentiment")
-parser.add_argument("--summarize", choices=["v2"], help="Generate summary")
+@click.option('--detect-entities', is_flag=True, default=False,
+              help='Detect entities')
+@click.option('--detect-topics', is_flag=True, default=False,
+              help='Detect topics')
+@click.option('--topics', is_flag=True, default=False,
+              help='Identify topics')
+@click.option('--intents', is_flag=True, default=False,
+              help='Detect speaker intents')
+@click.option('--sentiment', is_flag=True, default=False,
+              help='Analyze sentiment')
+@click.option('--summarize', type=click.Choice(['v2']),
+              help='Generate summary')
 
 # Search and modification
-parser.add_argument("--keywords", type=parse_keywords, action="append",
-                   help="Boost keywords (format: word:boost)")
-parser.add_argument("--search", action="append",
-                   help="Search for terms (not supported by Whisper)")
-parser.add_argument("--replace", type=parse_replace, action="append",
-                   help="Replace terms (format: from:to)")
-parser.add_argument("--redact", choices=REDACT_CHOICES, action="append",
-                   help="Redact sensitive info")
+@click.option('--keywords', multiple=True, callback=parse_keywords,
+              help='Boost keywords (format: word:boost)')
+@click.option('--search', multiple=True,
+              help='Search for terms (not supported by Whisper)')
+@click.option('--replace', multiple=True, callback=parse_replace,
+              help='Replace terms (format: from:to)')
+@click.option('--redact', type=click.Choice(REDACT_CHOICES), multiple=True,
+              help='Redact sensitive info')
 
 # Custom options
-parser.add_argument("--custom-topic", help="Custom topic for detection")
-parser.add_argument("--custom-topic-mode", default="extended",
-                   choices=["strict", "extended"],
-                   help="Custom topic mode")
-parser.add_argument("--tag", help="Tag for the request")
-parser.add_argument("--callback", help="URL for receiving results")
-parser.add_argument("--tier", help="Model tier level")
-parser.add_argument("--alternatives", type=int,
-                   help="Max transcript alternatives")
-parser.add_argument("--encoding",
-                   choices=["linear16", "flac", "mulaw", "amr-nb", "amr-wb", "opus", "speex"],
-                   help="Audio encoding for streaming")
-parser.add_argument("--sample-rate", type=int,
-                   help="Sample rate in Hz")
-parser.add_argument("--extra", type=parse_extra, action="append",
-                   help="Extra parameters (format: key=value)")
-parser.add_argument("--version", default="latest",
-                   help="Model version")
+@click.option('--custom-topic', help='Custom topic for detection')
+@click.option('--custom-topic-mode', type=click.Choice(['strict', 'extended']),
+              default='extended', help='Custom topic mode')
+@click.option('--tag', help='Tag for the request')
+@click.option('--callback', help='URL for receiving results')
+@click.option('--tier', help='Model tier level')
+@click.option('--alternatives', type=int,
+              help='Max transcript alternatives')
+@click.option('--encoding',
+              type=click.Choice(['linear16', 'flac', 'mulaw', 'amr-nb', 'amr-wb', 'opus', 'speex']),
+              help='Audio encoding for streaming')
+@click.option('--sample-rate', type=int, help='Sample rate in Hz')
+@click.option('--extra', multiple=True, callback=parse_extra,
+              help='Extra parameters (format: key=value)')
+@click.option('--version', default='latest', help='Model version')
+
+# Chunking options
+@click.option('--chunk-minutes', type=int, default=90,
+              help='Chunk duration in minutes')
+@click.option('-o', '--output', default='transcription.json',
+              help='Output file for chunking mode')
+
+# Live mode
+@click.option('--live', is_flag=True, help='Enable live transcription from microphone')
 
 # Output options
-parser.add_argument("--json", action="store_true", default=False,
-                   help="Output full JSON response")
+@click.option('--json', 'output_json', is_flag=True, default=False,
+              help='Output full JSON response')
+def cli_main(input_file, model, smart_format, diarize, paragraphs, utterances,
+             punctuate, numerals, profanity_filter, measurements, dictation,
+             filler_words, language, detect_language, multichannel, channels,
+             utt_split, detect_entities, detect_topics, topics, intents,
+             sentiment, summarize, keywords, search, replace, redact,
+             custom_topic, custom_topic_mode, tag, callback, tier,
+             alternatives, encoding, sample_rate, extra, version,
+             chunk_minutes, output, output_json, live):
+    """Click CLI wrapper for async main function"""
+    asyncio.run(main(input_file, model, smart_format, diarize, paragraphs, utterances,
+                     punctuate, numerals, profanity_filter, measurements, dictation,
+                     filler_words, language, detect_language, multichannel, channels,
+                     utt_split, detect_entities, detect_topics, topics, intents,
+                     sentiment, summarize, keywords, search, replace, redact,
+                     custom_topic, custom_topic_mode, tag, callback, tier,
+                     alternatives, encoding, sample_rate, extra, version,
+                     chunk_minutes, output, output_json, live))
 
-args = parser.parse_args()
+async def main(input_file, model, smart_format, diarize, paragraphs, utterances,
+               punctuate, numerals, profanity_filter, measurements, dictation,
+               filler_words, language, detect_language, multichannel, channels,
+               utt_split, detect_entities, detect_topics, topics, intents,
+               sentiment, summarize, keywords, search, replace, redact,
+               custom_topic, custom_topic_mode, tag, callback, tier,
+               alternatives, encoding, sample_rate, extra, version,
+               chunk_minutes, output, output_json, live):
+    """Transcribe audio using Deepgram API with smart defaults"""
 
-# Validate dependencies
-if args.paragraphs and not any([args.punctuate, args.diarize, args.multichannel, args.smart_format]):
-    parser.error("--paragraphs requires --punctuate, --diarize, --multichannel, or --smart-format")
+    # Package all options for easy passing
+    options = {
+        'model': model, 'smart_format': smart_format, 'diarize': diarize,
+        'paragraphs': paragraphs, 'utterances': utterances, 'punctuate': punctuate,
+        'numerals': numerals, 'profanity_filter': profanity_filter,
+        'measurements': measurements, 'dictation': dictation, 'filler_words': filler_words,
+        'language': language, 'detect_language': detect_language, 'multichannel': multichannel,
+        'channels': channels, 'utt_split': utt_split, 'detect_entities': detect_entities,
+        'detect_topics': detect_topics, 'topics': topics, 'intents': intents,
+        'sentiment': sentiment, 'summarize': summarize, 'keywords': keywords,
+        'search': search, 'replace': replace, 'redact': redact,
+        'custom_topic': custom_topic, 'custom_topic_mode': custom_topic_mode,
+        'tag': tag, 'callback': callback, 'tier': tier, 'alternatives': alternatives,
+        'encoding': encoding, 'sample_rate': sample_rate, 'extra': extra,
+        'version': version
+    }
 
-# Language-specific validations
-if args.language != 'en' and args.sentiment:
-    parser.error("--sentiment is only supported for English (--language en)")
+    # Get API key
+    api_key = os.environ.get('DEEPGRAM_API_KEY')
+    if not api_key:
+        click.echo("Error: DEEPGRAM_API_KEY environment variable not set")
+        sys.exit(1)
 
-# Model-language compatibility - auto-fallback for better UX
-if args.model == 'nova-3' and args.language != 'en':
-    # Nova-3 has issues with non-English languages, fallback to nova-2
-    print(f"Note: Using nova-2 for {args.language} language (better compatibility)", file=sys.stderr)
-    args.model = 'nova-2'
+    # Handle live streaming mode
+    if live:
+        await live_transcribe(**options)
+        return
 
-# Check for Whisper limitations
-is_whisper = args.model.startswith("whisper-")
-if is_whisper:
-    if args.search:
-        parser.error("--search is not supported with Whisper models")
-    # Note: redact IS supported by Whisper according to docs
+    # Check if input file is provided for non-live mode
+    if not input_file:
+        click.echo("Error: Input file is required (or use --live for live transcription)")
+        sys.exit(1)
 
-# Build query parameters
-params = []
+    # Check if we should use chunking automatically
+    should_chunk = False
 
-# Add all boolean options
-for key in ['smart_format', 'diarize', 'paragraphs', 'utterances', 'punctuate',
-            'numerals', 'profanity_filter', 'measurements', 'dictation',
-            'filler_words', 'detect_entities', 'detect_language', 'detect_topics',
-            'topics', 'intents', 'sentiment', 'multichannel']:
-    if getattr(args, key):
-        params.append((key, 'true'))
+    # Only check file duration for local files (not URLs)
+    if not input_file.startswith('http'):
+        try:
+            file_path = Path(input_file)
+            if file_path.exists():
+                # Get audio duration to decide on chunking
+                duration = await get_audio_duration(str(file_path))
+                # Auto-chunk if file is longer than 2 hours (7200 seconds)
+                if duration > 7200:
+                    should_chunk = True
+                    print(f"File duration: {duration/3600:.1f} hours - automatically enabling chunking")
+        except Exception as e:
+            # If we can't get duration, continue with normal processing
+            print(f"Warning: Could not determine file duration: {e}")
 
-# Add required parameters
-params.append(('model', args.model))
-params.append(('language', args.language))
-params.append(('utt_split', str(args.utt_split)))
-params.append(('version', args.version))
+    if should_chunk:
+        await chunk_and_transcribe(input_file, output, chunk_minutes, **options)
+        return
 
-# Add optional parameters
-if args.custom_topic:
-    params.append(('custom_topic', args.custom_topic))
-    params.append(('custom_topic_mode', args.custom_topic_mode))
-if args.tag:
-    params.append(('tag', args.tag))
-if args.callback:
-    params.append(('callback', args.callback))
-if args.tier:
-    params.append(('tier', args.tier))
-if args.alternatives:
-    params.append(('alternatives', str(args.alternatives)))
-if args.encoding:
-    params.append(('encoding', args.encoding))
-if args.sample_rate:
-    params.append(('sample_rate', str(args.sample_rate)))
-if args.channels:
-    params.append(('channels', str(args.channels)))
-if args.summarize:
-    params.append(('summarize', args.summarize))
+    # Validate dependencies
+    if paragraphs and not any([punctuate, diarize, multichannel, smart_format]):
+        click.echo("Error: --paragraphs requires --punctuate, --diarize, --multichannel, or --smart-format")
+        sys.exit(1)
 
-# Handle multiple value parameters
-if args.keywords:
-    # For Nova-3, use keyterms instead
-    param_name = 'keyterms' if 'nova-3' in args.model else 'keywords'
-    for kw in args.keywords:
-        params.append((param_name, kw))
+    # Language-specific validations
+    if language != 'en' and sentiment:
+        click.echo("Error: --sentiment is only supported for English (--language en)")
+        sys.exit(1)
 
-if args.search and not is_whisper:
-    for term in args.search:
-        params.append(('search', term))
+    # Model-language compatibility - auto-fallback for better UX
+    if model == 'nova-3' and language != 'en':
+        # Nova-3 has issues with non-English languages, fallback to nova-2
+        print(f"Note: Using nova-2 for {language} language (better compatibility)", file=sys.stderr)
+        model = 'nova-2'
+        options['model'] = model
 
-if args.redact:
-    for category in args.redact:
-        params.append(('redact', category))
+    # Check for Whisper limitations
+    is_whisper = model.startswith("whisper-")
+    if is_whisper:
+        if search:
+            click.echo("Error: --search is not supported with Whisper models")
+            sys.exit(1)
+        # Note: redact IS supported by Whisper according to docs
 
-if args.replace:
-    for replacement in args.replace:
-        params.append(('replace', replacement))
+    # Build query parameters
+    params = []
 
-# Add extra parameters
-if args.extra:
-    for extra_dict in args.extra:
-        for k, v in extra_dict.items():
-            params.append((k, v))
+    # Add all boolean options
+    for key in ['smart_format', 'diarize', 'paragraphs', 'utterances', 'punctuate',
+                'numerals', 'profanity_filter', 'measurements', 'dictation',
+                'filler_words', 'detect_entities', 'detect_language', 'detect_topics',
+                'topics', 'intents', 'sentiment', 'multichannel']:
+        if options[key]:
+            params.append((key, 'true'))
 
-# Get API key
-api_key = os.environ.get('DEEPGRAM_API_KEY')
-if not api_key:
-    parser.error("DEEPGRAM_API_KEY environment variable not set")
+    # Add required parameters
+    params.append(('model', model))
+    params.append(('language', language))
+    params.append(('utt_split', str(utt_split)))
+    params.append(('version', version))
 
-# Build URL with proper encoding
-query_string = urlencode(params)
-url = f"https://api.deepgram.com/v1/listen?{query_string}"
+    # Add optional parameters
+    if custom_topic:
+        params.append(('custom_topic', custom_topic))
+        params.append(('custom_topic_mode', custom_topic_mode))
+    if tag:
+        params.append(('tag', tag))
+    if callback:
+        params.append(('callback', callback))
+    if tier:
+        params.append(('tier', tier))
+    if alternatives:
+        params.append(('alternatives', str(alternatives)))
+    if encoding:
+        params.append(('encoding', encoding))
+    if sample_rate:
+        params.append(('sample_rate', str(sample_rate)))
+    if channels:
+        params.append(('channels', str(channels)))
+    if summarize:
+        params.append(('summarize', summarize))
 
-# Prepare request
-headers = {
-    'Authorization': f'Token {api_key}',
-    'Accept': 'application/json'
-}
+    # Handle multiple value parameters
+    if keywords:
+        # For Nova-3, use keyterms instead
+        param_name = 'keyterms' if 'nova-3' in model else 'keywords'
+        for kw in keywords:
+            params.append((param_name, kw))
 
-# Handle input (URL or file)
-if args.input.startswith('http'):
-    # For URLs, we need to send as JSON with 'url' field
-    headers['Content-Type'] = 'application/json'
-    data = json.dumps({'url': args.input})
-else:
-    # Read file
-    file_path = Path(args.input)
-    if not file_path.exists():
-        parser.error(f"File not found: {args.input}")
+    if search and not is_whisper:
+        for term in search:
+            params.append(('search', term))
 
-    # Guess content type
-    content_type, _ = mimetypes.guess_type(args.input)
-    if not content_type:
-        # Default to audio/mpeg
-        content_type = 'audio/mpeg'
+    if redact:
+        for category in redact:
+            params.append(('redact', category))
 
-    headers['Content-Type'] = content_type
-    with open(args.input, 'rb') as f:
-        data = f.read()
+    if replace:
+        for replacement in replace:
+            params.append(('replace', replacement))
 
-# Make request
-try:
-    response = requests.post(url, headers=headers, data=data, timeout=None)
-    response.raise_for_status()
-except requests.exceptions.RequestException as e:
-    print(f"Request failed: {e}", file=sys.stderr)
-    if hasattr(e, 'response') and e.response is not None:
-        if e.response.status_code == 400:
-            try:
-                error_data = e.response.json()
-                print(f"Error details: {error_data}", file=sys.stderr)
-            except:
-                print(f"Response body: {e.response.text}", file=sys.stderr)
-    sys.exit(1)
+    # Add extra parameters
+    if extra:
+        for extra_dict in extra:
+            for k, v in extra_dict.items():
+                params.append((k, v))
 
-# Parse response
-result = response.json()
+    # Build URL with proper encoding
+    query_string = urlencode(params)
+    url = f"https://api.deepgram.com/v1/listen?{query_string}"
 
-# If JSON output requested, print and exit
-if args.json:
-    print(json.dumps(result, indent=2))
-    sys.exit(0)
+    # Prepare request
+    headers = {
+        'Authorization': f'Token {api_key}',
+        'Accept': 'application/json'
+    }
 
-# Extract channels data
-channels = result.get('results', {}).get('channels', [])
-if not channels:
-    print("No transcription results found", file=sys.stderr)
-    sys.exit(1)
-
-# Get the first channel (or handle multichannel if needed)
-channel = channels[0]
-alternatives = channel.get('alternatives', [])
-if not alternatives:
-    print("No alternatives found", file=sys.stderr)
-    sys.exit(1)
-
-alternative = alternatives[0]
-
-# First, check if diarization is enabled and count unique speakers
-unique_speakers = set()
-if args.diarize:
-    if 'paragraphs' in alternative and 'paragraphs' in alternative.get('paragraphs', {}):
-        for para in alternative.get('paragraphs', {}).get('paragraphs', []):
-            speaker = para.get('speaker')
-            if speaker is not None:
-                unique_speakers.add(speaker)
-    elif 'words' in alternative:
-        for word in alternative.get('words', []):
-            speaker = word.get('speaker')
-            if speaker is not None:
-                unique_speakers.add(speaker)
-
-# Determine if we should show speaker labels
-show_speakers = args.diarize and len(unique_speakers) > 1
-
-# Check if we have paragraphs in the response
-if args.paragraphs and 'paragraphs' in alternative:
-    # Use the paragraph-formatted output
-    paragraphs = alternative.get('paragraphs', {})
-
-    if 'paragraphs' in paragraphs:
-        # Output with paragraph structure
-        for para in paragraphs.get('paragraphs', []):
-            speaker = para.get('speaker')
-            if speaker is not None and show_speakers:
-                print(f"\nSpeaker {speaker}:")
-
-            # Get sentences for this paragraph
-            sentences = para.get('sentences', [])
-            for sentence in sentences:
-                print(sentence.get('text', ''), end=' ')
-            print()  # New line after paragraph
+    # Handle input (URL or file)
+    if input_file.startswith('http'):
+        # For URLs, we need to send as JSON with 'url' field
+        headers['Content-Type'] = 'application/json'
+        data = json.dumps({'url': input_file})
     else:
-        # Just paragraphs without speaker labels
-        transcript = paragraphs.get('transcript', '')
-        if transcript:
-            # The transcript with paragraphs is already formatted with newlines
-            print(transcript)
+        # Read file
+        file_path = Path(input_file)
+        if not file_path.exists():
+            click.echo(f"Error: File not found: {input_file}")
+            sys.exit(1)
+
+        # Guess content type
+        content_type, _ = mimetypes.guess_type(input_file)
+        if not content_type:
+            # Default to audio/mpeg
+            content_type = 'audio/mpeg'
+
+        headers['Content-Type'] = content_type
+        with open(input_file, 'rb') as f:
+            data = f.read()
+
+    # Make request
+    try:
+        response = requests.post(url, headers=headers, data=data, timeout=None)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"Request failed: {e}", file=sys.stderr)
+        if hasattr(e, 'response') and e.response is not None:
+            if e.response.status_code == 400:
+                try:
+                    error_data = e.response.json()
+                    print(f"Error details: {error_data}", file=sys.stderr)
+                except:
+                    print(f"Response body: {e.response.text}", file=sys.stderr)
+        sys.exit(1)
+
+    # Parse response
+    result = response.json()
+
+    # If JSON output requested, print and exit
+    if output_json:
+        print(json.dumps(result, indent=2))
+        sys.exit(0)
+
+    # Extract channels data
+    channels = result.get('results', {}).get('channels', [])
+    if not channels:
+        print("No transcription results found", file=sys.stderr)
+        sys.exit(1)
+
+    # Get the first channel (or handle multichannel if needed)
+    channel = channels[0]
+    alternatives = channel.get('alternatives', [])
+    if not alternatives:
+        print("No alternatives found", file=sys.stderr)
+        sys.exit(1)
+
+    alternative = alternatives[0]
+
+    # First, check if diarization is enabled and count unique speakers
+    unique_speakers = set()
+    if diarize:
+        if 'paragraphs' in alternative and 'paragraphs' in alternative.get('paragraphs', {}):
+            for para in alternative.get('paragraphs', {}).get('paragraphs', []):
+                speaker = para.get('speaker')
+                if speaker is not None:
+                    unique_speakers.add(speaker)
+        elif 'words' in alternative:
+            for word in alternative.get('words', []):
+                speaker = word.get('speaker')
+                if speaker is not None:
+                    unique_speakers.add(speaker)
+
+    # Determine if we should show speaker labels
+    show_speakers = diarize and len(unique_speakers) > 1
+
+    # Check if we have paragraphs in the response
+    if paragraphs and 'paragraphs' in alternative:
+        # Use the paragraph-formatted output
+        paragraphs = alternative.get('paragraphs', {})
+
+        if 'paragraphs' in paragraphs:
+            # Output with paragraph structure
+            for para in paragraphs.get('paragraphs', []):
+                speaker = para.get('speaker')
+                if speaker is not None and show_speakers:
+                    print(f"\nSpeaker {speaker}:")
+
+                # Get sentences for this paragraph
+                sentences = para.get('sentences', [])
+                for sentence in sentences:
+                    print(sentence.get('text', ''), end=' ')
+                print()  # New line after paragraph
         else:
-            # Fallback to basic transcript
-            print(alternative.get('transcript', ''))
+            # Just paragraphs without speaker labels
+            transcript = paragraphs.get('transcript', '')
+            if transcript:
+                # The transcript with paragraphs is already formatted with newlines
+                print(transcript)
+            else:
+                # Fallback to basic transcript
+                print(alternative.get('transcript', ''))
 
-elif show_speakers and 'words' in alternative:
-    # Diarization without paragraphs - show speaker changes
-    words = alternative.get('words', [])
-    current_speaker = None
+    elif show_speakers and 'words' in alternative:
+        # Diarization without paragraphs - show speaker changes
+        words = alternative.get('words', [])
+        current_speaker = None
 
-    for word in words:
-        speaker = word.get('speaker')
-        if speaker != current_speaker:
-            if current_speaker is not None:
-                print()  # New line between speakers
-            print(f"\nSpeaker {speaker}: ", end='')
-            current_speaker = speaker
-        print(word.get('word', ''), end=' ')
-    print()  # Final newline
+        for word in words:
+            speaker = word.get('speaker')
+            if speaker != current_speaker:
+                if current_speaker is not None:
+                    print()  # New line between speakers
+                print(f"\nSpeaker {speaker}: ", end='')
+                current_speaker = speaker
+            print(word.get('word', ''), end=' ')
+        print()  # Final newline
 
-else:
-    # Just print basic transcript
-    transcript = alternative.get('transcript', '')
-    print(transcript)
-
-# Print additional information if requested
-
-if args.summarize and 'summary' in result.get('results', {}):
-    print("\n--- Summary ---")
-    summary = result['results'].get('summary', {})
-    if isinstance(summary, dict) and 'short' in summary:
-        print(summary.get('short', ''))
     else:
-        print(summary)
+        # Just print basic transcript
+        transcript = alternative.get('transcript', '')
+        print(transcript)
 
-if args.topics and 'topics' in result.get('results', {}):
-    print("\n--- Topics ---")
-    topics = result['results'].get('topics', {})
-    if 'segments' in topics:
-        for segment in topics['segments']:
-            topics_list = segment.get('topics', [])
-            if topics_list:
-                print(f"Topics: {', '.join([t.get('topic', '') for t in topics_list])}")
+    # Print additional information if requested
 
-if args.intents and 'intents' in result.get('results', {}):
-    print("\n--- Intents ---")
-    intents = result['results'].get('intents', {})
-    if 'segments' in intents:
-        for segment in intents['segments']:
-            intent = segment.get('intent', '')
-            if intent:
-                print(f"Intent: {intent}")
+    if summarize and 'summary' in result.get('results', {}):
+        print("\n--- Summary ---")
+        summary = result['results'].get('summary', {})
+        if isinstance(summary, dict) and 'short' in summary:
+            print(summary.get('short', ''))
+        else:
+            print(summary)
+
+    if topics and 'topics' in result.get('results', {}):
+        print("\n--- Topics ---")
+        topics_result = result['results'].get('topics', {})
+        if 'segments' in topics_result:
+            for segment in topics_result['segments']:
+                topics_list = segment.get('topics', [])
+                if topics_list:
+                    print(f"Topics: {', '.join([t.get('topic', '') for t in topics_list])}")
+
+    if intents and 'intents' in result.get('results', {}):
+        print("\n--- Intents ---")
+        intents_result = result['results'].get('intents', {})
+        if 'segments' in intents_result:
+            for segment in intents_result['segments']:
+                intent = segment.get('intent', '')
+                if intent:
+                    print(f"Intent: {intent}")
+
+if __name__ == "__main__":
+    cli_main()

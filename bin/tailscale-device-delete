@@ -98,7 +98,7 @@ fn select_devices_with_fzf(devices: &[Device]) -> Result<Vec<Device>> {
 
     let selected_names: Vec<String> = output
         .lines()
-        .map(|line| line.split(" - ").next().unwrap_or("").to_string())
+        .map(|line| line.split(" - ").next().unwrap_or("").trim().to_string())
         .collect();
 
     let selected_devices: Vec<Device> = devices
@@ -124,14 +124,21 @@ fn main() -> Result<()> {
     let selected_devices = if args.devices.is_empty() {
         select_devices_with_fzf(&devices)?
     } else {
-        devices
-            .into_iter()
+        let filtered: Vec<Device> = devices
+            .iter()
             .filter(|d| args.devices.contains(&d.name))
-            .collect()
+            .cloned()
+            .collect();
+        filtered
     };
 
     if selected_devices.is_empty() {
         println!("No matching devices found");
+        println!("\nAvailable devices:");
+        for device in &devices {
+            println!("  - '{}' (last seen: {})", device.name, time_ago(device.last_seen));
+        }
+        println!("\nYou searched for: {:?}", args.devices);
         return Ok(());
     }
 

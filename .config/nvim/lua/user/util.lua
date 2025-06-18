@@ -9,7 +9,7 @@ function M.open_url()
     local cursor_col = vim.fn.col(".")
     local urls = {}
 
-    for url in string.gmatch(line, "https?://[%w-_./?%%=~&:+%%*]+") do
+    for url in string.gmatch(line, "https?://[%w-_./?%%=~&:+%%*@]+") do
         table.insert(urls, url)
     end
 

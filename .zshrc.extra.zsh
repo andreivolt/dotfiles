@@ -35,7 +35,7 @@ source ~/.zsh.d/prompt.zsh
 [[ -n "$TMUX" ]] && zsh-defer source ~/.zsh.d/tmux.zsh
 zsh-defer eval "$(dircolors -b ~/.dircolors)"
 zsh-defer source ~/.local/share/zsh/plugins/nix-shell/nix-shell.plugin.zsh
-zsh-defer source ~/.local/share/zsh/plugins/zsh-fzf-history-search/zsh-fzf-history-search.zsh
+zsh-defer source ~/.zsh.d/history-search/history-search.zsh
 zsh-defer source ~/.zsh.d/aliases-global.zsh
 zsh-defer source ~/.zsh.d/aliases.zsh
 zsh-defer source ~/.zsh.d/autopair.zsh
