@@ -6,6 +6,7 @@ export FZF_DEFAULT_OPTS="\
 --wrap \
 --ansi \
 --preview-window=wrap \
+--tiebreak=index \
 --color=border:bright-black \
 --color=fg+:white:bold \
 --color=bg:-1,gutter:-1 \
