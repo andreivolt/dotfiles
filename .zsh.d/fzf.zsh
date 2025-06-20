@@ -1,23 +1,13 @@
 export FZF_DEFAULT_OPTS="\
+--ansi \
 --bind='ctrl-y:execute-silent(pbcopy <<< {})+abort' \
---info=inline \
 --border \
 --cycle \
---wrap \
---ansi \
+--highlight-line \
+--info=inline \
 --preview-window=wrap \
+--wrap \
 --tiebreak=index \
---color=border:bright-black \
---color=fg+:white:bold \
---color=bg:-1,gutter:-1 \
---color=hl+:yellow:bold,bg+:236 \
---color=pointer:blue \
---color=hl:yellow \
---color=prompt:blue \
---color=border:8 \
---color=info:240 \
---color=spinner:blue \
---color=marker:green
 "
 
 export FZF_DEFAULT_COMMAND="\
