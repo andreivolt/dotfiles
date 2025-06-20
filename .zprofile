@@ -7,6 +7,7 @@ export GPG_TTY="$(tty)"
 export LESS='--RAW-CONTROL-CHARS --LONG-PROMPT --ignore-case --no-init --quit-if-one-screen'
 export MANPAGER='nvim +Man!'
 export MANWIDTH=100
+export NIXPKGS_ALLOW_UNFREE=1
 export PAGER=nvimpager
 export PYTHONDONTWRITEBYTECODE=1 # prevent Python from creating __pycache__ directories
 export PYTHONWARNINGS=ignore
