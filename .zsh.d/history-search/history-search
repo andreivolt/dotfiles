@@ -107,7 +107,7 @@ fn main() {
     let mut fzf = Command::new("fzf")
         .arg("--nth=2..")
         .arg("--no-multi")
-        .arg("--tiebreak=index")
+        .arg("--scheme=history")
         .arg("--bind=ctrl-r:toggle-sort")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
