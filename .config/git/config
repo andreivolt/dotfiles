@@ -38,6 +38,7 @@
 
 [init]
   defaultBranch = main
+	templateDir = 
 
 [rebase]
   autoStash = true

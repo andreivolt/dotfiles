@@ -26,6 +26,18 @@ spoon.SpoonInstall:andUse("WinWin", {
 local redshift = require("redshift")
 redshift.init()
 
+-- Auto-move Ghostty to external monitor when connected
+hs.screen.watcher.new(function()
+  if #hs.screen.allScreens() > 1 then
+    hs.timer.doAfter(0.5, function()
+      local ghostty = hs.application.get("ghostty")
+      if ghostty then
+        toggleApp.toggleAppMonitor()
+      end
+    end)
+  end
+end):start()
+
 -- CLI setup
 hs.ipc.cliInstall()
 
