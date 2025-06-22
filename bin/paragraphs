@@ -1,0 +1,76 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = [
+#   "joblib",
+#   "platformdirs",
+#   "sh",
+#   "tiktoken",
+# ]
+# ///
+
+import sys
+import argparse
+import hashlib
+from platformdirs import user_cache_dir
+from joblib import Memory
+import sh
+import tiktoken
+
+cache_dir = user_cache_dir("paragraphs")
+memory = Memory(cache_dir, verbose=0)
+
+tokenizer = tiktoken.get_encoding("cl100k_base")
+
+def chunk_text(text, max_tokens=60000):
+    """Chunk text to fit within model's output limit using tiktoken (65,536 tokens for Gemini 2.5 Flash, leaving room for formatting)"""
+    tokens = tokenizer.encode(text)
+
+    chunks = []
+    for i in range(0, len(tokens), max_tokens):
+        chunk_tokens = tokens[i:i + max_tokens]
+        chunk_text = tokenizer.decode(chunk_tokens)
+        chunks.append(chunk_text)
+
+    return chunks
+
+@memory.cache
+def split_into_paragraphs(text):
+    """Split text into meaningful paragraphs using Gemini 2.5 Flash"""
+    chunks = chunk_text(text)
+    processed_chunks = []
+
+    for chunk in chunks:
+        prompt = """Split this text into meaningful paragraphs. Each paragraph should represent a coherent topic or thought. Return only the formatted text with proper paragraph breaks (double newlines between paragraphs).
+
+Text:
+""" + chunk
+
+        result = sh.llm('prompt', '-m', 'gemini-2.5-flash-preview-05-20', '--no-log', prompt)
+        processed_chunks.append(result.strip())
+
+    return '\n\n'.join(processed_chunks)
+
+parser = argparse.ArgumentParser(description='Split text into meaningful paragraphs using AI')
+parser.add_argument('input', nargs='?', help='Input file (or stdin if not specified)')
+args = parser.parse_args()
+
+try:
+    if args.input:
+        with open(args.input, 'r') as f:
+            text = f.read()
+    else:
+        text = sys.stdin.read()
+
+    if not text.strip():
+        print("Error: No input text provided", file=sys.stderr)
+        sys.exit(1)
+
+    result = split_into_paragraphs(text)
+    print(result)
+
+except FileNotFoundError:
+    print(f"Error: File '{args.input}' not found", file=sys.stderr)
+    sys.exit(1)
+except Exception as e:
+    print(f"Error: {str(e)}", file=sys.stderr)
+    sys.exit(1)

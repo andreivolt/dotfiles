@@ -22,7 +22,7 @@ function fzf-file-widget-vi() {
   if [[ -z "$BUFFER" ]]; then
     local selected=$(rg --files --sort modified --follow -g '!Library' -g '!.git' | tac | fzf)
     if [[ -n "$selected" ]]; then
-      BUFFER="vi $selected"
+      BUFFER="vi '$selected'"
       zle accept-line
     fi
   else
