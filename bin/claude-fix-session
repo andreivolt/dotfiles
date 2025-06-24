@@ -1,0 +1,153 @@
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! simd-json = "0.13"
+//! walkdir = "2.0"
+//! dirs = "5.0"
+//! clap = { version = "4.4", features = ["derive"] }
+//! colored = "2.0"
+//! ```
+
+use clap::Parser;
+use colored::*;
+use simd_json::owned::Value;
+use simd_json::prelude::*;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
+use walkdir::WalkDir;
+
+#[derive(Parser)]
+#[command(name = "claude-fix-session")]
+#[command(about = "Fix a specific Claude session to work in current directory")]
+struct Args {
+    /// Session ID to fix
+    session_id: String,
+}
+
+fn find_session_file(session_id: &str) -> Option<std::path::PathBuf> {
+    let claude_base = dirs::home_dir().map(|h| h.join(".claude/projects")).unwrap_or_else(|| Path::new(".").to_path_buf());
+
+    for entry in WalkDir::new(&claude_base) {
+        if let Ok(entry) = entry {
+            if entry.path().extension().map_or(false, |ext| ext == "jsonl") {
+                if let Some(stem) = entry.path().file_stem() {
+                    if stem.to_string_lossy() == session_id {
+                        return Some(entry.path().to_path_buf());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn fix_session(session_path: &Path) {
+    let current_dir = std::env::current_dir().unwrap();
+    // Resolve symlinks to get the real path
+    let real_current_dir = std::fs::canonicalize(&current_dir).unwrap_or(current_dir);
+    let current_dir_str = real_current_dir.to_string_lossy();
+
+    println!("{} Found session: {}", "✓".green(), session_path.display());
+
+    // Calculate the correct project directory (match Claude CLI's behavior)
+    // Claude CLI resolves symlinks and converts @ to - in email addresses
+    let expected_project_name = current_dir_str.replace('/', "-").replace('@', "-");
+    let claude_base = dirs::home_dir().map(|h| h.join(".claude/projects")).unwrap_or_else(|| Path::new(".").to_path_buf());
+    let expected_project_dir = claude_base.join(&expected_project_name);
+
+    // Create the project directory if it doesn't exist
+    if !expected_project_dir.exists() {
+        println!("{} Creating project directory: {}", "✓".green(), expected_project_name);
+        std::fs::create_dir_all(&expected_project_dir).ok();
+    }
+
+    // Calculate new session file path
+    let session_filename = session_path.file_name().unwrap();
+    let new_session_path = expected_project_dir.join(session_filename);
+
+    println!("{} Fixing CWDs to: {}", "✓".green(), current_dir_str);
+
+    // Read all lines
+    let file = match File::open(session_path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("{} Error reading session file: {}", "✗".red(), e);
+            return;
+        }
+    };
+
+    let reader = BufReader::new(file);
+    let mut updated_lines = Vec::new();
+    let mut update_count = 0;
+
+    for line in reader.lines().filter_map(|l| l.ok()) {
+        let mut line_bytes = line.clone().into_bytes();
+        if let Ok(mut data) = simd_json::from_slice::<Value>(&mut line_bytes) {
+            let mut updated = false;
+
+            // Update cwd field
+            if let Some(cwd) = data.get_mut("cwd") {
+                if let Some(cwd_str) = cwd.as_str() {
+                    if cwd_str != current_dir_str {
+                        *cwd = Value::String(current_dir_str.to_string());
+                        updated = true;
+                    }
+                }
+            }
+
+            // Update workingDirectory field
+            if let Some(wd) = data.get_mut("workingDirectory") {
+                if let Some(wd_str) = wd.as_str() {
+                    if wd_str != current_dir_str {
+                        *wd = Value::String(current_dir_str.to_string());
+                        updated = true;
+                    }
+                }
+            }
+
+            if updated {
+                update_count += 1;
+                updated_lines.push(simd_json::to_string(&data).unwrap_or(line));
+            } else {
+                updated_lines.push(line);
+            }
+        } else {
+            updated_lines.push(line);
+        }
+    }
+
+    // Write to the correct project directory
+    if let Ok(mut file) = std::fs::File::create(&new_session_path) {
+        for line in updated_lines {
+            writeln!(file, "{}", line).ok();
+        }
+        println!("{} Wrote session to: {}", "✓".green(), new_session_path.display());
+    } else {
+        eprintln!("{} Error writing session file", "✗".red());
+        return;
+    }
+
+    // Remove the old session file if it's in a different location
+    if new_session_path != session_path {
+        std::fs::remove_file(session_path).ok();
+        println!("{} Moved session to correct project directory", "✓".green());
+    }
+
+    if update_count > 0 {
+        println!("{} Updated {} CWD references", "✓".green(), update_count);
+    }
+
+    println!("{} Session is now ready for: claude -r {}", "✓".green(), session_path.file_stem().unwrap().to_string_lossy());
+}
+
+fn main() {
+    let args = Args::parse();
+
+    if let Some(session_path) = find_session_file(&args.session_id) {
+        fix_session(&session_path);
+    } else {
+        eprintln!("{} Session not found: {}", "✗".red(), args.session_id);
+        std::process::exit(1);
+    }
+}

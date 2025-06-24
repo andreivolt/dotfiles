@@ -105,19 +105,34 @@ OptionParser.new do |opts|
   opts.on("-l", "--layout", "Preserve layout using document detection") do
     options[:layout] = true
   end
+
+  opts.on("-c", "--copy", "Copy text to clipboard") do
+    options[:copy] = true
+  end
 end.parse!
 
-if options[:screenshot]
+result = if options[:screenshot]
   temp_file = Tempfile.new(['screenshot', '.png'])
   temp_path = temp_file.path
   temp_file.close
   `screencapture -i -s '#{temp_path}'`
-  puts detect_text(temp_path, options[:layout])
+  detect_text(temp_path, options[:layout])
 elsif ARGV[0]
-  puts detect_text(ARGV[0], options[:layout])
+  detect_text(ARGV[0], options[:layout])
 else
   Tempfile.open('input') do |f|
     f.write($stdin.read)
-    puts detect_text(f.path, options[:layout])
+    detect_text(f.path, options[:layout])
   end
+end
+
+if options[:copy]
+  begin
+    IO.popen('pbcopy', 'w') { |clipboard| clipboard.write(result) }
+    puts "Text copied to clipboard"
+  rescue
+    $stderr.puts "Error: Failed to copy to clipboard"
+  end
+else
+  puts result
 end

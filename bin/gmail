@@ -71,7 +71,7 @@ def get_gmail_service():
                 print(f"and save to: {CREDENTIALS_FILE}")
                 exit(1)
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-            creds = flow.run_local_server(port=0)
+            creds = flow.run_local_server(port=0, bind_addr='127.0.0.1')
 
         with open(TOKEN_FILE, "wb") as token:
             pickle.dump(creds, token)

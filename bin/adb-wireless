@@ -2,7 +2,7 @@
 """Enable/disable wireless ADB debugging on Android devices."""
 # /// script
 # dependencies = [
-#   "pure-python-adb",
+#   "sh",
 # ]
 # ///
 
@@ -10,114 +10,98 @@
 import argparse
 import sys
 import time
-import json
-import signal
-import atexit
-from contextlib import contextmanager
-from ppadb.client import Client as AdbClient
-
-
-
-@contextmanager
-def adb_wireless_context():
-    """Context manager to ensure adb_wifi_enabled is reset even if program is killed"""
-    device_ref = {'device': None}
-
-    def cleanup():
-        if device_ref['device']:
-            try:
-                device_ref['device'].shell("settings put global adb_wifi_enabled 0")
-            except Exception:
-                pass
-
-    def signal_handler(signum, frame):
-        cleanup()
-        sys.exit(1)
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    atexit.register(cleanup)
-
-    try:
-        yield device_ref
-    finally:
-        cleanup()
-
-
-def get_device_ip(device):
-    result = device.shell("getprop dhcp.wlan0.ipaddress")
-    return result.strip() if result and result.strip() else None
+import sh
 
 
 def enable_wireless():
     print("Enabling wireless debugging...")
+    
+    adb = sh.adb
 
-    with adb_wireless_context() as device_ref:
-        client = AdbClient()
-        devices = client.devices()
+    # Check if device is connected via USB
+    devices_output = adb.devices()
+    if "device" not in str(devices_output):
+        print("Error: No devices connected via USB")
+        sys.exit(1)
 
-        if not devices:
-            print("Error: No devices connected via USB")
-            sys.exit(1)
-
-        device = devices[0]
-        device_ref['device'] = device
-
-        device.shell("settings put global adb_wifi_enabled 1")
-
-        ip = get_device_ip(device)
-        if not ip:
+    # Get device IP using adb shell
+    try:
+        ip = adb.shell("ip route get 1.1.1.1").split("src")[1].split()[0].strip()
+    except:
+        try:
+            ip = adb.shell("ip addr show wlan0 | grep 'inet ' | awk '{print $2}' | cut -d/ -f1").strip()
+        except:
             print("Error: Could not get device IP address. Is WiFi connected?")
             sys.exit(1)
+    
+    if not ip:
+        print("Error: Could not get device IP address. Is WiFi connected?")
+        sys.exit(1)
 
-        print(f"Device IP: {ip}")
+    print(f"Device IP: {ip}")
 
-        client.remote_connect(5555)
-        time.sleep(2)
+    # Enable TCP mode on port 5555
+    adb.tcpip("5555")
+    print("Waiting for device to restart in TCP mode...")
+    time.sleep(3)
 
-        try:
-            client.remote_connect(ip, 5555)
-            print(f"Connecting to {ip}:5555...")
-            print("Connected. You can disconnect USB.")
-        except Exception as e:
-            print(f"Error connecting to {ip}:5555: {e}")
+    # Connect to device wirelessly
+    try:
+        result = adb.connect(f"{ip}:5555")
+        
+        if "connected" in str(result).lower():
+            print(f"Connected to {ip}:5555")
+            print("You can disconnect USB now.")
+            
+            # Verify connection
+            devices_output = adb.devices()
+            if f"{ip}:5555" in str(devices_output):
+                print("✓ Wireless connection verified")
+            else:
+                print("⚠ Connection may not be stable")
+        else:
+            print(f"Failed to connect: {result}")
             sys.exit(1)
+    except Exception as e:
+        print(f"Failed to connect: {e}")
+        sys.exit(1)
 
 
 def disable_wireless():
     print("Disabling wireless debugging...")
-
-    client = AdbClient()
-    devices = client.devices()
-
-    if not devices:
-        print("No devices connected")
-        sys.exit(1)
-
-    for device in devices:
-        try:
-            device.shell("settings put global adb_wifi_enabled 0")
-            print(f"✓ Disabled wireless debugging on {device.serial}")
-        except Exception:
-            print(f"✗ Failed to disable on {device.serial}")
-
-    print("Wireless debugging disabled")
+    
+    adb = sh.adb
+    
+    try:
+        devices_output = str(adb.devices())
+        if "device" not in devices_output:
+            print("No devices connected")
+            sys.exit(1)
+        
+        # Switch back to USB mode
+        adb.usb()
+        print("✓ Switched back to USB mode")
+        
+    except Exception as e:
+        print(f"✗ Failed to disable wireless debugging: {e}")
 
 
 def show_status():
-    client = AdbClient()
-    devices = client.devices()
-
-    print("List of devices attached")
-    for device in devices:
-        state = "device" if device.get_state() == "device" else device.get_state()
-        print(f"{device.serial}\t{state}")
-
-    wireless_count = sum(1 for device in devices if ':' in device.serial)
-    if wireless_count > 0:
-        print(f"Wireless connections: {wireless_count}")
-    else:
-        print("No wireless connections")
+    adb = sh.adb
+    
+    try:
+        devices_output = str(adb.devices())
+        print(devices_output)
+        
+        # Count wireless connections
+        wireless_count = devices_output.count(':5555')
+        if wireless_count > 0:
+            print(f"Wireless connections: {wireless_count}")
+        else:
+            print("No wireless connections")
+            
+    except Exception as e:
+        print(f"Error getting device status: {e}")
 
 
 parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
