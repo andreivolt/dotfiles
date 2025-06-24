@@ -1,0 +1,653 @@
+#!/usr/bin/env -S uv run --script --quiet
+"""Monitor NextDNS API usage and analytics."""
+# /// script
+# dependencies = [
+#   "numpy>=1.24",
+#   "pandas>=2",
+#   "requests>=2.31",
+#   "rich>=13",
+#   "scipy>=1.10",
+# ]
+# ///
+
+
+import os
+import requests
+from datetime import datetime, timedelta, time
+from collections import defaultdict
+from typing import Dict, List, Tuple, Optional
+import argparse
+import numpy as np
+from scipy import signal
+from rich.console import Console
+from rich.table import Table
+from rich.text import Text
+from rich.align import Align
+import pickle
+from pathlib import Path
+import csv
+import io
+import pandas as pd
+from scipy.ndimage import binary_dilation, binary_erosion
+
+console = Console()
+
+
+class NextDNSUsageTracker:
+    def __init__(self):
+        self.api_key = os.environ.get("NEXTDNS_API_KEY")
+        self.profile_id = os.environ.get("NEXTDNS_PROFILE_ID")
+
+        if not self.api_key or not self.profile_id:
+            console.print(
+                "[red]Error: NEXTDNS_API_KEY and NEXTDNS_PROFILE_ID environment variables are required[/red]"
+            )
+            exit(1)
+
+        self.base_url = "https://api.nextdns.io"
+        self.cache_dir = Path.home() / ".cache" / "nextdns-usage"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def _make_request(self, endpoint: str, params: Dict = None) -> Dict:
+        """Make authenticated request to NextDNS API"""
+        headers = {"X-Api-Key": self.api_key}
+        url = f"{self.base_url}/profiles/{self.profile_id}/{endpoint}"
+
+        try:
+            response = requests.get(url, headers=headers, params=params or {})
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            if "400" not in str(e):
+                console.print(f"[red]API Error: {e}[/red]")
+            return {}
+
+    def download_logs_csv(
+        self, start: datetime, end: datetime, use_cache: bool = True
+    ) -> pd.DataFrame:
+        """Download complete logs as CSV and return as DataFrame"""
+        # Use global cache key since API returns all logs regardless of date range
+        cache_key = f"logs_csv_all_{self.profile_id}.pkl"
+        cache_file = self.cache_dir / cache_key
+
+        # Check cache (valid for 2 hours for complete data)
+        if use_cache and cache_file.exists():
+            cache_age = datetime.now() - datetime.fromtimestamp(
+                cache_file.stat().st_mtime
+            )
+            if cache_age.total_seconds() < 7200:  # 2 hour cache
+                try:
+                    with open(cache_file, "rb") as f:
+                        df = pickle.load(f)
+                        # Filter to requested date range
+                        start_tz = pd.Timestamp(start).tz_localize("UTC")
+                        end_tz = pd.Timestamp(end).tz_localize("UTC")
+                        filtered_df = df[
+                            (df["timestamp"] >= start_tz) & (df["timestamp"] < end_tz)
+                        ]
+                        return filtered_df
+                except:
+                    pass
+
+        # Get download URL (no date filtering - API returns all available logs)
+        params = {"redirect": "0"}
+
+        url_data = self._make_request("logs/download", params)
+        if not url_data or "data" not in url_data or "url" not in url_data["data"]:
+            console.print("[red]Failed to get download URL[/red]")
+            return pd.DataFrame()
+
+        # Download CSV data
+        download_url = url_data["data"]["url"]
+        response = requests.get(download_url)
+        if response.status_code != 200:
+            console.print("[red]Failed to download logs[/red]")
+            return pd.DataFrame()
+
+        # Parse CSV
+        csv_data = io.StringIO(response.text)
+        df = pd.read_csv(csv_data)
+
+        # Parse timestamp column
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+        # Cache the complete data
+        if not df.empty:
+            try:
+                with open(cache_file, "wb") as f:
+                    pickle.dump(df, f)
+            except:
+                pass
+
+        # Filter to requested date range and return
+        start_tz = pd.Timestamp(start).tz_localize("UTC")
+        end_tz = pd.Timestamp(end).tz_localize("UTC")
+        filtered_df = df[(df["timestamp"] >= start_tz) & (df["timestamp"] < end_tz)]
+
+        return filtered_df
+
+    def detect_sleep_patterns(
+        self,
+        device_df: pd.DataFrame,
+        target_date=None,
+        quiet_threshold_minutes: int = 60,
+        min_sleep_hours: float = 3.0,
+    ) -> Dict:
+        """
+        Detect sleep patterns using advanced signal processing.
+
+        Sleep is inferred from the longest quiet period that overlaps typical sleep hours (22:00-10:00).
+        """
+        if device_df.empty:
+            return {
+                "sleep_periods": [],
+                "awake_periods": [],
+                "total_awake_hours": 0,
+                "total_sleep_hours": 0,
+                "first_activity": None,
+                "last_activity": None,
+            }
+
+        # Convert to local timezone for processing (CET/CEST = UTC+1/UTC+2)
+        device_df = device_df.copy()
+        # Manual conversion: remove UTC timezone and add 2 hours for CEST (summer time)
+        device_df["timestamp_local"] = (
+            device_df["timestamp"].dt.tz_convert("Europe/Berlin").dt.tz_localize(None)
+        )
+        device_df = device_df.sort_values("timestamp_local")
+        timestamps = device_df["timestamp_local"].values
+
+        # Get day boundaries (in local timezone) - extend to capture overnight sleep
+        # Use the target date if provided, otherwise infer from data
+        if target_date:
+            day_start = pd.Timestamp(target_date).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+        else:
+            day_start = pd.Timestamp(timestamps[0]).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+
+        analysis_start = day_start.replace(hour=18) - pd.Timedelta(
+            days=1
+        )  # 6 PM previous day
+        analysis_end = day_start.replace(hour=6) + pd.Timedelta(days=1)  # 6 AM next day
+
+        # Simple Data-Driven Sleep Detection
+        # Create 10-minute bins for analysis (balance between resolution and noise)
+        bins = pd.date_range(start=analysis_start, end=analysis_end, freq="10min")
+        query_counts = np.zeros(len(bins) - 1)
+
+        # Count queries per 10-minute period
+        for ts in timestamps:
+            bin_idx = np.searchsorted(bins, pd.Timestamp(ts)) - 1
+            if 0 <= bin_idx < len(query_counts):
+                query_counts[bin_idx] += 1
+
+        # Find the longest low-activity period during potential sleep hours (22:00-12:00)
+        sleep_periods = []
+
+        if len(query_counts) > 0:
+            # Calculate activity threshold dynamically based on the data
+            # Use a low percentile to identify truly quiet periods
+            activity_threshold = max(
+                1, np.percentile(query_counts[query_counts > 0], 10)
+            )
+
+            # Find periods of low activity
+            low_activity = query_counts <= activity_threshold
+
+            # Find consecutive low-activity periods
+            changes = np.diff(
+                np.concatenate(([False], low_activity, [False])).astype(int)
+            )
+            starts = np.where(changes == 1)[0]
+            ends = np.where(changes == -1)[0]
+
+            # Evaluate each quiet period
+            candidate_periods = []
+            for start_idx, end_idx in zip(starts, ends):
+                duration_bins = end_idx - start_idx
+                duration_hours = duration_bins * (10 / 60)  # 10-minute bins
+
+                if duration_hours >= 3.0:  # At least 3 hours
+                    period_start = bins[start_idx]
+                    period_end = bins[end_idx]
+
+                    # Score based on:
+                    # 1. Duration (longer is better)
+                    # 2. How low the activity is during this period
+                    # 3. Overlap with typical sleep hours
+                    avg_activity = np.mean(query_counts[start_idx:end_idx])
+
+                    # Calculate overlap with prime sleep hours (00:00-08:00)
+                    prime_sleep_start = day_start  # 00:00
+                    prime_sleep_end = day_start.replace(hour=8)  # 08:00
+
+                    overlap_start = max(period_start, prime_sleep_start)
+                    overlap_end = min(period_end, prime_sleep_end)
+
+                    if overlap_start < overlap_end:
+                        overlap_hours = (
+                            overlap_end - overlap_start
+                        ).total_seconds() / 3600
+                        overlap_ratio = overlap_hours / duration_hours
+                    else:
+                        overlap_ratio = 0
+
+                    # Secondary overlap with extended sleep hours (22:00-10:00)
+                    extended_sleep_start = day_start.replace(hour=22) - pd.Timedelta(
+                        days=1
+                    )
+                    extended_sleep_end = day_start.replace(hour=10)
+
+                    ext_overlap_start = max(period_start, extended_sleep_start)
+                    ext_overlap_end = min(period_end, extended_sleep_end)
+
+                    if ext_overlap_start < ext_overlap_end:
+                        ext_overlap_hours = (
+                            ext_overlap_end - ext_overlap_start
+                        ).total_seconds() / 3600
+                        ext_overlap_ratio = ext_overlap_hours / duration_hours
+                    else:
+                        ext_overlap_ratio = 0
+
+                    # Score: prioritize low activity, reasonable duration, and sleep hour overlap
+                    activity_score = 1.0 / (
+                        avg_activity + 1
+                    )  # Lower activity = higher score
+                    duration_score = min(
+                        duration_hours / 8.0, 1.0
+                    )  # Optimal around 8 hours
+                    sleep_time_score = (
+                        overlap_ratio * 2.0 + ext_overlap_ratio
+                    )  # Prefer core sleep hours
+
+                    total_score = (
+                        activity_score * duration_score * (1.0 + sleep_time_score)
+                    )
+
+                    candidate_periods.append(
+                        {
+                            "start": period_start,
+                            "end": period_end,
+                            "duration_hours": duration_hours,
+                            "avg_activity": avg_activity,
+                            "total_queries": np.sum(query_counts[start_idx:end_idx]),
+                            "score": total_score,
+                            "overlap_ratio": overlap_ratio,
+                        }
+                    )
+
+            # Select the best candidate (highest score)
+            if candidate_periods:
+                best_period = max(candidate_periods, key=lambda x: x["score"])
+
+                # Only accept if it has some overlap with sleep hours or is very long
+                if (
+                    best_period["overlap_ratio"] > 0.1
+                    or best_period["duration_hours"] > 6
+                ):
+                    # Check if sleep period extends to end of analysis window (ongoing sleep)
+                    if best_period["end"] >= analysis_end - pd.Timedelta(minutes=30):
+                        # Ongoing sleep - adjust end time and duration
+                        current_time = pd.Timestamp.now().replace(
+                            second=0, microsecond=0
+                        )
+                        if current_time > best_period["start"]:
+                            best_period["end"] = current_time
+                            best_period["duration_hours"] = (
+                                current_time - best_period["start"]
+                            ).total_seconds() / 3600
+                            best_period["ongoing"] = True
+                        else:
+                            best_period["ongoing"] = False
+                    else:
+                        best_period["ongoing"] = False
+
+                    sleep_periods = [best_period]
+
+        # Determine awake periods (between sleep periods)
+        all_periods = sorted(sleep_periods, key=lambda x: x["start"])
+
+        if not all_periods:
+            # No sleep detected - consider entire period as awake
+            awake_periods = [
+                {
+                    "start": pd.Timestamp(timestamps[0]),
+                    "end": pd.Timestamp(timestamps[-1]),
+                    "duration_hours": (
+                        pd.Timestamp(timestamps[-1]) - pd.Timestamp(timestamps[0])
+                    ).total_seconds()
+                    / 3600,
+                }
+            ]
+        else:
+            awake_periods = []
+            # First awake period (before first sleep)
+            if all_periods[0]["start"] > day_start:
+                first_activity = pd.Timestamp(timestamps[0])
+                awake_periods.append(
+                    {
+                        "start": first_activity,
+                        "end": all_periods[0]["start"],
+                        "duration_hours": (
+                            all_periods[0]["start"] - first_activity
+                        ).total_seconds()
+                        / 3600,
+                    }
+                )
+
+            # Awake periods between sleeps
+            for i in range(len(all_periods) - 1):
+                awake_start = all_periods[i]["end"]
+                awake_end = all_periods[i + 1]["start"]
+                awake_periods.append(
+                    {
+                        "start": awake_start,
+                        "end": awake_end,
+                        "duration_hours": (awake_end - awake_start).total_seconds()
+                        / 3600,
+                    }
+                )
+
+            # Last awake period (after last sleep)
+            if all_periods[-1]["end"] < pd.Timestamp(timestamps[-1]):
+                last_activity = pd.Timestamp(timestamps[-1])
+                awake_periods.append(
+                    {
+                        "start": all_periods[-1]["end"],
+                        "end": last_activity,
+                        "duration_hours": (
+                            last_activity - all_periods[-1]["end"]
+                        ).total_seconds()
+                        / 3600,
+                    }
+                )
+
+        # Calculate totals
+        total_sleep_hours = sum(p["duration_hours"] for p in sleep_periods)
+        total_awake_hours = sum(p["duration_hours"] for p in awake_periods)
+
+        # Find true first and last activity (in local timezone)
+        first_activity = pd.Timestamp(timestamps[0])
+        last_activity = pd.Timestamp(timestamps[-1])
+
+        return {
+            "sleep_periods": sleep_periods,
+            "awake_periods": awake_periods,
+            "total_awake_hours": total_awake_hours,
+            "total_sleep_hours": total_sleep_hours,
+            "first_activity": first_activity,
+            "last_activity": last_activity,
+            "total_queries": len(device_df),
+        }
+
+    def analyze_usage(
+        self, device_filter: str = None, days: int = 7, use_cache: bool = True
+    ) -> Dict:
+        """Analyze device usage patterns including sleep detection"""
+        usage_data = defaultdict(dict)
+        dates = [
+            (datetime.now() - timedelta(days=i)).date() for i in range(days - 1, -1, -1)
+        ]
+
+        with console.status(
+            "[bold green]Analyzing usage and sleep patterns..."
+        ) as status:
+            for date in dates:
+                status.update(
+                    f"[bold green]Processing {date.strftime('%Y-%m-%d')}...[/bold green]"
+                )
+
+                # Download complete logs for extended range (to capture overnight sleep)
+                # Get data from 6 PM previous day to 6 AM next day
+                start = datetime.combine(date - timedelta(days=1), time(18, 0))
+                end = datetime.combine(date + timedelta(days=1), time(6, 0))
+
+                df = self.download_logs_csv(start, end, use_cache=use_cache)
+
+                if df.empty:
+                    continue
+
+                # Get unique devices
+                devices = (
+                    df.groupby(["device_id", "device_name"])
+                    .size()
+                    .reset_index(name="count")
+                )
+
+                for _, device in devices.iterrows():
+                    device_id = device["device_id"]
+                    device_name = device["device_name"]
+
+                    # Apply filter if specified
+                    if device_filter:
+                        if not (
+                            device_filter.lower() in device_name.lower()
+                            or device_filter == device_id
+                        ):
+                            continue
+
+                    # Get this device's logs for the extended window
+                    device_df = df[df["device_id"] == device_id]
+
+                    # Detect sleep patterns with extended context
+                    patterns = self.detect_sleep_patterns(device_df, target_date=date)
+
+                    usage_data[device_name][date] = patterns
+
+        return dict(usage_data)
+
+
+def format_time_period(start: pd.Timestamp, end: pd.Timestamp) -> str:
+    """Format a time period for display"""
+    if start.date() == end.date():
+        return f"{start.strftime('%H:%M')}-{end.strftime('%H:%M')}"
+    else:
+        return f"{start.strftime('%H:%M')}-{end.strftime('%H:%M')}+1d"
+
+
+def create_gantt_chart(patterns: Dict, date: pd.Timestamp) -> Table:
+    """Create a 24-hour Gantt chart showing sleep/wake periods"""
+
+    # Create the chart table
+    chart = Table(show_header=True, box=None, padding=(0, 0))
+    chart.add_column("Time", width=4, style="dim")
+    chart.add_column("", width=72)  # 72 chars for 24 hours (3 chars per hour)
+
+    # Time labels for hours
+    hours = []
+    for h in range(24):
+        hours.append(f"{h:2d}")
+
+    # Create the timeline
+    timeline = [" "] * 72  # 3 chars per hour
+    labels = {}  # Store labels to place inside segments
+
+    # Mark hour boundaries
+    for h in range(24):
+        pos = h * 3
+        if h % 6 == 0:  # Major tick every 6 hours
+            timeline[pos] = "|"
+        else:  # Minor tick
+            timeline[pos] = "."
+
+    # Process sleep periods
+    for period in patterns.get("sleep_periods", []):
+        start_hour = period["start"].hour + period["start"].minute / 60
+
+        if period.get("ongoing", False):
+            # Ongoing sleep - go to current hour
+            current_time = pd.Timestamp.now()
+            end_hour = current_time.hour + current_time.minute / 60
+        else:
+            end_hour = period["end"].hour + period["end"].minute / 60
+
+        # Handle overnight periods
+        if end_hour < start_hour:
+            end_hour += 24
+
+        # Fill sleep period
+        start_pos = int(start_hour * 3)
+        end_pos = int(end_hour * 3)
+
+        # Ensure we don't go beyond the chart
+        end_pos = min(end_pos, 71)
+
+        for i in range(start_pos, end_pos + 1):
+            if i < 72:
+                timeline[i] = "█"
+
+        # Add duration label in the middle of the segment
+        duration_text = f"{period['duration_hours']:.1f}h"
+        if period.get("ongoing", False):
+            duration_text += "+"
+
+        mid_pos = (start_pos + end_pos) // 2
+        label_start = max(0, mid_pos - len(duration_text) // 2)
+
+        # Store label for placement
+        labels[label_start] = duration_text
+
+    # Place labels on timeline
+    for pos, label in labels.items():
+        for i, char in enumerate(label):
+            if pos + i < 72:
+                if timeline[pos + i] == "█":  # Only place on sleep blocks
+                    timeline[pos + i] = char
+
+    # Create header with hour markers
+    header_line = []
+    for h in range(24):
+        if h % 6 == 0:
+            header_line.extend(f"{h:2d} ")
+        else:
+            header_line.extend("   ")
+
+    # Add the chart rows
+    chart.add_row("", "".join(header_line[:72]))
+    chart.add_row("", "".join(timeline))
+
+    # Add legend
+    legend = Text()
+    legend.append("█", style="blue")
+    legend.append(" Sleep  ", style="white")
+    legend.append("░", style="dim")
+    legend.append(" Wake", style="white")
+
+    chart.add_row("", "")
+    chart.add_row("", str(legend))
+
+    return chart
+
+
+parser = argparse.ArgumentParser(description="Analyze device usage and sleep patterns from NextDNS complete logs"
+, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+parser.add_argument(
+    "-d",
+    "--device",
+    help="Device name/ID to analyze, or 'list' to show available devices",
+)
+parser.add_argument(
+    "--days", type=int, default=7, help="Days to analyze"
+)
+parser.add_argument(
+    "--no-cache", action="store_true", help="Force refresh data without using cache"
+)
+parser.add_argument(
+    "--clear-cache", action="store_true", help="Clear the cache and exit"
+)
+
+args = parser.parse_args()
+
+tracker = NextDNSUsageTracker()
+
+# Handle cache clearing
+if args.clear_cache:
+    import shutil
+
+    if tracker.cache_dir.exists():
+        shutil.rmtree(tracker.cache_dir)
+        console.print("[green]Cache cleared successfully[/green]")
+    else:
+        console.print("[yellow]No cache to clear[/yellow]")
+    sys.exit(0)
+
+# Handle device listing
+if args.device == "list":
+    # Get recent logs to find devices (yesterday to avoid hanging)
+    start = datetime.combine(datetime.now().date() - timedelta(days=1), time.min)
+    end = datetime.combine(datetime.now().date(), time.min)
+
+    with console.status("[bold green]Fetching device list..."):
+        df = tracker.download_logs_csv(start, end, use_cache=True)
+
+    if df.empty:
+        console.print("[red]No logs found for today[/red]")
+        sys.exit(0)
+
+    # Get unique devices with query counts
+    devices = (
+        df.groupby(["device_id", "device_name"]).size().reset_index(name="queries")
+    )
+    devices = devices.sort_values("queries", ascending=False)
+
+    console.print("[bold cyan]Available Devices (yesterday):[/bold cyan]")
+    for _, device in devices.iterrows():
+        console.print(
+            f"  {device['device_name']} (ID: {device['device_id']}) - {device['queries']:,} queries"
+        )
+    sys.exit(0)
+
+# Analyze usage
+usage_data = tracker.analyze_usage(
+    device_filter=args.device, days=args.days, use_cache=not args.no_cache
+)
+
+if not usage_data:
+    console.print("[red]No usage data found[/red]")
+    sys.exit(0)
+
+# Show sleep periods for each device
+for device_name, device_data in usage_data.items():
+    console.print(
+        f"[bold cyan]{device_name} - Last 7 Days Sleep Patterns[/bold cyan]"
+    )
+
+    dates = sorted(device_data.keys())
+    found_sleep = False
+
+    for date in dates:
+        patterns = device_data[date]
+        console.print(f"\n[bold]{date.strftime('%a %m/%d')}:[/bold]")
+
+        if patterns["sleep_periods"]:
+            found_sleep = True
+
+            # Create and show Gantt chart
+            gantt = create_gantt_chart(patterns, date)
+            console.print(gantt)
+
+            # Show text summary below chart
+
+            for period in patterns["sleep_periods"]:
+                if period.get("ongoing", False):
+                    console.print(
+                        f"  Sleep: {period['start'].strftime('%H:%M')} → Still sleeping ({period['duration_hours']:.1f}h so far)"
+                    )
+                else:
+                    console.print(
+                        f"  Sleep: {period['start'].strftime('%H:%M')} → {period['end'].strftime('%H:%M')} ({period['duration_hours']:.1f}h)"
+                    )
+        else:
+            console.print("[dim]  No clear sleep period detected[/dim]")
+
+    if not found_sleep:
+        console.print(
+            "\n[dim]No clear sleep periods detected in the analyzed timeframe[/dim]"
+        )
+
+    if len(usage_data) > 1:
+        console.print("\n" + "=" * 80 + "\n")

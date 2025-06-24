@@ -1,0 +1,12 @@
+#!/bin/bash
+
+TARGET_PATH="${1:-.}"
+
+process_repo() {
+    echo "Processing: $1"
+    cd "$1" && git gc --aggressive --prune=now >/dev/null 2>&1 && echo "✓ $1" || echo "✗ $1"
+}
+
+export -f process_repo
+
+cd "$TARGET_PATH" && find . -type d -name ".git" -exec dirname {} + | parallel process_repo

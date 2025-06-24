@@ -1,52 +1,107 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! dialoguer = "0.11"
+//! clap = { version = "4.5", features = ["derive"] }
+//! ```
 
-require 'bundler/inline'
+use clap::Parser;
+use dialoguer::{theme::ColorfulTheme, Select};
+use std::process::Command;
 
-$VERBOSE = nil
-gemfile(false, quiet: true) do
-  source :rubygems
-  gem 'tty-prompt'
-end
-$VERBOSE = false
+#[derive(Parser)]
+#[command(about = "Change display resolution")]
+struct Args {
+    /// Set specific resolution (e.g., 1920x1080)
+    resolution: Option<String>,
+}
 
-displayplacer_output = `displayplacer list`
+fn main() {
+    let args = Args::parse();
 
-initial_res_command = displayplacer_output.lines.last.chomp
-screen_id = displayplacer_output.lines.find { |line| line.start_with?('Persistent screen id:') }.split(':').last.strip
+    let (screen_id, resolutions) = get_resolutions();
 
-resolutions = displayplacer_output.lines
-  .select { |line| line.match?(/^ *mode \d+:/) && line.include?('scaling:on') }
-  .flat_map { |line|
-    parts = line.split
-    resolution = parts[2].split(':')[1]
-    width, height = resolution.split('x').map(&:to_i)
-    ["#{width}x#{height}"]
-  }
-  .sort_by { |res| res.split('x').map(&:to_i).reverse }
-  .reverse
-  .uniq { |res| res.split('x')[0] }
+    if let Some(target_res) = args.resolution {
+        // Non-interactive mode
+        if resolutions.iter().any(|res| res == &target_res) {
+            apply_resolution(&screen_id, &target_res);
+        } else {
+            eprintln!("Resolution {} not available", target_res);
+            eprintln!("Available: {}", resolutions.join(", "));
+            std::process::exit(1);
+        }
+    } else {
+        // Interactive mode
+        if resolutions.is_empty() {
+            eprintln!("No resolutions found with scaling:on");
+            return;
+        }
 
-apply_resolution = lambda do |selected_resolution|
-  command =
-    if selected_resolution
-      parts = selected_resolution.split('x')
-      "displayplacer 'id:#{screen_id} res:#{selected_resolution} hz:60 enabled:true scaling:on origin:(0,0) degree:0'"
-    else
-      initial_res_command
-    end
-  system(command)
-end
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("Select a resolution:")
+            .items(&resolutions)
+            .default(0)
+            .interact()
+            .unwrap();
 
-prompt = TTY::Prompt.new
-prompt.on(:keypress) do |event|
-  if event.value == "j"
-    prompt.trigger(:keydown)
-  end
+        apply_resolution(&screen_id, &resolutions[selection]);
+    }
+}
 
-  if event.value == "k" || event.key.name == :back_tab
-    prompt.trigger(:keyup)
-  end
-end
+fn get_resolutions() -> (String, Vec<String>) {
+    let output = Command::new("displayplacer")
+        .arg("list")
+        .output()
+        .expect("Failed to run displayplacer");
 
-selected_resolution = prompt.select("Select a resolution:", resolutions, cycle: true)
-apply_resolution.call(selected_resolution)
+    let content = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = content.lines().collect();
+
+    let screen_id = lines.iter()
+        .find(|line| line.starts_with("Persistent screen id:"))
+        .and_then(|line| line.split(':').nth(1))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+
+    let mut resolutions: Vec<(u32, u32, String)> = lines.iter()
+        .filter(|line| line.contains("mode ") && line.contains("scaling:on"))
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if let Some(res_part) = parts.get(2) {
+                if let Some(res) = res_part.split(':').nth(1) {
+                    let dims: Vec<&str> = res.split('x').collect();
+                    if dims.len() == 2 {
+                        if let (Ok(width), Ok(height)) = (dims[0].parse::<u32>(), dims[1].parse::<u32>()) {
+                            return Some((width, height, res.to_string()));
+                        }
+                    }
+                }
+            }
+            None
+        })
+        .collect();
+
+    // Sort by width descending, then height descending
+    resolutions.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+    
+    // Remove duplicates by width, keeping the one with highest height
+    let mut seen_widths = std::collections::HashSet::new();
+    resolutions.retain(|(width, _, _)| seen_widths.insert(*width));
+
+    let resolution_strings: Vec<String> = resolutions.into_iter().map(|(_, _, res)| res).collect();
+
+    (screen_id, resolution_strings)
+}
+
+fn apply_resolution(screen_id: &str, resolution: &str) {
+    let command = format!(
+        "displayplacer 'id:{} res:{} hz:60 enabled:true scaling:on origin:(0,0) degree:0'",
+        screen_id, resolution
+    );
+
+    Command::new("sh")
+        .arg("-c")
+        .arg(&command)
+        .status()
+        .expect("Failed to apply resolution");
+}

@@ -1,0 +1,70 @@
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! clap = { version = "4", features = ["derive"] }
+//! anyhow = "1"
+//! duct = "0.13"
+//! signal-hook = "0.3"
+//! ```
+
+use anyhow::{Context, Result};
+use clap::Parser;
+use duct::cmd;
+use signal_hook::{consts::{SIGINT, SIGTERM}, iterator::Signals};
+use std::process;
+use std::thread;
+
+#[derive(Parser)]
+#[command(about = "Control KeepingYouAwake on macOS")]
+struct Cli {
+    /// Action: on, off, or minutes (number implies on)
+    action: Option<String>,
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    let (action, minutes) = if let Some(arg) = cli.action {
+        if let Ok(mins) = arg.parse::<u32>() {
+            ("activate", Some(mins))
+        } else {
+            match arg.as_str() {
+                "on" => ("activate", None),
+                "off" => ("deactivate", None),
+                _ => {
+                    eprintln!("Invalid action: {}. Use 'on', 'off', or a number of minutes.", arg);
+                    process::exit(1);
+                }
+            }
+        }
+    } else {
+        ("activate", None)
+    };
+
+    let url = format!("keepingyouawake:///{action}{}",
+        minutes.map_or(String::new(), |m| format!("?minutes={m}")));
+
+    cmd!("open", "--background", &url)
+        .run()
+        .context("Failed to open KeepingYouAwake URL")?;
+
+    if action == "activate" && minutes.is_none() {
+        println!("☕ Staying awake indefinitely. Press Ctrl+C to stop.");
+
+        // Handle both SIGINT (Ctrl+C) and SIGTERM (timeout)
+        thread::spawn(move || {
+            let mut signals = Signals::new(&[SIGINT, SIGTERM]).unwrap();
+            for _ in signals.forever() {
+                println!("\n😴 Stopping awake mode...");
+                let _ = cmd!("open", "--background", "keepingyouawake:///deactivate").run();
+                process::exit(0);
+            }
+        });
+
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    }
+
+    Ok(())
+}
