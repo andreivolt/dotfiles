@@ -26,16 +26,33 @@ spoon.SpoonInstall:andUse("WinWin", {
 local redshift = require("redshift")
 redshift.init()
 
+-- Function to handle Ghostty resizing
+local function handleGhosttyResize()
+  local ghostty = hs.application.get("ghostty")
+  
+  if ghostty then
+    local mainWindow = ghostty:mainWindow()
+    
+    if mainWindow then
+      local currentScreen = mainWindow:screen()
+      
+      if #hs.screen.allScreens() > 1 then
+        toggleApp.toggleAppMonitor()
+      else
+        mainWindow:maximize()
+      end
+    end
+  end
+end
+
 -- Auto-move Ghostty to external monitor when connected
 hs.screen.watcher.new(function()
-  if #hs.screen.allScreens() > 1 then
-    hs.timer.doAfter(0.5, function()
-      local ghostty = hs.application.get("ghostty")
-      if ghostty then
-        toggleApp.toggleAppMonitor()
-      end
-    end)
-  end
+  hs.timer.doAfter(0.5, handleGhosttyResize)
+end):start()
+
+-- Also watch for resolution changes specifically
+hs.spaces.watcher.new(function()
+  hs.timer.doAfter(0.5, handleGhosttyResize)
 end):start()
 
 -- CLI setup

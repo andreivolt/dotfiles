@@ -1,154 +1,118 @@
-#!/usr/bin/env -S uv run --script --quiet
-"""Convert files to text/markdown format using pandoc."""
-# /// script
-# dependencies = [
-#   "click",
-#   "panflute",
-#   "pypandoc",
-#   "sh",
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! Convert files to plain text
+//! ```cargo
+//! [dependencies]
+//! clap = { version = "4", features = ["derive"] }
+//! anyhow = "1"
+//! mime_guess = "2"
+//! sha2 = "0.10"
+//! ```
 
+use anyhow::Result;
+use clap::Parser;
+use mime_guess::mime;
+use sha2::{Sha256, Digest};
+use std::{fs, path::Path, process::Command};
 
-import sys
-from pathlib import Path
-import pypandoc
-import panflute as pf
-import click
-import sh
-
-def clean_filter(elem):
-    """Panflute filter to remove styling attributes"""
-    # Handle all elements that can have attributes - be more aggressive
-    if hasattr(elem, 'attributes'):
-        elem.attributes = {}
-    if hasattr(elem, 'classes'):
-        elem.classes = []
-    if hasattr(elem, 'identifier'):
-        elem.identifier = ""
-
-    # Convert formatting elements to plain content
-    if isinstance(elem, (pf.Strong, pf.Emph, pf.Underline)):
-        return elem.content
-    elif isinstance(elem, pf.Link) and elem.url == "":
-        return elem.content
-
-    return elem
-
-def clean_markdown_output(text):
-    """Remove any remaining styling artifacts from markdown"""
-    import re
-    # Remove {.underline} and similar class markers
-    text = re.sub(r'\{\.[\w-]+\}', '', text)
-    # Remove {#id} markers
-    text = re.sub(r'\{#[\w-]+\}', '', text)
-    # Remove empty [] markers
-    text = re.sub(r'\[\]\{[^}]*\}', '', text)
-    return text
-
-def unoconv_to_markdown(input_file):
-    """Convert file using unoconv -> pypandoc with panflute filter"""
-    try:
-        html_content = sh.unoconv('--format', 'html', '--stdout', input_file, _err='/dev/null')
-        doc = pf.convert_text(str(html_content), input_format='html', output_format='panflute')
-        doc = doc.walk(clean_filter)
-        markdown = pf.convert_text(doc, input_format='panflute', output_format='markdown')
-        return clean_markdown_output(markdown)
-    except:
-        return None
-
-
-def convert_text_html(file_path):
-    doc = pf.convert_text(file_path.read_text(), input_format='html', output_format='panflute')
-    doc = doc.walk(clean_filter)
-    markdown = pf.convert_text(doc, input_format='panflute', output_format='markdown')
-    return clean_markdown_output(markdown)
-
-def convert_with_unoconv(file_path):
-    result = unoconv_to_markdown(str(file_path))
-    if result:
-        return result
-    else:
-        # Fallback: use pypandoc but still clean the output
-        markdown = pypandoc.convert_file(str(file_path), 'markdown')
-        return clean_markdown_output(markdown)
-
-def convert_excel(file_path):
-    return unoconv_to_markdown(str(file_path)) or "Unsupported Excel format"
-
-def convert_powerpoint(file_path):
-    return unoconv_to_markdown(str(file_path)) or "Unsupported PowerPoint format"
-
-def convert_image(file_path):
-    return f"# OCR Output from {file_path.name}\n\n{sh.tesseract(str(file_path), 'stdout')}"
-
-def convert_audio(file_path):
-    return f"# Audio Transcription\n\n{sh.deepgram('--detect-language', str(file_path))}"
-
-# MIME type mapping
-CONVERTERS = {
-    'text/html': convert_text_html,
-    'text/csv': lambda f: pypandoc.convert_file(str(f), 'markdown'),
-    'text/markdown': lambda f: f.read_text(),
-    'application/pdf': convert_with_unoconv,
-    'application/msword': convert_with_unoconv,
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': convert_with_unoconv,
-    'application/vnd.oasis.opendocument.text': convert_with_unoconv,
-    'application/rtf': convert_with_unoconv,
-    'application/epub+zip': convert_with_unoconv,
-    'application/vnd.ms-excel': convert_excel,
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': convert_excel,
-    'application/vnd.ms-powerpoint': convert_powerpoint,
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation': convert_powerpoint,
-    'application/postscript': lambda f: str(sh.ps2ascii(str(f))),
-    'application/json': lambda f: f"# JSON Content\n\n```json\n{sh.jq('.', str(f))}```",
-    'application/xml': lambda f: f"# XML Content\n\n```xml\n{sh.xmllint('--format', str(f))}```",
+#[derive(Parser)]
+#[command(about = "Convert files to plain text")]
+struct Args {
+    #[arg(required = true)]
+    files: Vec<String>,
 }
 
-def convert_by_mime(mime_type: str, file_path: Path):
-    """Convert file based on MIME type"""
-    # Check exact match first
-    if mime_type in CONVERTERS:
-        return CONVERTERS[mime_type](file_path)
+fn pandoc_convert(path: &Path, from: &str) -> Result<String> {
+    let output = Command::new("pandoc")
+        .args(["-f", from, "-t", "plain", "--wrap=none"])
+        .arg(path)
+        .output()?;
 
-    # Check prefix matches
-    if mime_type.startswith('text/'):
-        return file_path.read_text()
-    elif mime_type.startswith('image/'):
-        return convert_image(file_path)
-    elif mime_type.startswith('audio/'):
-        return convert_audio(file_path)
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
 
-    raise click.ClickException(f"Unsupported MIME type: {mime_type}")
+fn soffice_convert(path: &Path) -> Result<String> {
+    let temp_dir = std::env::temp_dir();
+    let stem = path.file_stem().unwrap().to_str().unwrap();
+    let html_path = temp_dir.join(format!("{}.html", stem));
 
-def get_mime_type(file_path: Path) -> str:
-    """Get MIME type using sh.file"""
-    return str(sh.file('--mime-type', '-b', str(file_path))).strip()
+    let output = Command::new("soffice")
+        .args(["--headless", "--convert-to", "html", "--outdir"])
+        .arg(&temp_dir)
+        .arg(path)
+        .output()?;
 
-@click.command()
-@click.argument('files', nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
-def main(files):
-    """Convert files to text/markdown format"""
-    if len(files) == 1:
-        # Single file to stdout
-        file_path = files[0]
-        mime_type = get_mime_type(file_path)
-        try:
-            result = convert_by_mime(mime_type, file_path)
-            click.echo(result, nl=False)
-        except Exception as e:
-            raise click.ClickException(f"Error converting {file_path}: {e}")
-    else:
-        # Multiple files to .txt files
-        for file_path in files:
-            output_path = file_path.with_suffix('.txt')
-            click.echo(f"Converting {file_path} to {output_path}...", err=True)
+    if !output.status.success() {
+        anyhow::bail!("soffice failed: {}", String::from_utf8_lossy(&output.stderr));
+    }
 
-            mime_type = get_mime_type(file_path)
-            try:
-                result = convert_by_mime(mime_type, file_path)
-                output_path.write_text(result)
-            except Exception as e:
-                click.echo(f"Failed to convert {file_path}: {e}", err=True)
+    if !html_path.exists() {
+        anyhow::bail!("HTML file not created: {}", html_path.display());
+    }
 
-main()
+    let result = pandoc_convert(&html_path, "html");
+    let _ = fs::remove_file(&html_path);
+    result
+}
+
+
+fn file_hash(path: &Path) -> Result<String> {
+    let content = fs::read(path)?;
+    let hash = Sha256::digest(&content);
+    Ok(format!("{:x}", hash))
+}
+
+fn convert(path: &Path) -> Result<String> {
+    let hash = file_hash(path)?;
+    let cache_path = path.with_extension(format!("{}.{}.2text",
+        path.extension().unwrap_or_default().to_str().unwrap_or(""),
+        &hash[..8])); // First 8 chars of hash
+
+    // Check if cache exists
+    if cache_path.exists() {
+        if let Ok(cached) = fs::read_to_string(&cache_path) {
+            return Ok(cached);
+        }
+    }
+
+    // Not cached, convert and save
+    let result = convert_impl(path)?;
+    let _ = fs::write(&cache_path, &result);
+    Ok(result)
+}
+
+fn convert_impl(path: &Path) -> Result<String> {
+    let mime = mime_guess::from_path(path).first_or_text_plain();
+
+    match (mime.type_(), mime.subtype().as_str()) {
+        (mime::TEXT, "html") => pandoc_convert(path, "html"),
+        (mime::TEXT, _) => Ok(fs::read_to_string(path)?),
+        (mime::APPLICATION, "pdf") => Command::new("pdftotext")
+            .args(["-layout", path.to_str().unwrap(), "-"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .map_err(Into::into),
+        (mime::APPLICATION, s) if s.contains("word") => soffice_convert(path),
+        (mime::APPLICATION, s) if s.contains("opendocument") => soffice_convert(path),
+        (mime::APPLICATION, "rtf") => soffice_convert(path),
+        (mime::APPLICATION, s) if s.contains("excel") => soffice_convert(path),
+        (mime::APPLICATION, s) if s.contains("powerpoint") => soffice_convert(path),
+        (mime::APPLICATION, s) if s.contains("epub") => pandoc_convert(path, "epub"),
+        (mime::IMAGE, _) => Command::new("tesseract")
+            .args([path.to_str().unwrap(), "stdout"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .map_err(Into::into),
+        _ => anyhow::bail!("Unsupported: {}", mime),
+    }
+}
+
+fn main() -> Result<()> {
+    let args = Args::parse();
+    let paths: Vec<_> = args.files.iter().map(Path::new).collect();
+
+    for path in &paths {
+        print!("{}", convert(path)?);
+    }
+
+    Ok(())
+}

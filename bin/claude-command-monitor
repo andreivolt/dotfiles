@@ -24,18 +24,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 #[derive(Parser)]
 #[command(name = "claude-command-monitor")]
-#[command(about = "Monitor Claude project files for bash commands")]
-#[command(version = "1.0")]
-#[command(long_about = r#"
-Monitor Claude Code project JSONL files for bash commands.
-
-By default, commands are only echoed to stdout.
-Use --write-history to also append them to your zsh history file.
-
-Examples:
-  claude-command-monitor                  # Echo commands only
-  claude-command-monitor --write-history  # Echo and write to history
-"#)]
+#[command(about = "Monitor Claude project files for ommands")]
 struct Args {
     /// Write commands to zsh history file (~/.local/state/zsh/history)
     #[arg(short, long)]

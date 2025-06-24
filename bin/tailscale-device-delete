@@ -7,14 +7,14 @@
 //! chrono = { version = "0.4", features = ["serde"] }
 //! argh = "0.1"
 //! anyhow = "1.0"
-//! chrono-human-duration = "0.1"
+//! timeago = "0.4"
 //! duct = "0.13"
 //! ```
 
 use anyhow::{anyhow, Result};
 use argh::FromArgs;
 use chrono::{DateTime, Utc};
-use chrono_human_duration::ChronoHumanDuration;
+use timeago;
 use duct::cmd;
 use serde::Deserialize;
 use std::env;
@@ -53,7 +53,7 @@ fn time_ago(dt: Option<DateTime<Utc>>) -> String {
         Some(dt) => {
             let now = Utc::now();
             let duration = now.signed_duration_since(dt);
-            duration.format_human().to_string()
+            timeago::Formatter::new().convert(duration.to_std().unwrap_or(std::time::Duration::ZERO))
         }
         None => "never".to_string(),
     }
