@@ -45,7 +45,7 @@ def split_into_paragraphs(text):
 Text:
 """ + chunk
 
-        result = sh.llm('prompt', '-m', 'gemini-2.5-flash-preview-05-20', '--no-log', prompt)
+        result = sh.llm('prompt', '-m', '4o', '--no-log', prompt)
         processed_chunks.append(result.strip())
 
     return '\n\n'.join(processed_chunks)

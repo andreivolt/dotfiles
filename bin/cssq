@@ -100,10 +100,6 @@ await new Command()
   .option("-a, --attribute <attribute:string>", "Extract a specific attribute from matched elements")
   .option("-t, --text", "Extract text content from matched elements")
   .option("-o, --html", "Output the outer HTML of matched elements (default)", { default: true })
-  .example("Extract all h1 elements", "cssq index.html -s h1")
-  .example("Extract href attributes from links", "cssq index.html -s a -a href")
-  .example("Extract text content from paragraphs", "cssq index.html -s p -t")
-  .example("Extract title text from piped HTML", "curl example.com | cssq -s title -t")
   .action(async (options, inputFile) => {
     await main(options, inputFile);
   })
