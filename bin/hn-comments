@@ -170,7 +170,7 @@ export class HackerNewsCommentsParser {
 
   async fetchAndParse(itemId, useCache = true, maxAgeMinutes = 60) {
     const cache = new CacheManager();
-    
+
     // Check cache first
     if (useCache && cache.has(itemId, maxAgeMinutes)) {
       const cached = cache.get(itemId);

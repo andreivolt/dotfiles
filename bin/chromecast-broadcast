@@ -145,9 +145,9 @@ def stream_audio_live(cast, cast_name, port=None):
     """Stream live audio directly to Chromecast."""
     import subprocess
     import sh
-    
+
     print("Starting live audio stream... Press Ctrl+C to stop")
-    
+
     # Find an available port if not specified
     if port is None:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -155,24 +155,24 @@ def stream_audio_live(cast, cast_name, port=None):
             port = s.getsockname()[1]
 
     print(f"Using port {port} for live stream")
-    
+
     # Get local IP
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect(("8.8.8.8", 80))
     local_ip = s.getsockname()[0]
     s.close()
-    
+
     # Start HTTP server for streaming
     app = Flask(__name__)
-    
+
     # Global variable to store the ffmpeg process
     ffmpeg_proc = None
-    
+
     @app.route('/stream.mp3')
     def stream_audio():
         nonlocal ffmpeg_proc
         print(f"Stream request from {request.remote_addr}")
-        
+
         def generate():
             nonlocal ffmpeg_proc
             try:
@@ -188,45 +188,45 @@ def stream_audio_live(cast, cast_name, port=None):
                     '-f', 'mp3',
                     '-'
                 ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-                
+
                 # Stream the output
                 while True:
                     data = ffmpeg_proc.stdout.read(4096)
                     if not data:
                         break
                     yield data
-                        
+
             except Exception as e:
                 print(f"Stream error: {e}")
             finally:
                 if ffmpeg_proc:
                     ffmpeg_proc.terminate()
                     ffmpeg_proc = None
-    
+
         return app.response_class(generate(), mimetype='audio/mpeg')
-    
+
     # Start server in background
     def run_server():
         app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
-    
+
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
     time.sleep(2)  # Give server time to start
-    
+
     # Connect to Chromecast and start playback
     print(f"Connecting to {cast_name} at {cast.cast_info.host}:{cast.cast_info.port}...")
     cast.wait()
-    
+
     mc = cast.media_controller
     stream_url = f'http://{local_ip}:{port}/stream.mp3'
     print(f"Starting live stream: {stream_url}")
-    
+
     mc.play_media(stream_url, 'audio/mpeg')
     mc.block_until_active()
-    
+
     print(f"Live streaming to {cast_name}")
     print("Press Ctrl+C to stop streaming")
-    
+
     try:
         # Keep streaming until interrupted
         while True:

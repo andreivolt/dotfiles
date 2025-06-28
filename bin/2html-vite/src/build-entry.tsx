@@ -11,9 +11,9 @@ const title = process.env.VITE_DOCUMENT_TITLE || 'Document'
 const clientScript = process.env.VITE_CLIENT_SCRIPT || ''
 
 // Server-side render the document app
-const documentApp = React.createElement(DocumentApp, { 
-  markdown, 
-  onlyRender: true 
+const documentApp = React.createElement(DocumentApp, {
+  markdown,
+  onlyRender: true
 })
 
 // Render the complete HTML document

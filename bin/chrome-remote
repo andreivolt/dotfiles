@@ -24,7 +24,7 @@ from platformdirs import user_data_dir
 def find_chrome_executable() -> Optional[str]:
     """Find Chrome executable based on the current platform."""
     system = platform.system().lower()
-    
+
     if system == "darwin":  # macOS
         paths = [
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -46,17 +46,17 @@ def find_chrome_executable() -> Optional[str]:
         ]
     else:
         return None
-    
+
     for path in paths:
         if os.path.isfile(path) and os.access(path, os.X_OK):
             return path
-    
+
     # Try to find via PATH
     for name in ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"]:
         path = shutil.which(name)
         if path:
             return path
-    
+
     return None
 
 
@@ -69,11 +69,11 @@ def get_debug_profile_dir(profile_name: str = "chrome-debug") -> Path:
 def ensure_profile_exists(profile_dir: Path) -> None:
     """Create the profile directory if it doesn't exist."""
     profile_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Create a simple preferences file to avoid first-run prompts
     prefs_file = profile_dir / "Default" / "Preferences"
     prefs_file.parent.mkdir(exist_ok=True)
-    
+
     if not prefs_file.exists():
         prefs_content = '''
 {
@@ -97,7 +97,7 @@ def launch_chrome_debug(chrome_path: str, profile_dir: Path, port: int, addition
     """Launch Chrome with remote debugging enabled."""
     if additional_args is None:
         additional_args = []
-    
+
     args = [
         chrome_path,
         f"--remote-debugging-port={port}",
@@ -110,10 +110,10 @@ def launch_chrome_debug(chrome_path: str, profile_dir: Path, port: int, addition
         "--disable-features=TranslateUI",
         "--disable-ipc-flooding-protection",
     ] + additional_args
-    
+
     try:
-        process = subprocess.Popen(args, 
-                                 stdout=subprocess.DEVNULL, 
+        process = subprocess.Popen(args,
+                                 stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL,
                                  start_new_session=True)
         return process
@@ -123,42 +123,42 @@ def launch_chrome_debug(chrome_path: str, profile_dir: Path, port: int, addition
 
 def main():
     parser = argparse.ArgumentParser(description="Launch Chrome with remote debugging enabled")
-    parser.add_argument("--url", "-u", 
+    parser.add_argument("--url", "-u",
                        help="URL to open on launch")
     parser.add_argument("--headless", action="store_true",
                        help="Run Chrome in headless mode")
-    
+
     args = parser.parse_args()
-    
+
     # Find Chrome executable
     chrome_path = find_chrome_executable()
     if not chrome_path:
         print("Error: Could not find Chrome executable", file=sys.stderr)
         sys.exit(1)
-    
-    
+
+
     # Setup profile directory
     profile_dir = get_debug_profile_dir("chrome-debug")
-    
+
     try:
         ensure_profile_exists(profile_dir)
     except Exception as e:
         print(f"Error: Could not create profile directory: {e}", file=sys.stderr)
         sys.exit(1)
-    
+
     # Prepare additional arguments
     additional_args = []
     if args.headless:
         additional_args.append("--headless")
     if args.url:
         additional_args.append(args.url)
-    
+
     # Launch Chrome
     try:
         process = launch_chrome_debug(chrome_path, profile_dir, 9222, additional_args)
         print(f"Chrome launched with remote debugging on port 9222")
         print(f"Debug URL: http://localhost:9222")
-        
+
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

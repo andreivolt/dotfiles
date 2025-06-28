@@ -537,13 +537,13 @@ class ClaudeAPIClient:
             # Use a shorter timeout for this call to avoid hanging
             url = f"{BASE_URL}/api/organizations/{self.organization_id}/chat_conversations/{chat_id}"
             headers = self.get_headers("navigation")
-            
+
             # Make the request with a short timeout to prevent hanging
             response = http_get(url, headers=headers, timeout=10, impersonate="chrome110")
-            
+
             if response.status_code == 200:
                 chat_data = response.json()
-                
+
                 if "chat_messages" in chat_data and chat_data["chat_messages"]:
                     # Get the last message (should be from assistant)
                     last_message = chat_data["chat_messages"][-1]
@@ -553,7 +553,7 @@ class ClaudeAPIClient:
             # If we can't get the last message, fall back to zero UUID
             # This is expected for new conversations or network issues
             pass
-        
+
         # Fallback to zero UUID for new conversations
         return "00000000-0000-4000-8000-000000000000"
 
@@ -580,7 +580,7 @@ class ClaudeAPIClient:
         # Always use the correct parent UUID - this enables proper conversation continuation
         # for ALL scenarios (not just --continue flag)
         parent_uuid = self._get_last_message_uuid(chat_id)
-        
+
         payload = {
             "prompt": prompt,
             "parent_message_uuid": parent_uuid,

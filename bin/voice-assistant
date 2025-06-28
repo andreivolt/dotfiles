@@ -84,14 +84,14 @@ async def live_transcribe_with_stop_words():
     """Live transcription with stop word detection using Deepgram streaming."""
     try:
         from deepgram import DeepgramClientOptions, LiveTranscriptionEvents, LiveOptions, Microphone
-        
+
         config = DeepgramClientOptions(options={"keepalive": "true"})
         deepgram = DeepgramClient(DEEPGRAM_API_KEY, config)
         dg_connection = deepgram.listen.asynclive.v("1")
-        
+
         transcript_parts = []
         should_stop = False
-        
+
         async def on_message(self, result, **kwargs):
             nonlocal should_stop, transcript_parts
             try:
@@ -99,11 +99,11 @@ async def live_transcribe_with_stop_words():
                     sentence = result.channel.alternatives[0].transcript
                     if len(sentence) == 0:
                         return
-                    
+
                     if result.is_final:
                         print(f"💬 {sentence}")
                         transcript_parts.append(sentence)
-                        
+
                         # Check for stop words in final results
                         sentence_lower = sentence.lower().strip()
                         for stop_word in STOP_WORDS:
@@ -151,7 +151,7 @@ async def live_transcribe_with_stop_words():
         addons = {"no_delay": "true"}
 
         print("🎤 Starting live transcription... (say 'stop' or 'done' to end)")
-        
+
         if await dg_connection.start(options, addons=addons) is False:
             print("❌ Failed to connect to Deepgram")
             return ""
@@ -174,7 +174,7 @@ async def live_transcribe_with_stop_words():
             if full_transcript.lower().endswith(stop_word):
                 full_transcript = full_transcript[:-len(stop_word)].strip()
                 break
-        
+
         return full_transcript
 
     except Exception as e:
@@ -185,13 +185,13 @@ async def listen_for_stop_during_speech():
     """Listen for stop words during TTS playback."""
     try:
         from deepgram import DeepgramClientOptions, LiveTranscriptionEvents, LiveOptions, Microphone
-        
+
         config = DeepgramClientOptions(options={"keepalive": "true"})
         deepgram = DeepgramClient(DEEPGRAM_API_KEY, config)
         dg_connection = deepgram.listen.asynclive.v("1")
-        
+
         stop_detected = False
-        
+
         async def on_message(self, result, **kwargs):
             nonlocal stop_detected
             try:
@@ -199,7 +199,7 @@ async def listen_for_stop_during_speech():
                     sentence = result.channel.alternatives[0].transcript
                     if len(sentence) == 0:
                         return
-                    
+
                     # Check for stop words in both interim and final results
                     sentence_lower = sentence.lower().strip()
                     for stop_word in STOP_WORDS:
@@ -253,7 +253,7 @@ async def listen_for_stop_during_speech():
 async def translate_to_romanian(text):
     """Translate text to Romanian using Claude."""
     translation_prompt = f"Translate this text to Romanian, return only the translation: {text}"
-    
+
     try:
         result = subprocess.run(
             ["claude-api", "chat", "--discard", translation_prompt],
@@ -269,7 +269,7 @@ async def translate_to_romanian(text):
 async def send_to_claude(prompt):
     print(f"\n🤖 Sending to Claude: {prompt}")
     print("🎯 Claude's response:")
-    
+
     try:
         # Start Claude API with streaming
         claude_process = subprocess.Popen(
@@ -280,7 +280,7 @@ async def send_to_claude(prompt):
             bufsize=1,
             universal_newlines=True
         )
-        
+
         # Start TTS process to accept streaming input
         tts_process = subprocess.Popen(
             ["deepgram-tts"],
@@ -288,62 +288,62 @@ async def send_to_claude(prompt):
             stderr=subprocess.PIPE,
             text=True
         )
-        
+
         print("🔊 Starting streaming speech... (say 'stop' to interrupt)")
-        
+
         # Start listening for stop words in parallel
         stop_task = asyncio.create_task(listen_for_stop_during_speech())
-        
+
         # Stream Claude's output to both console and TTS
         full_response = ""
         word_buffer = ""
         word_count = 0
         interrupted = False
-        
+
         try:
             # Read Claude output asynchronously
-            
+
             async def read_claude_output():
                 nonlocal word_buffer, word_count, full_response
                 loop = asyncio.get_event_loop()
-                
+
                 while True:
                     # Read line from Claude in a non-blocking way
                     line = await loop.run_in_executor(None, claude_process.stdout.readline)
                     if not line:  # EOF
                         break
-                        
+
                     if line.strip():  # Only process non-empty lines
                         print(line, end='', flush=True)  # Display to console
                         full_response += line
                         word_buffer += line
-                        
+
                         # Count words for faster streaming
                         words_in_line = len(line.split())
                         word_count += words_in_line
-                        
+
                         # Send to TTS much more aggressively - every 5-8 words or punctuation
                         should_send = (
                             any(punct in word_buffer for punct in '.!?') or  # End of sentence
                             word_count >= 5 or  # Every 5 words minimum
                             len(word_buffer) > 30  # Or every 30 characters
                         )
-                        
+
                         if should_send and tts_process.stdin:
                             tts_process.stdin.write(word_buffer + " ")
                             tts_process.stdin.flush()
                             word_buffer = ""
                             word_count = 0
-            
+
             # Run both tasks concurrently
             claude_task = asyncio.create_task(read_claude_output())
-            
+
             # Wait for either Claude to finish or stop to be detected
             done, pending = await asyncio.wait(
                 [claude_task, stop_task],
                 return_when=asyncio.FIRST_COMPLETED
             )
-            
+
             # Check what completed first
             if stop_task in done:
                 interrupted = await stop_task
@@ -356,20 +356,20 @@ async def send_to_claude(prompt):
             else:
                 # Claude finished, cancel stop listening
                 stop_task.cancel()
-                
+
             # Cancel any remaining tasks
             for task in pending:
                 task.cancel()
-            
+
             # Send any remaining text in buffer
             if not interrupted and word_buffer.strip() and tts_process.stdin:
                 tts_process.stdin.write(word_buffer)
                 tts_process.stdin.flush()
-            
+
             # Close TTS input to signal end
             if tts_process.stdin:
                 tts_process.stdin.close()
-            
+
             # Clean up processes
             if interrupted:
                 claude_process.terminate()
@@ -378,7 +378,7 @@ async def send_to_claude(prompt):
                 claude_process.wait()
                 tts_process.wait()
                 print("\n✅ Streaming response completed")
-            
+
         except Exception as e:
             print(f"\n❌ Error during streaming: {e}")
             # Clean up processes
@@ -386,7 +386,7 @@ async def send_to_claude(prompt):
             tts_process.terminate()
             if not stop_task.done():
                 stop_task.cancel()
-        
+
     except subprocess.CalledProcessError as e:
         print(f"❌ Error calling Claude: {e}")
         print(f"stderr: {e.stderr}")
@@ -397,7 +397,7 @@ def speak_with_deepgram(text):
     """Convert text to speech using Deepgram TTS."""
     if not text.strip():
         return
-        
+
     print("🔊 Speaking response...")
     try:
         # Use the deepgram-tts script to convert and play the text
@@ -419,24 +419,24 @@ def speak_with_deepgram(text):
 async def main():
     configure_apis()
     porcupine = initialize_porcupine()
-    
+
     print(f"🎙️  Voice Assistant Ready! Wake word: '{WAKE_WORD}' | Stop words: {STOP_WORDS}")
     print("Press Ctrl+C to exit\n")
-    
+
     try:
         while True:
             print(f"🔊 Listening for wake word '{WAKE_WORD}'...")
-            
+
             if detect_wake_word(porcupine):
                 transcript = await live_transcribe_with_stop_words()
-                
+
                 if transcript:
                     print(f"\n📝 Final transcript: {transcript}")
                     await send_to_claude(transcript)
                     print("\n" + "="*50)  # Separator between interactions
                 else:
                     print("\n❌ No speech detected. Please try again.")
-                    
+
     except KeyboardInterrupt:
         print("\n👋 Voice assistant shutting down...")
     finally:
