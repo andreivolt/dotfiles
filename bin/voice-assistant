@@ -2,12 +2,11 @@
 """Voice-activated assistant with wake word detection."""
 # /// script
 # dependencies = [
-#   "google-generativeai>=0.8",
+#   "deepgram-sdk>=3.0",
 #   "numpy>=1.24",
-#   "openai>=1.54",
 #   "pvporcupine>=3.0",
-#   "scipy>=1.11",
 #   "sounddevice>=0.4",
+#   "pyaudio>=0.2.11",
 # ]
 # ///
 
@@ -17,27 +16,53 @@ import sys
 import pvporcupine
 import sounddevice as sd
 import numpy as np
-import tempfile
-import openai
-import google.generativeai as genai
-from scipy.io.wavfile import write
+import subprocess
+import asyncio
+from deepgram import DeepgramClient
 
 # Configuration
-WAKE_WORD = "picovoice"
+WAKE_WORD = "computer"
+STOP_WORDS = ["stop", "done"]
 ACCESS_KEY = os.getenv("PORCUPINE_ACCESS_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
 SAMPLE_RATE = 16000
 
 def configure_apis():
-    if not GEMINI_API_KEY:
-        print("Error: GEMINI_API_KEY environment variable is required")
+    if not DEEPGRAM_API_KEY:
+        print("Error: DEEPGRAM_API_KEY environment variable is required")
         sys.exit(1)
-    if not OPENAI_API_KEY:
-        print("Error: OPENAI_API_KEY environment variable is required")
-        sys.exit(1)
-    genai.configure(api_key=GEMINI_API_KEY)
-    openai.api_key = OPENAI_API_KEY
+
+def play_wake_sound():
+    """Play a simple wake sound using sounddevice."""
+    try:
+        # Generate a simple ascending beep
+        duration = 0.3  # seconds
+        sample_rate = 44100
+        t = np.linspace(0, duration, int(sample_rate * duration), False)
+        # Two tone beep: 800Hz then 1000Hz
+        beep1 = np.sin(800 * 2 * np.pi * t[:len(t)//2]) * 0.3
+        beep2 = np.sin(1000 * 2 * np.pi * t[len(t)//2:]) * 0.3
+        beep = np.concatenate([beep1, beep2])
+        sd.play(beep, sample_rate)
+        sd.wait()  # Wait for sound to finish
+    except Exception as e:
+        print(f"Could not play wake sound: {e}")
+
+def play_stop_sound():
+    """Play a descending beep for stop word detection."""
+    try:
+        # Generate a descending beep (opposite of wake sound)
+        duration = 0.2  # seconds, shorter than wake
+        sample_rate = 44100
+        t = np.linspace(0, duration, int(sample_rate * duration), False)
+        # Two tone beep: 1000Hz then 600Hz (descending)
+        beep1 = np.sin(1000 * 2 * np.pi * t[:len(t)//2]) * 0.25
+        beep2 = np.sin(600 * 2 * np.pi * t[len(t)//2:]) * 0.25
+        beep = np.concatenate([beep1, beep2])
+        sd.play(beep, sample_rate)
+        sd.wait()  # Wait for sound to finish
+    except Exception as e:
+        print(f"Could not play stop sound: {e}")
 
 def initialize_porcupine():
     if not ACCESS_KEY:
@@ -46,57 +71,378 @@ def initialize_porcupine():
     return pvporcupine.create(keywords=[WAKE_WORD], access_key=ACCESS_KEY)
 
 def detect_wake_word(porcupine):
-    print(f"Listening for wake word '{WAKE_WORD}'...")
     with sd.InputStream(channels=1, samplerate=porcupine.sample_rate, dtype='int16') as stream:
         while True:
             audio_data = stream.read(porcupine.frame_length)[0]
             pcm = np.frombuffer(audio_data, dtype=np.int16)
             if porcupine.process(pcm) >= 0:
-                print("Wake word detected!")
+                print("✅ Wake word detected!")
+                play_wake_sound()
                 return True
 
-def record_audio(duration=3):
-    print("Recording audio...")
-    audio_data = sd.rec(int(duration * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=1, dtype='int16')
-    sd.wait()
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-        # Save the audio data as a WAV file
-        write(f.name, SAMPLE_RATE, audio_data)
-        audio_file_path = f.name
-    return audio_file_path
+async def live_transcribe_with_stop_words():
+    """Live transcription with stop word detection using Deepgram streaming."""
+    try:
+        from deepgram import DeepgramClientOptions, LiveTranscriptionEvents, LiveOptions, Microphone
+        
+        config = DeepgramClientOptions(options={"keepalive": "true"})
+        deepgram = DeepgramClient(DEEPGRAM_API_KEY, config)
+        dg_connection = deepgram.listen.asynclive.v("1")
+        
+        transcript_parts = []
+        should_stop = False
+        
+        async def on_message(self, result, **kwargs):
+            nonlocal should_stop, transcript_parts
+            try:
+                if hasattr(result, 'channel') and result.channel and result.channel.alternatives:
+                    sentence = result.channel.alternatives[0].transcript
+                    if len(sentence) == 0:
+                        return
+                    
+                    if result.is_final:
+                        print(f"💬 {sentence}")
+                        transcript_parts.append(sentence)
+                        
+                        # Check for stop words in final results
+                        sentence_lower = sentence.lower().strip()
+                        for stop_word in STOP_WORDS:
+                            if stop_word in sentence_lower:
+                                print(f"🛑 Stop word '{stop_word}' detected!")
+                                play_stop_sound()
+                                should_stop = True
+                                return
+                    else:
+                        # Also check interim results for faster stop word detection
+                        print(f"\033[90m{sentence}\033[0m", end='\r')
+                        sentence_lower = sentence.lower().strip()
+                        for stop_word in STOP_WORDS:
+                            if stop_word in sentence_lower:
+                                print(f"\n🛑 Stop word '{stop_word}' detected (interim)!")
+                                play_stop_sound()
+                                should_stop = True
+                                return
+            except Exception as e:
+                print(f"Error in transcript: {e}")
 
-def transcribe_audio(file_path):
-    if not OPENAI_API_KEY:
-        print("Error: OPENAI_API_KEY environment variable is required")
-        sys.exit(1)
-    with open(file_path, "rb") as audio_file:
-        # Transcribe using OpenAI Whisper API
-        transcription = openai.audio.transcriptions.create(
-            file=audio_file,
-            model="whisper-1"
+        async def on_close(self, close, **kwargs):
+            print("Connection Closed")
+
+        async def on_error(self, error, **kwargs):
+            print(f"Error: {error}")
+
+        dg_connection.on(LiveTranscriptionEvents.Transcript, on_message)
+        dg_connection.on(LiveTranscriptionEvents.Close, on_close)
+        dg_connection.on(LiveTranscriptionEvents.Error, on_error)
+
+        options = LiveOptions(
+            model="nova-2",
+            language="en-US",
+            smart_format=True,
+            encoding="linear16",
+            channels=1,
+            sample_rate=16000,
+            interim_results=True,
+            utterance_end_ms="1000",
+            vad_events=True,
+            endpointing=300,
         )
-    transcription_text = transcription.text
-    print(f"Transcription: {transcription_text}")
-    return transcription_text
 
-def generate_response(prompt, model="gemini-1.5-flash-8b"):
-    model_instance = genai.GenerativeModel(model)
-    generation_config = genai.GenerationConfig(temperature=0.7)
-    response = model_instance.generate_content(
-        [prompt],
-        generation_config=generation_config,
-        request_options={"timeout": None}
-    )
-    print("AI Response:")
-    for candidate in response.candidates:
-        print(candidate.content.parts[0].text)
+        addons = {"no_delay": "true"}
 
-# Parse arguments
-configure_apis()
-porcupine = initialize_porcupine()
+        print("🎤 Starting live transcription... (say 'stop' or 'done' to end)")
+        
+        if await dg_connection.start(options, addons=addons) is False:
+            print("❌ Failed to connect to Deepgram")
+            return ""
 
-if detect_wake_word(porcupine):
-    audio_file_path = record_audio()
-    transcription_text = transcribe_audio(audio_file_path)
-    generate_response(transcription_text)
-    os.remove(audio_file_path)
+        microphone = Microphone(dg_connection.send)
+        microphone.start()
+
+        try:
+            while not should_stop:
+                await asyncio.sleep(0.1)
+        except KeyboardInterrupt:
+            print("\nStopping...")
+        finally:
+            microphone.finish()
+            await dg_connection.finish()
+
+        # Return full transcript without stop words
+        full_transcript = " ".join(transcript_parts).strip()
+        for stop_word in STOP_WORDS:
+            if full_transcript.lower().endswith(stop_word):
+                full_transcript = full_transcript[:-len(stop_word)].strip()
+                break
+        
+        return full_transcript
+
+    except Exception as e:
+        print(f"Could not start live transcription: {e}")
+        return ""
+
+async def listen_for_stop_during_speech():
+    """Listen for stop words during TTS playback."""
+    try:
+        from deepgram import DeepgramClientOptions, LiveTranscriptionEvents, LiveOptions, Microphone
+        
+        config = DeepgramClientOptions(options={"keepalive": "true"})
+        deepgram = DeepgramClient(DEEPGRAM_API_KEY, config)
+        dg_connection = deepgram.listen.asynclive.v("1")
+        
+        stop_detected = False
+        
+        async def on_message(self, result, **kwargs):
+            nonlocal stop_detected
+            try:
+                if hasattr(result, 'channel') and result.channel and result.channel.alternatives:
+                    sentence = result.channel.alternatives[0].transcript
+                    if len(sentence) == 0:
+                        return
+                    
+                    # Check for stop words in both interim and final results
+                    sentence_lower = sentence.lower().strip()
+                    for stop_word in STOP_WORDS:
+                        if stop_word in sentence_lower:
+                            print(f"\n🛑 Stop word '{stop_word}' detected during speech!")
+                            play_stop_sound()
+                            stop_detected = True
+                            return
+            except Exception as e:
+                print(f"Error in stop detection: {e}")
+
+        async def on_close(self, close, **kwargs):
+            pass
+
+        async def on_error(self, error, **kwargs):
+            pass
+
+        dg_connection.on(LiveTranscriptionEvents.Transcript, on_message)
+        dg_connection.on(LiveTranscriptionEvents.Close, on_close)
+        dg_connection.on(LiveTranscriptionEvents.Error, on_error)
+
+        options = LiveOptions(
+            model="nova-2",
+            language="en-US",
+            smart_format=True,
+            encoding="linear16",
+            channels=1,
+            sample_rate=16000,
+            interim_results=True,
+            utterance_end_ms="500",  # Faster detection
+        )
+
+        if await dg_connection.start(options) is False:
+            return False
+
+        microphone = Microphone(dg_connection.send)
+        microphone.start()
+
+        # Listen for stop words
+        while not stop_detected:
+            await asyncio.sleep(0.1)
+
+        microphone.finish()
+        await dg_connection.finish()
+        return stop_detected
+
+    except Exception as e:
+        print(f"Error in stop listener: {e}")
+        return False
+
+async def translate_to_romanian(text):
+    """Translate text to Romanian using Claude."""
+    translation_prompt = f"Translate this text to Romanian, return only the translation: {text}"
+    
+    try:
+        result = subprocess.run(
+            ["claude-api", "chat", "--discard", translation_prompt],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout.strip()
+    except Exception as e:
+        print(f"Translation error: {e}")
+        return text  # Fallback to original text
+
+async def send_to_claude(prompt):
+    print(f"\n🤖 Sending to Claude: {prompt}")
+    print("🎯 Claude's response:")
+    
+    try:
+        # Start Claude API with streaming
+        claude_process = subprocess.Popen(
+            ["claude-api", "chat", "--stream", "--discard", prompt],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        
+        # Start TTS process to accept streaming input
+        tts_process = subprocess.Popen(
+            ["deepgram-tts"],
+            stdin=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
+        print("🔊 Starting streaming speech... (say 'stop' to interrupt)")
+        
+        # Start listening for stop words in parallel
+        stop_task = asyncio.create_task(listen_for_stop_during_speech())
+        
+        # Stream Claude's output to both console and TTS
+        full_response = ""
+        word_buffer = ""
+        word_count = 0
+        interrupted = False
+        
+        try:
+            # Read Claude output asynchronously
+            
+            async def read_claude_output():
+                nonlocal word_buffer, word_count, full_response
+                loop = asyncio.get_event_loop()
+                
+                while True:
+                    # Read line from Claude in a non-blocking way
+                    line = await loop.run_in_executor(None, claude_process.stdout.readline)
+                    if not line:  # EOF
+                        break
+                        
+                    if line.strip():  # Only process non-empty lines
+                        print(line, end='', flush=True)  # Display to console
+                        full_response += line
+                        word_buffer += line
+                        
+                        # Count words for faster streaming
+                        words_in_line = len(line.split())
+                        word_count += words_in_line
+                        
+                        # Send to TTS much more aggressively - every 5-8 words or punctuation
+                        should_send = (
+                            any(punct in word_buffer for punct in '.!?') or  # End of sentence
+                            word_count >= 5 or  # Every 5 words minimum
+                            len(word_buffer) > 30  # Or every 30 characters
+                        )
+                        
+                        if should_send and tts_process.stdin:
+                            tts_process.stdin.write(word_buffer + " ")
+                            tts_process.stdin.flush()
+                            word_buffer = ""
+                            word_count = 0
+            
+            # Run both tasks concurrently
+            claude_task = asyncio.create_task(read_claude_output())
+            
+            # Wait for either Claude to finish or stop to be detected
+            done, pending = await asyncio.wait(
+                [claude_task, stop_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            # Check what completed first
+            if stop_task in done:
+                interrupted = await stop_task
+                if interrupted:
+                    print("\n🛑 Speech interrupted!")
+                    claude_task.cancel()
+                else:
+                    # Stop task completed but no stop detected, wait for Claude
+                    await claude_task
+            else:
+                # Claude finished, cancel stop listening
+                stop_task.cancel()
+                
+            # Cancel any remaining tasks
+            for task in pending:
+                task.cancel()
+            
+            # Send any remaining text in buffer
+            if not interrupted and word_buffer.strip() and tts_process.stdin:
+                tts_process.stdin.write(word_buffer)
+                tts_process.stdin.flush()
+            
+            # Close TTS input to signal end
+            if tts_process.stdin:
+                tts_process.stdin.close()
+            
+            # Clean up processes
+            if interrupted:
+                claude_process.terminate()
+                tts_process.terminate()
+            else:
+                claude_process.wait()
+                tts_process.wait()
+                print("\n✅ Streaming response completed")
+            
+        except Exception as e:
+            print(f"\n❌ Error during streaming: {e}")
+            # Clean up processes
+            claude_process.terminate()
+            tts_process.terminate()
+            if not stop_task.done():
+                stop_task.cancel()
+        
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error calling Claude: {e}")
+        print(f"stderr: {e.stderr}")
+    except FileNotFoundError as e:
+        print(f"❌ Command not found: {e}")
+
+def speak_with_deepgram(text):
+    """Convert text to speech using Deepgram TTS."""
+    if not text.strip():
+        return
+        
+    print("🔊 Speaking response...")
+    try:
+        # Use the deepgram-tts script to convert and play the text
+        # Don't capture output since it's binary audio data
+        result = subprocess.run(
+            ["deepgram-tts", text],
+            check=True,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        print("✅ Speech completed")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error with TTS: {e}")
+        if e.stderr:
+            print(f"TTS stderr: {e.stderr}")
+    except FileNotFoundError:
+        print("❌ deepgram-tts command not found. Make sure it's in your PATH.")
+
+async def main():
+    configure_apis()
+    porcupine = initialize_porcupine()
+    
+    print(f"🎙️  Voice Assistant Ready! Wake word: '{WAKE_WORD}' | Stop words: {STOP_WORDS}")
+    print("Press Ctrl+C to exit\n")
+    
+    try:
+        while True:
+            print(f"🔊 Listening for wake word '{WAKE_WORD}'...")
+            
+            if detect_wake_word(porcupine):
+                transcript = await live_transcribe_with_stop_words()
+                
+                if transcript:
+                    print(f"\n📝 Final transcript: {transcript}")
+                    await send_to_claude(transcript)
+                    print("\n" + "="*50)  # Separator between interactions
+                else:
+                    print("\n❌ No speech detected. Please try again.")
+                    
+    except KeyboardInterrupt:
+        print("\n👋 Voice assistant shutting down...")
+    finally:
+        porcupine.delete()
+        print("🔌 Resources cleaned up. Goodbye!")
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
