@@ -24,11 +24,11 @@ const createHeadingComponent = (level: number, toc: TocItem[] = []) => ({ childr
   // Get the next heading ID from TOC in order
   const id = toc[headingIndex]?.id || `h-${Math.random().toString(36).substr(2, 9)}`
   headingIndex++
-  
+
   const HeadingTag = `h${level}` as keyof JSX.IntrinsicElements
   // Remove the problematic 'node' prop and any other unwanted props
   const { node, ...cleanProps } = props
-  
+
   return <HeadingTag id={id} {...cleanProps}>{children}</HeadingTag>
 }
 
@@ -40,7 +40,7 @@ interface MarkdownRendererProps {
 export function MarkdownRenderer({ markdown, toc = [] }: MarkdownRendererProps) {
   // Reset heading index for each render
   headingIndex = 0
-  
+
   const components = {
     h1: createHeadingComponent(1, toc),
     h2: createHeadingComponent(2, toc),
@@ -51,8 +51,8 @@ export function MarkdownRenderer({ markdown, toc = [] }: MarkdownRendererProps) 
   }
 
   return (
-    <ReactMarkdown 
-      remarkPlugins={[remarkGfm]} 
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
       components={components}
     >
       {markdown}

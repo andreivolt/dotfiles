@@ -328,30 +328,30 @@ em {
   .app-layout {
     flex-direction: column;
   }
-  
+
   .toc {
     width: 100%;
     height: auto;
     position: static;
     padding: 15px 20px;
   }
-  
+
   .article-container {
     padding: 10px 20px;
   }
-  
+
   article {
     padding: 30px 20px;
   }
-  
+
   h1 {
     font-size: 2em;
   }
-  
+
   h2 {
     font-size: 1.5em;
   }
-  
+
   h3 {
     font-size: 1.2em;
   }
@@ -399,22 +399,22 @@ em {
     background: white;
     color: black;
   }
-  
+
   article {
     box-shadow: none;
     padding: 0;
   }
-  
+
   a {
     color: black;
     text-decoration: underline;
   }
-  
+
   img {
     box-shadow: none;
     page-break-inside: avoid;
   }
-  
+
   h1, h2, h3, h4, h5, h6 {
     page-break-after: avoid;
   }

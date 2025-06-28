@@ -15,7 +15,7 @@ import sh
 
 def enable_wireless():
     print("Enabling wireless debugging...")
-    
+
     adb = sh.adb
 
     # Check if device is connected via USB
@@ -33,7 +33,7 @@ def enable_wireless():
         except:
             print("Error: Could not get device IP address. Is WiFi connected?")
             sys.exit(1)
-    
+
     if not ip:
         print("Error: Could not get device IP address. Is WiFi connected?")
         sys.exit(1)
@@ -48,11 +48,11 @@ def enable_wireless():
     # Connect to device wirelessly
     try:
         result = adb.connect(f"{ip}:5555")
-        
+
         if "connected" in str(result).lower():
             print(f"Connected to {ip}:5555")
             print("You can disconnect USB now.")
-            
+
             # Verify connection
             devices_output = adb.devices()
             if f"{ip}:5555" in str(devices_output):
@@ -69,37 +69,37 @@ def enable_wireless():
 
 def disable_wireless():
     print("Disabling wireless debugging...")
-    
+
     adb = sh.adb
-    
+
     try:
         devices_output = str(adb.devices())
         if "device" not in devices_output:
             print("No devices connected")
             sys.exit(1)
-        
+
         # Switch back to USB mode
         adb.usb()
         print("✓ Switched back to USB mode")
-        
+
     except Exception as e:
         print(f"✗ Failed to disable wireless debugging: {e}")
 
 
 def show_status():
     adb = sh.adb
-    
+
     try:
         devices_output = str(adb.devices())
         print(devices_output)
-        
+
         # Count wireless connections
         wireless_count = devices_output.count(':5555')
         if wireless_count > 0:
             print(f"Wireless connections: {wireless_count}")
         else:
             print("No wireless connections")
-            
+
     except Exception as e:
         print(f"Error getting device status: {e}")
 

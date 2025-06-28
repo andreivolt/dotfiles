@@ -9,7 +9,7 @@ use std::process;
 
 fn main() {
     let ctx = ClipboardContext::new().unwrap();
-    
+
     match ctx.get_html() {
         Ok(html) => {
             println!("{}", html);

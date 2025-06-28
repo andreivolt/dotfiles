@@ -73,13 +73,13 @@ export function TableOfContents({ toc, onlyRender = false }: TableOfContentsProp
 
   const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     if (onlyRender) return
-    
+
     e.preventDefault()
     const href = e.currentTarget.getAttribute('href')
     if (href) {
       const targetId = href.substring(1)
       const targetElement = document.getElementById(targetId)
-      
+
       if (targetElement) {
         targetElement.scrollIntoView({
           behavior: 'smooth',
@@ -96,8 +96,8 @@ export function TableOfContents({ toc, onlyRender = false }: TableOfContentsProp
       <ul className="toc-list">
         {toc.map((item, index) => (
           <li key={index} className={`toc-item toc-level-${item.level}`}>
-            <a 
-              href={`#${item.id}`} 
+            <a
+              href={`#${item.id}`}
               className={`toc-link ${activeId === item.id ? 'active' : ''}`}
               onClick={handleClick}
             >
