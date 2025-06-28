@@ -83,7 +83,7 @@ fn get_resolutions() -> (String, Vec<String>) {
 
     // Sort by width descending, then height descending
     resolutions.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
-    
+
     // Remove duplicates by width, keeping the one with highest height
     let mut seen_widths = std::collections::HashSet::new();
     resolutions.retain(|(width, _, _)| seen_widths.insert(*width));

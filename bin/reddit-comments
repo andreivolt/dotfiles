@@ -114,7 +114,7 @@ else:
     tree_comments = [reddit_to_tree_format(comment) for comment in comments]
     # Filter out None values from deleted/removed comments
     tree_comments = [comment for comment in tree_comments if comment is not None]
-    
+
     # Use tree-render via sh
     import sh
     print(sh.Command('tree-render')('--author=author', '--timestamp=time', '--content=text', '--replies=children', _in=json.dumps(tree_comments)), end='')

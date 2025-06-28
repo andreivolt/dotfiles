@@ -47,7 +47,7 @@ def get_gmail_service():
 
     # Ensure cache directory exists
     os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
-    
+
     if os.path.exists(TOKEN_FILE):
         with open(TOKEN_FILE, "rb") as token:
             creds = pickle.load(token)
@@ -65,7 +65,7 @@ def get_gmail_service():
         if not creds:  # Need new credentials (either never had them or refresh failed)
             # Ensure config directory exists
             os.makedirs(os.path.dirname(CREDENTIALS_FILE), exist_ok=True)
-            
+
             if not os.path.exists(CREDENTIALS_FILE):
                 print(f"Please download OAuth2 credentials from Google Cloud Console")
                 print(f"and save to: {CREDENTIALS_FILE}")

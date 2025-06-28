@@ -1,7 +1,7 @@
 // Client-side functionality for the built HTML
 export function initializeToc() {
   let activeId = '';
-  
+
   function updateActiveToc() {
     // TOC data will be injected by the build process
     const toc = (window as any).__TOC_DATA__ || [];
@@ -22,12 +22,12 @@ export function initializeToc() {
     if (currentActiveId !== activeId) {
       const prevActive = document.querySelector('.toc-link.active');
       if (prevActive) prevActive.classList.remove('active');
-      
+
       if (currentActiveId) {
         const newActive = document.querySelector(`a[href="#${currentActiveId}"]`);
         if (newActive) newActive.classList.add('active');
       }
-      
+
       activeId = currentActiveId;
     }
   }
@@ -37,10 +37,10 @@ export function initializeToc() {
     const target = e.currentTarget as HTMLAnchorElement;
     const href = target.getAttribute('href');
     if (!href) return;
-    
+
     const targetId = href.substring(1);
     const targetElement = document.getElementById(targetId);
-    
+
     if (targetElement) {
       targetElement.scrollIntoView({
         behavior: 'smooth',

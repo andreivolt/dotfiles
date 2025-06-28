@@ -2,10 +2,10 @@
 //! ```cargo
 //! [dependencies]
 //! clap = { version = "4.0", features = ["derive"] }
-//! 
+//!
 //! [target.'cfg(target_os = "macos")'.dependencies]
 //! coreaudio-sys = "0.2"
-//! 
+//!
 //! [target.'cfg(target_os = "linux")'.dependencies]
 //! alsa = "0.7"
 //! ```
@@ -87,7 +87,7 @@ mod macos {
     fn get_default_input_device() -> Result<AudioDeviceID, Box<dyn Error>> {
         let mut device_id: AudioDeviceID = 0;
         let mut property_size = mem::size_of::<AudioDeviceID>() as UInt32;
-        
+
         let property_address = AudioObjectPropertyAddress {
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -118,7 +118,7 @@ mod macos {
 
     fn get_input_mute_status() -> Result<bool, Box<dyn Error>> {
         let device_id = get_default_input_device()?;
-        
+
         let property_address = AudioObjectPropertyAddress {
             mSelector: kAudioDevicePropertyMute,
             mScope: kAudioDevicePropertyScopeInput,
@@ -129,7 +129,7 @@ mod macos {
         let has_property = unsafe {
             AudioObjectHasProperty(device_id, &property_address) != 0
         };
-        
+
         if !has_property {
             return Err(Box::new(AudioError("Device does not support mute".to_string())));
         }
@@ -157,7 +157,7 @@ mod macos {
 
     fn set_input_mute(mute: bool) -> Result<(), Box<dyn Error>> {
         let device_id = get_default_input_device()?;
-        
+
         let property_address = AudioObjectPropertyAddress {
             mSelector: kAudioDevicePropertyMute,
             mScope: kAudioDevicePropertyScopeInput,
@@ -168,14 +168,14 @@ mod macos {
         let has_property = unsafe {
             AudioObjectHasProperty(device_id, &property_address) != 0
         };
-        
+
         if !has_property {
             return Err(Box::new(AudioError("Device does not support mute".to_string())));
         }
 
         let mute_value: UInt32 = if mute { 1 } else { 0 };
         let property_size = mem::size_of::<UInt32>() as UInt32;
-        
+
         let status = unsafe {
             AudioObjectSetPropertyData(
                 device_id,
@@ -193,7 +193,7 @@ mod macos {
 
         let status_msg = if mute { "🔇 Muted" } else { "🎤 Unmuted" };
         show_notification(status_msg);
-        
+
         Ok(())
     }
 
@@ -258,10 +258,10 @@ mod linux {
 
     fn try_alsa_get_mute_status() -> Result<bool, Box<dyn Error>> {
         let mixer = Mixer::new("default", false)?;
-        
+
         // Try common capture control names
         let control_names = ["Capture", "Mic", "Microphone", "Internal Mic"];
-        
+
         for name in &control_names {
             if let Ok(selem_id) = SelemId::new(name, 0) {
                 if let Some(selem) = mixer.find_selem(&selem_id) {
@@ -277,10 +277,10 @@ mod linux {
 
     fn try_alsa_mute(mute: bool) -> Result<(), Box<dyn Error>> {
         let mixer = Mixer::new("default", false)?;
-        
+
         // Try common capture control names
         let control_names = ["Capture", "Mic", "Microphone", "Internal Mic"];
-        
+
         for name in &control_names {
             if let Ok(selem_id) = SelemId::new(name, 0) {
                 if let Some(selem) = mixer.find_selem(&selem_id) {
@@ -288,7 +288,7 @@ mod linux {
                         // ALSA switch: 1 = enabled, 0 = disabled (muted)
                         // So we invert the mute boolean
                         selem.set_capture_switch_all(!mute)?;
-                        
+
                         let status = if mute { "🔇 Muted" } else { "🎤 Unmuted" };
                         show_notification(status);
                         return Ok(());
@@ -302,7 +302,7 @@ mod linux {
 
     fn try_pulseaudio_mute(mute: bool) -> Result<(), Box<dyn Error>> {
         let mute_arg = if mute { "1" } else { "0" };
-        
+
         let output = Command::new("pactl")
             .args(&["set-source-mute", "@DEFAULT_SOURCE@", mute_arg])
             .output()?;
@@ -315,7 +315,7 @@ mod linux {
 
         let status = if mute { "🔇 Muted" } else { "🎤 Unmuted" };
         show_notification(status);
-        
+
         Ok(())
     }
 
