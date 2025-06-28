@@ -320,7 +320,13 @@ try:
         # Use tree-render via sh
         import sh
         import json
-        print(sh.Command('tree-render')('--author=author', '--timestamp=time', '--content=text', '--replies=children', _in=json.dumps(tree_comments)), end='')
+        # Pass through the TTY status to tree-render's environment
+        env = os.environ.copy()
+        if not sys.stdout.isatty():
+            env['NO_COLOR'] = '1'
+        
+        result = sh.Command('tree-render')('--author=author', '--timestamp=time', '--content=text', '--replies=children', _in=json.dumps(tree_comments), _env=env)
+        print(result, end='')
 
 except Exception as e:
     print(f"Error: {e}", file=sys.stderr)
