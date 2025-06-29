@@ -17,6 +17,7 @@ export XDG_CONFIG_HOME=~/.config
 export XDG_DATA_HOME=~/.local
 export XDG_RUNTIME_DIR=$TMPDIR
 export XDG_STATE_HOME=~/.local/state
+export ENABLE_BACKGROUND_TASKS=1 # Claude Code
 
 path=(
   ~/bin(N)
