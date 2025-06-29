@@ -1,81 +1,131 @@
-#!/usr/bin/env -S uv run --script --quiet
-"""Upload files to Filebase storage service."""
-# /// script
-# dependencies = [
-#   "boto3~=1.38.0",
-#   "pyperclip",
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! Upload files to Filebase storage service.
+//!
+//! ```cargo
+//! [dependencies]
+//! aws-config = "1.1"
+//! aws-sdk-s3 = "1.14"
+//! tokio = { version = "1", features = ["full"] }
+//! clap = { version = "4", features = ["derive"] }
+//! mime_guess = "2"
+//! rand = "0.8"
+//! hex = "0.4"
+//! clipboard = "0.5"
+//! ```
 
+use aws_config::BehaviorVersion;
+use aws_sdk_s3::Client;
+use aws_sdk_s3::primitives::ByteStream;
+use clap::Parser;
+use mime_guess::MimeGuess;
+use rand::Rng;
+use std::io::{self, Read};
+use std::path::PathBuf;
 
-import argparse
-import boto3
-import mimetypes
-import os
-import secrets
-import pyperclip
-import sys
-from pathlib import Path
+#[derive(Parser, Debug)]
+#[command(about = "Upload files to Filebase storage service")]
+struct Args {
+    /// File to upload
+    file: Option<PathBuf>,
 
-parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('file', nargs='?', help='File to upload')
-parser.add_argument('-c', '--copy', action='store_true', help='Copy URL to clipboard (macOS only)')
+    /// Copy URL to clipboard (macOS only)
+    #[arg(short, long)]
+    copy: bool,
+}
 
-args = parser.parse_args()
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
 
-# Initialize S3 client with filebase profile
-session = boto3.Session(profile_name='filebase')
-s3 = session.client('s3')
-bucket = 'andreiv'
+    // Initialize S3 client with filebase profile
+    let config = aws_config::defaults(BehaviorVersion::latest())
+        .profile_name("filebase")
+        .load()
+        .await;
+    let client = Client::new(&config);
+    let bucket = "andreiv";
 
-if args.file:
-    file_path = Path(args.file)
-    file_name = file_path.name
-    content = file_path.read_bytes()
+    let (content, file_name, content_type) = if let Some(file_path) = args.file {
+        // Read file from path
+        let content = std::fs::read(&file_path)?;
+        let file_name = file_path
+            .file_name()
+            .ok_or("Invalid file name")?
+            .to_string_lossy()
+            .to_string();
 
-    # Get MIME type
-    content_type, _ = mimetypes.guess_type(str(file_path))
-    if not content_type:
-        content_type = 'application/octet-stream'
-else:
-    content = sys.stdin.buffer.read()
+        // Get MIME type
+        let mime_type = MimeGuess::from_path(&file_path)
+            .first_raw()
+            .unwrap_or("application/octet-stream");
 
-    # For stdin, try to detect common formats or default to text
-    if content.startswith(b'%PDF'):
-        content_type = 'application/pdf'
-        ext = 'pdf'
-    elif content.startswith(b'\x89PNG'):
-        content_type = 'image/png'
-        ext = 'png'
-    elif content.startswith(b'\xff\xd8\xff'):
-        content_type = 'image/jpeg'
-        ext = 'jpg'
-    elif content.startswith(b'{') or content.startswith(b'['):
-        content_type = 'application/json'
-        ext = 'json'
-    else:
-        content_type = 'text/plain'
-        ext = 'txt'
+        (content, file_name, mime_type.to_string())
+    } else {
+        // Read from stdin
+        let mut content = Vec::new();
+        io::stdin().read_to_end(&mut content)?;
 
-    file_name = f"{secrets.token_hex(8)}.{ext}"
+        // Detect content type and extension
+        let (content_type, ext) = match &content {
+            bytes if bytes.starts_with(b"%PDF") => ("application/pdf", "pdf"),
+            bytes if bytes.starts_with(b"\x89PNG") => ("image/png", "png"),
+            bytes if bytes.starts_with(&[0xff, 0xd8, 0xff]) => ("image/jpeg", "jpg"),
+            bytes if bytes.starts_with(b"{") || bytes.starts_with(b"[") => ("application/json", "json"),
+            _ => ("text/plain", "txt"),
+        };
 
-# Upload to S3
-s3.put_object(
-    Bucket=bucket,
-    Key=file_name,
-    Body=content,
-    ContentType=content_type,
-    Metadata={'Content-Type': content_type}
-)
+        // Generate random filename
+        let random_hex: String = (0..8)
+            .map(|_| format!("{:02x}", rand::thread_rng().gen::<u8>()))
+            .collect();
+        let file_name = format!("{}.{}", random_hex, ext);
 
-# Get CID from metadata
+        (content, file_name, content_type.to_string())
+    };
 
-head_response = s3.head_object(Bucket=bucket, Key=file_name)
-cid = head_response['Metadata']['cid']
-ipfs_url = f"https://ipfs.filebase.io/ipfs/{cid}"
+    // Upload to S3
+    let body = ByteStream::from(content);
+    client
+        .put_object()
+        .bucket(bucket)
+        .key(&file_name)
+        .body(body)
+        .content_type(&content_type)
+        .metadata("Content-Type", &content_type)
+        .send()
+        .await?;
 
-if args.copy:
-    pyperclip.copy(ipfs_url)
-    print("URL copied to clipboard")
-else:
-    print(ipfs_url)
+    // Get object metadata to retrieve CID
+    let head_response = client
+        .head_object()
+        .bucket(bucket)
+        .key(&file_name)
+        .send()
+        .await?;
+
+    let cid = head_response
+        .metadata()
+        .and_then(|m| m.get("cid"))
+        .ok_or("CID not found in metadata")?;
+
+    let ipfs_url = format!("https://ipfs.filebase.io/ipfs/{}", cid);
+
+    if args.copy {
+        #[cfg(target_os = "macos")]
+        {
+            use clipboard::{ClipboardContext, ClipboardProvider};
+            let mut ctx: ClipboardContext = ClipboardProvider::new()?;
+            ctx.set_contents(ipfs_url)?;
+            println!("URL copied to clipboard");
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            eprintln!("Clipboard support is only available on macOS");
+            println!("{}", ipfs_url);
+        }
+    } else {
+        println!("{}", ipfs_url);
+    }
+
+    Ok(())
+}
