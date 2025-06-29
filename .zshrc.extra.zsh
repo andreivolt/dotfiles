@@ -19,6 +19,38 @@ setopt numeric_glob_sort
 
 READNULLCMD=$PAGER
 
+alias -g C='| wc -l'
+alias -g H='| head'
+alias -g L="| $PAGER"
+alias -g NUL="&> /dev/null"
+alias -g X='| xargs'
+alias -g COPY='| pbcopy'
+alias -g PASTE='pbpaste |'
+
+alias eza="eza --icons never"
+alias ls="eza"
+alias l="ls -1"
+alias la="ls -a"
+alias ll="ls -l --classify=auto --git"
+alias lla="ll -a"
+
+alias cdt='cd $(mktemp -d)'
+alias diff="diff --color"
+alias edir="edir -r"
+alias gc='git clone --depth 1'
+alias gist="gh gist"
+alias gron="fastgron"
+alias hgrep='history | grep -i --color'
+alias j="jobs"
+alias path='printf "%s\n" $path'
+alias reload-history='fc -p && fc -R'
+alias rg='rg --smart-case --colors match:bg:yellow --colors match:fg:black'
+alias rm="rm --verbose"
+alias vi="nvim"
+alias yt-dlp="yt-dlp --cookies-from-browser chrome"
+
+alias -- +x='chmod +x'
+
 # history expansion
 bindkey ' ' magic-space
 
@@ -36,8 +68,6 @@ source ~/.zsh.d/prompt.zsh
 zsh-defer eval "$(dircolors -b ~/.dircolors)"
 zsh-defer source ~/.local/share/zsh/plugins/nix-shell/nix-shell.plugin.zsh
 zsh-defer source ~/.zsh.d/history-search/history-search.zsh
-zsh-defer source ~/.zsh.d/aliases-global.zsh
-zsh-defer source ~/.zsh.d/aliases.zsh
 zsh-defer source ~/.zsh.d/autopair.zsh
 zsh-defer source ~/.zsh.d/autosuggestions.zsh
 zsh-defer source ~/.zsh.d/completion.zsh
