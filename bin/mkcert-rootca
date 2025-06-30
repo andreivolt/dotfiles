@@ -1,2 +1,0 @@
-mkdir -p ~/.local/ca-certificates
-cat /etc/ssl/cert.pem ~/.local/mkcert/rootCA.pem > ~/.local/ca-certificates/combined-ca-bundle.pem

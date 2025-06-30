@@ -1,7 +1,8 @@
 HISTSIZE="999999"
 SAVEHIST="999999"
-HISTFILE="${XDG_STATE_HOME:-$HOME/.local/state}/zsh/history"
-mkdir -p ${HISTFILE:h}
+zsh_state_path=${XDG_STATE_HOME:-$HOME/.local/state}/zsh
+HISTFILE="$zsh_state_path/history"
+[[ -d $zsh_state_path ]] || mkdir $zsh_state_path
 setopt append_history
 setopt extended_history
 setopt share_history
@@ -51,6 +52,7 @@ alias -- +x='chmod +x'
 source ~/.zsh.d/vi.zsh
 
 autoload -Uz compinit
+[[ -d ~/.cache/zsh ]] || mkdir ~/.cache/zsh
 [[ -f ~/.cache/zsh/zcompdump(#qN.mh+24) ]] && {
 	compinit -d ~/.cache/zsh/zcompdump
 	zcompile ~/.cache/zsh/zcompdump
@@ -70,6 +72,9 @@ bindkey -M menuselect "+" accept-and-menu-complete
 
 zstyle ':completion:*' use-cache on
 zstyle ':completion:*' cache-path "$XDG_CACHE_HOME/zsh/.zcompcache"
+
+zcompcache_path="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/.zcompcache"
+[[ -d $zcompcache_path ]] || mkdir $zcompcache_path
 
 zstyle ':completion:*' accept-exact '*(N)'
 zstyle ':completion:*' rehash true

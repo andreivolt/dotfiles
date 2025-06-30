@@ -1,233 +1,377 @@
-#!/usr/bin/env -S uv run --script --quiet
-"""Convert text to speech using UnrealSpeech API."""
-# /// script
-# dependencies = [
-#   "pydub",
-#   "sh",
-#   "simpleaudio",
-#   "unrealspeech>=0.1,<0.2",
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! Convert text to speech using UnrealSpeech API.
+//! ```cargo
+//! [dependencies]
+//! clap = { version = "4.0", features = ["derive"] }
+//! tokio = { version = "1.0", features = ["full"] }
+//! reqwest = { version = "0.11", features = ["json"] }
+//! serde = { version = "1.0", features = ["derive"] }
+//! serde_json = "1.0"
+//! regex = "1.0"
+//! tempfile = "3.0"
+//! anyhow = "1.0"
+//! atty = "0.2"
+//! futures = "0.3"
+//! rodio = "0.19"
+//! symphonia = { version = "0.5", features = ["all"] }
+//! ```
 
+use anyhow::{anyhow, Result};
+use clap::Parser;
+use futures::future::join_all;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use std::env;
+use std::io::{self, Read, Write};
+use rodio::{Decoder, OutputStream, Sink};
+use std::io::Cursor;
+use tokio::sync::mpsc;
+use tokio::time::{timeout, Duration};
 
-import os
-import sys
-import argparse
-import threading
-import queue
-import tempfile
-import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import sh
+#[derive(Parser, Clone)]
+#[command(about = "Convert text to speech using UnrealSpeech API")]
+struct Args {
+    /// Voice ID (Scarlett, Dan, Liv, Will, Amy, etc.)
+    #[arg(short = 'v', long = "voice-id", default_value = "Liv")]
+    voice_id: String,
 
-# Monkey patch to avoid playsound import issue
-sys.modules['playsound'] = type(sys)('playsound')
-sys.modules['playsound'].playsound = lambda x: None
+    /// Bitrate (320k, 256k, 192k, 128k, 64k, 32k)
+    #[arg(short = 'b', long = "bitrate", default_value = "320k")]
+    bitrate: String,
 
-import unrealspeech
+    /// Speed (-1.0 to 1.0, 0=normal)
+    #[arg(short = 's', long = "speed", default_value = "0.0")]
+    speed: f32,
 
-def parse_args():
-    parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-v', '--voice-id', default='Liv',
-                       help='Voice ID (Scarlett, Dan, Liv, Will, Amy, etc.)')
-    parser.add_argument('-b', '--bitrate', default='320k',
-                       help='Bitrate (320k, 256k, 192k, 128k, 64k, 32k)')
-    parser.add_argument('-s', '--speed', type=float, default=0.0,
-                       help='Speed (-1.0 to 1.0, 0=normal)')
-    parser.add_argument('-p', '--pitch', type=float, default=1.0,
-                       help='Pitch (0.5 to 1.5)')
-    parser.add_argument('-c', '--codec', default='pcm_s16le',
-                       help='Codec (pcm_s16le, libmp3lame, pcm_mulaw)')
-    parser.add_argument('-t', '--temperature', type=float, default=0.25,
-                       help='Temperature (0.1 to 1.0)')
-    parser.add_argument('text', nargs='*', help='Text to synthesize')
-    return parser.parse_args()
+    /// Pitch (0.5 to 1.5)
+    #[arg(short = 'p', long = "pitch", default_value = "1.0")]
+    pitch: f32,
 
-def split_at_sentence_boundary(text, max_length=500):
-    """Split text at sentence boundary, keeping first chunk under max_length"""
-    if len(text) <= max_length:
-        return text, ""
+    /// Codec (pcm_s16le, libmp3lame, pcm_mulaw)
+    #[arg(short = 'c', long = "codec", default_value = "pcm_s16le")]
+    codec: String,
 
-    # Find last sentence ending before max_length
-    truncated = text[:max_length]
-    last_punct = max(truncated.rfind('.'), truncated.rfind('!'), truncated.rfind('?'))
+    /// Temperature (0.1 to 1.0)
+    #[arg(short = 't', long = "temperature", default_value = "0.25")]
+    temperature: f32,
 
-    if last_punct > 0:
-        split_point = last_punct + 1
-        return text[:split_point].strip(), text[split_point:].strip()
+    /// Text to synthesize
+    text: Vec<String>,
+}
 
-    # Fallback to word boundary
-    words = text[:max_length].split()
-    if len(words) > 1:
-        first_part = ' '.join(words[:-1])
-        remaining = text[len(first_part):].strip()
-        return first_part, remaining
+#[derive(Serialize)]
+struct StreamRequest {
+    #[serde(rename = "Text")]
+    text: String,
+    #[serde(rename = "VoiceId")]
+    voice_id: String,
+    #[serde(rename = "Bitrate")]
+    bitrate: String,
+    #[serde(rename = "Speed")]
+    speed: f32,
+    #[serde(rename = "Pitch")]
+    pitch: f32,
+    #[serde(rename = "Codec")]
+    codec: String,
+    #[serde(rename = "Temperature")]
+    temperature: f32,
+}
 
-    return text[:max_length], text[max_length:]
+#[derive(Serialize)]
+struct SpeechRequest {
+    #[serde(rename = "Text")]
+    text: String,
+    #[serde(rename = "VoiceId")]
+    voice_id: String,
+    #[serde(rename = "Bitrate")]
+    bitrate: String,
+    #[serde(rename = "Speed")]
+    speed: f32,
+    #[serde(rename = "Pitch")]
+    pitch: f32,
+}
 
-def split_text_into_chunks(text, max_length=3000):
-    """Split text into chunks at sentence boundaries"""
-    chunks = []
-    current_chunk = ""
+#[derive(Deserialize)]
+struct SpeechResponse {
+    #[serde(rename = "OutputUri")]
+    output_uri: Option<String>,
+}
 
-    sentences = re.split(r'(?<=[.!?])\s+', text)
+#[derive(Clone)]
+struct UnrealSpeechClient {
+    client: reqwest::Client,
+    api_key: String,
+}
 
-    for sentence in sentences:
-        if len(current_chunk) + len(sentence) + 1 <= max_length:
-            if current_chunk:
-                current_chunk += " " + sentence
-            else:
-                current_chunk = sentence
-        else:
-            if current_chunk:
-                chunks.append(current_chunk)
-                current_chunk = sentence
-            else:
-                # Single sentence longer than max_length
-                chunks.append(sentence)
+impl UnrealSpeechClient {
+    fn new(api_key: String) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            api_key,
+        }
+    }
 
-    if current_chunk:
-        chunks.append(current_chunk)
+    async fn stream(&self, request: &StreamRequest) -> Result<Vec<u8>> {
+        let response = self
+            .client
+            .post("https://api.v7.unrealspeech.com/stream")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(request)
+            .send()
+            .await?;
 
-    return chunks
-
-def synthesize_stream(client, text, options):
-    """Synthesize using stream endpoint"""
-    return client.stream(
-        text,
-        voice_id=options.voice_id,
-        bitrate=options.bitrate,
-        speed=options.speed,
-        pitch=options.pitch,
-        codec=options.codec,
-        temperature=options.temperature
-    )
-
-def synthesize_speech(client, text, options):
-    """Synthesize using speech endpoint (returns URL)"""
-    response = client.speech(
-        text,
-        voice_id=options.voice_id,
-        bitrate=options.bitrate,
-        speed=options.speed,
-        pitch=options.pitch
-    )
-    return response.get('OutputUri')
-
-def play_audio_data(audio_data, audio_format='mp3'):
-    """Play audio data using system play command"""
-    with tempfile.NamedTemporaryFile(suffix=f'.{audio_format}', delete=False) as f:
-        f.write(audio_data)
-        f.flush()
-        try:
-            sh.play(f.name, _out='/dev/null', _err='/dev/null')
-        except:
-            pass
-        os.unlink(f.name)
-
-def play_audio_url(url):
-    """Play audio from URL using system play command"""
-    try:
-        sh.play(url, _out='/dev/null', _err='/dev/null')
-    except:
-        pass
-
-# Parse arguments
-args = parse_args()
-
-if not os.getenv('UNREALSPEECH_API_KEY'):
-    print("Error: UNREALSPEECH_API_KEY environment variable not set", file=sys.stderr)
-    sys.exit(1)
-
-# Get text from args or stdin
-if args.text:
-    text = ' '.join(args.text)
-else:
-    text = sys.stdin.read().strip()
-
-if not text:
-    print("Error: No text provided", file=sys.stderr)
-    sys.exit(1)
-
-client = unrealspeech.UnrealSpeechAPI(api_key=os.getenv('UNREALSPEECH_API_KEY'))
-
-# Check if stdout is a pipe (not a TTY)
-is_piped = not sys.stdout.isatty()
-
-if is_piped:
-    # Output raw audio to stdout when piped
-    try:
-        audio_data = synthesize_stream(client, text, args)
-        sys.stdout.buffer.write(audio_data)
-        sys.stdout.buffer.flush()
-    except Exception as e:
-        print(f"Error synthesizing audio: {e}", file=sys.stderr)
-        sys.exit(1)
-    sys.exit(0)
-
-# Original streaming playback behavior for TTY
-# Split text into immediate stream part and remaining chunks
-first_chunk, remaining_text = split_at_sentence_boundary(text, 500)
-
-# Queue for sequential playback
-playback_queue = queue.Queue()
-
-def background_processor():
-    """Process remaining chunks in background"""
-    if not remaining_text:
-        return
-
-    chunks = split_text_into_chunks(remaining_text, 3000)
-
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        # Submit all chunks for processing
-        future_to_chunk = {
-            executor.submit(synthesize_speech, client, chunk, args): i
-            for i, chunk in enumerate(chunks)
+        if !response.status().is_success() {
+            return Err(anyhow!("API request failed: {}", response.status()));
         }
 
-        # Collect results in order
-        results = [None] * len(chunks)
-        for future in as_completed(future_to_chunk):
-            chunk_index = future_to_chunk[future]
-            try:
-                url = future.result()
-                results[chunk_index] = url
-            except Exception as e:
-                print(f"Error processing chunk {chunk_index}: {e}", file=sys.stderr)
+        let bytes = response.bytes().await?;
+        Ok(bytes.to_vec())
+    }
 
-        # Queue results in order
-        for url in results:
-            if url:
-                playback_queue.put(url)
+    async fn speech(&self, request: &SpeechRequest) -> Result<Option<String>> {
+        let response = self
+            .client
+            .post("https://api.v7.unrealspeech.com/speech")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(request)
+            .send()
+            .await?;
 
-    playback_queue.put(None)  # Signal end
+        if !response.status().is_success() {
+            return Err(anyhow!("API request failed: {}", response.status()));
+        }
 
-# Start background processing
-bg_thread = threading.Thread(target=background_processor)
-bg_thread.daemon = True
-bg_thread.start()
+        let speech_response: SpeechResponse = response.json().await?;
+        Ok(speech_response.output_uri)
+    }
+}
 
-# Stream and play first chunk immediately
-try:
-    first_audio = synthesize_stream(client, first_chunk, args)
-    play_audio_data(first_audio, 'mp3')
-except Exception as e:
-    print(f"Error streaming first chunk: {e}", file=sys.stderr)
-    sys.exit(1)
+fn split_at_sentence_boundary(text: &str, max_length: usize) -> (String, String) {
+    if text.len() <= max_length {
+        return (text.to_string(), String::new());
+    }
 
-# Play remaining chunks as they become available
+    let truncated = &text[..max_length];
+    let last_punct = ['.', '!', '?']
+        .iter()
+        .map(|&c| truncated.rfind(c))
+        .filter_map(|pos| pos)
+        .max();
 
-while True:
-    try:
-        url = playback_queue.get(timeout=30)
-        if url is None:  # End signal
-            break
-        play_audio_url(url)
-    except queue.Empty:
-        print("Timeout waiting for background processing", file=sys.stderr)
-        break
-    except Exception as e:
-        print(f"Error playing audio: {e}", file=sys.stderr)
+    if let Some(pos) = last_punct {
+        let split_point = pos + 1;
+        return (
+            text[..split_point].trim().to_string(),
+            text[split_point..].trim().to_string(),
+        );
+    }
 
-bg_thread.join(timeout=1)
+    // Fallback to word boundary
+    let words: Vec<&str> = truncated.split_whitespace().collect();
+    if words.len() > 1 {
+        let first_part = words[..words.len() - 1].join(" ");
+        let remaining = text[first_part.len()..].trim().to_string();
+        return (first_part, remaining);
+    }
+
+    (text[..max_length].to_string(), text[max_length..].to_string())
+}
+
+fn split_text_into_chunks(text: &str, max_length: usize) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut current_chunk = String::new();
+
+    let sentence_re = Regex::new(r"(?<=[.!?])\s+").unwrap();
+    let sentences: Vec<&str> = sentence_re.split(text).collect();
+
+    for sentence in sentences {
+        if current_chunk.len() + sentence.len() + 1 <= max_length {
+            if !current_chunk.is_empty() {
+                current_chunk.push(' ');
+            }
+            current_chunk.push_str(sentence);
+        } else {
+            if !current_chunk.is_empty() {
+                chunks.push(current_chunk.clone());
+                current_chunk = sentence.to_string();
+            } else {
+                // Single sentence longer than max_length
+                chunks.push(sentence.to_string());
+            }
+        }
+    }
+
+    if !current_chunk.is_empty() {
+        chunks.push(current_chunk);
+    }
+
+    chunks
+}
+
+async fn play_audio_data(audio_data: &[u8]) -> Result<()> {
+    let (_stream, stream_handle) = OutputStream::try_default()?;
+    let sink = Sink::try_new(&stream_handle)?;
+    
+    let cursor = Cursor::new(audio_data.to_vec());
+    let source = Decoder::new(cursor)?;
+    
+    sink.append(source);
+    sink.sleep_until_end();
+    
+    Ok(())
+}
+
+async fn play_audio_url(url: &str) -> Result<()> {
+    let response = reqwest::get(url).await?;
+    let audio_data = response.bytes().await?;
+    
+    play_audio_data(&audio_data).await
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+
+    let api_key = env::var("UNREALSPEECH_API_KEY")
+        .map_err(|_| anyhow!("UNREALSPEECH_API_KEY environment variable not set"))?;
+
+    // Get text from args or stdin
+    let text = if !args.text.is_empty() {
+        args.text.join(" ")
+    } else {
+        let mut buffer = String::new();
+        io::stdin().read_to_string(&mut buffer)?;
+        buffer.trim().to_string()
+    };
+
+    if text.is_empty() {
+        return Err(anyhow!("No text provided"));
+    }
+
+    let client = UnrealSpeechClient::new(api_key);
+
+    // Check if stdout is a pipe (not a TTY)
+    let is_piped = !atty::is(atty::Stream::Stdout);
+
+    if is_piped {
+        // Output raw audio to stdout when piped
+        let request = StreamRequest {
+            text,
+            voice_id: args.voice_id,
+            bitrate: args.bitrate,
+            speed: args.speed,
+            pitch: args.pitch,
+            codec: args.codec,
+            temperature: args.temperature,
+        };
+
+        let audio_data = client.stream(&request).await?;
+        io::stdout().write_all(&audio_data)?;
+        io::stdout().flush()?;
+        return Ok(());
+    }
+
+    // Original streaming playback behavior for TTY
+    let (first_chunk, remaining_text) = split_at_sentence_boundary(&text, 500);
+
+    // Channel for sequential playback
+    let (tx, mut rx) = mpsc::unbounded_channel::<Option<String>>();
+
+    // Start background processing
+    if !remaining_text.is_empty() {
+        let client_clone = client.clone();
+        let args_clone = args.clone();
+        let remaining_text_clone = remaining_text.clone();
+        let tx_clone = tx.clone();
+
+        tokio::spawn(async move {
+            let chunks = split_text_into_chunks(&remaining_text_clone, 3000);
+
+            // Create futures for all chunks
+            let futures: Vec<_> = chunks
+                .into_iter()
+                .enumerate()
+                .map(|(i, chunk)| {
+                    let client = client_clone.clone();
+                    let args = args_clone.clone();
+                    async move {
+                        let request = SpeechRequest {
+                            text: chunk,
+                            voice_id: args.voice_id,
+                            bitrate: args.bitrate,
+                            speed: args.speed,
+                            pitch: args.pitch,
+                        };
+                        (i, client.speech(&request).await)
+                    }
+                })
+                .collect();
+
+            // Execute all futures concurrently
+            let results = join_all(futures).await;
+
+            // Sort results by index and send in order
+            let mut sorted_results: Vec<_> = results.into_iter().collect();
+            sorted_results.sort_by_key(|(i, _)| *i);
+
+            for (_, result) in sorted_results {
+                match result {
+                    Ok(Some(url)) => {
+                        if tx_clone.send(Some(url)).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(None) => {
+                        eprintln!("Warning: No URL returned for chunk");
+                    }
+                    Err(e) => {
+                        eprintln!("Error processing chunk: {}", e);
+                    }
+                }
+            }
+
+            let _ = tx_clone.send(None); // Signal end
+        });
+    } else {
+        let _ = tx.send(None); // No remaining text, signal end immediately
+    }
+
+    // Stream and play first chunk immediately
+    let first_request = StreamRequest {
+        text: first_chunk,
+        voice_id: args.voice_id.clone(),
+        bitrate: args.bitrate.clone(),
+        speed: args.speed,
+        pitch: args.pitch,
+        codec: args.codec,
+        temperature: args.temperature,
+    };
+
+    match client.stream(&first_request).await {
+        Ok(first_audio) => {
+            if let Err(e) = play_audio_data(&first_audio).await {
+                eprintln!("Error playing first chunk: {}", e);
+            }
+        }
+        Err(e) => {
+            eprintln!("Error streaming first chunk: {}", e);
+            std::process::exit(1);
+        }
+    }
+
+    // Play remaining chunks as they become available
+    while let Some(url_opt) = timeout(Duration::from_secs(30), rx.recv()).await.ok().flatten() {
+        match url_opt {
+            Some(url) => {
+                if let Err(e) = play_audio_url(&url).await {
+                    eprintln!("Error playing audio: {}", e);
+                }
+            }
+            None => break, // End signal
+        }
+    }
+
+    Ok(())
+}

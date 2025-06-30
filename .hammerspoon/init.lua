@@ -11,10 +11,6 @@ spoon.SpoonInstall:andUse("ReloadConfiguration", {
 })
 spoon.ReloadConfiguration:start()
 
-spoon.SpoonInstall:andUse("WinWin", {
-  repo = "default",
-})
-
 local function toggleDarkMode()
 	hs.osascript.applescript([[
         tell application "System Events"
