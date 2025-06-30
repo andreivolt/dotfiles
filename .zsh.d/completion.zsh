@@ -50,7 +50,7 @@ zstyle -e ':completion:*' completer '
     ;;
     *)
       _last_try="$HISTNO$BUFFER$CURSOR"
-      reply=(_expand_alias _complete _prefix)
+      reply=(_complete _expand_alias _prefix)
     ;;
   esac
 '

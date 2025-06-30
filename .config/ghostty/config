@@ -24,10 +24,10 @@ adjust-cell-width = -10%
 
 font-size = 18
 
-background-opacity = 0.8
+background-opacity = 0.75
 background-blur-radius = 18
 
-theme = IR_Black
+theme = aurora
 foreground = #dddddd
 background = #000000
 

@@ -19,11 +19,16 @@
 vim.api.nvim_exec([[syn match URL /http[s]\?:\/\/[[:alnum:]%\/_#.-]*/ containedin=ALL]], false)
 vim.api.nvim_set_hl(0, "URL", { underline = true, fg = "skyblue" })
 
-vim.cmd("colorscheme github_dark_default")
+vim.cmd("colorscheme aurora")
 
 vim.api.nvim_create_autocmd("ColorScheme", {
   pattern = "*",
   callback = function()
+    -- Make Normal background transparent
+    vim.api.nvim_set_hl(0, "Normal", { bg = "NONE" })
+    vim.api.nvim_set_hl(0, "NormalFloat", { bg = "NONE" })
+    
+    -- Handle EndOfBuffer coloring
     local normal_hl = vim.api.nvim_get_hl(0, { name = "Normal" })
     if normal_hl.bg then
       local bg_color = string.format("#%06x", normal_hl.bg)
@@ -36,3 +41,7 @@ vim.api.nvim_create_autocmd("ColorScheme", {
     end
   end,
 })
+
+-- Apply transparent background to current colorscheme
+vim.api.nvim_set_hl(0, "Normal", { bg = "NONE" })
+vim.api.nvim_set_hl(0, "NormalFloat", { bg = "NONE" })
