@@ -1,85 +1,90 @@
-#!/usr/bin/env -S uv run --script --quiet
-"""Create SSH tunnels for port forwarding."""
-# /// script
-# dependencies = [
-#   "sh",
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! clap = { version = "4", features = ["derive"] }
+//! tokio = { version = "1", features = ["full"] }
+//! rand = "0.8"
+//! anyhow = "1.0"
+//! ```
 
+use anyhow::Result;
+use clap::Parser;
+use rand::Rng;
+use std::process::Stdio;
+use tokio::process::Command;
+use tokio::signal;
+use tokio::time::{sleep, Duration};
 
-import argparse
-from sh import pgrep, ssh
-import time
-import random
-import sys
-import signal
+#[derive(Parser)]
+#[command(about = "Create SSH tunnels for port forwarding")]
+struct Args {
+    #[arg(short, long)]
+    local_port: u16,
+    #[arg(short, long)]
+    remote_port: u16,
+    #[arg(short, long)]
+    username: Option<String>,
+    #[arg(short = 'H', long)]
+    remote_host: String,
+    #[arg(short, long)]
+    identity_file: Option<String>,
+}
 
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
 
-def create_tunnel(local_port, remote_port, username, remote_host, identity_file=None):
-    random_port = random.randint(30000, 59999)
+    tokio::select! {
+        _ = signal::ctrl_c() => {
+            println!("\nShutting down tunnel...");
+        }
+        _ = async {
+            loop {
+                match run_tunnel(&args).await {
+                    Ok(_) => {
+                        println!("Tunnel disconnected. Restarting in 5s...");
+                        sleep(Duration::from_secs(5)).await;
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {}. Restarting in 5s...", e);
+                        sleep(Duration::from_secs(5)).await;
+                    }
+                }
+            }
+        } => {}
+    }
 
-    ssh_cmd = ["ssh"]
-    if identity_file:
-        ssh_cmd.extend(["-i", identity_file])
+    Ok(())
+}
 
-    ssh_cmd.extend([
-        "-R", f"{random_port}:localhost:{local_port}",
-        f"{username}@{remote_host}",
-        f"socat TCP-LISTEN:{remote_port},fork,reuseaddr TCP:localhost:{random_port}"
-    ])
+async fn run_tunnel(args: &Args) -> Result<()> {
+    let random_port: u16 = rand::thread_rng().gen_range(30000..60000);
+    let target = match &args.username {
+        Some(user) => format!("{}@{}", user, args.remote_host),
+        None => args.remote_host.clone(),
+    };
 
-    return ssh_cmd, random_port
+    println!("Starting tunnel: localhost:{} -> {}:{}",
+             args.local_port, target, args.remote_port);
 
-def is_tunnel_running(random_port, local_port):
-    try:
-        pgrep("-f", f"ssh.*-R {random_port}:localhost:{local_port}")
-        return True
-    except sh.ErrorReturnCode:
-        return False
+    let reverse_arg = format!("{}:localhost:{}", random_port, args.local_port);
+    let socat_cmd = format!("socat TCP-LISTEN:{},fork,reuseaddr TCP:localhost:{}",
+                           args.remote_port, random_port);
 
-parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("-l", "--local-port", type=int, required=True,
-                    help="Local port to be forwarded")
-parser.add_argument("-r", "--remote-port", type=int, required=True,
-                    help="Remote port on the server")
-parser.add_argument("-u", "--username", required=True,
-                    help="Remote server username")
-parser.add_argument("-H", "--remote-host", required=True,
-                    help="Remote server host")
-parser.add_argument("-i", "--identity-file",
-                    help="SSH identity file")
+    let mut ssh_args = vec!["-R", &reverse_arg, &target, &socat_cmd];
 
-args = parser.parse_args()
+    if let Some(identity) = &args.identity_file {
+        ssh_args.insert(0, identity);
+        ssh_args.insert(0, "-i");
+    }
 
-ssh_cmd, random_port = create_tunnel(
-    args.local_port, args.remote_port, args.username,
-    args.remote_host, args.identity_file
-)
+    let mut child = Command::new("ssh")
+        .args(&ssh_args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    
+    child.wait().await?;
 
-print(f"Starting tunnel: {' '.join(ssh_cmd)}")
-
-def signal_handler(sig, frame):
-    print("\nShutting down tunnel...")
-    sys.exit(0)
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-
-process = None
-
-try:
-    while True:
-        if process is None or not is_tunnel_running(random_port, args.local_port):
-            if process:
-                print("SSH tunnel disconnected. Restarting...")
-                process.terminate()
-
-            process = ssh(*ssh_cmd[1:], _bg=True)
-            time.sleep(5)
-
-        time.sleep(60)
-
-except KeyboardInterrupt:
-    if process:
-        process.terminate()
-    print("\nTunnel stopped.")
+    Ok(())
+}

@@ -12,16 +12,18 @@
 //! dirs = "5"
 //! sha2 = "0.10"
 //! hex = "0.4"
-//! comfy-table = "7.1"
-//! scraper = "0.20"
+//! html2text = "0.12"
+//! html-escape = "0.2"
+//! regex = "1"
 //! ```
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local, TimeZone, Utc};
 use clap::Parser;
-use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Table};
+use html2text::from_read;
+use html_escape;
+use regex::Regex;
 use roux::Subreddit;
-use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -152,162 +154,44 @@ fn clear_cache() -> Result<()> {
 }
 
 fn clean_comment_text(text: &str) -> String {
-    // Parse HTML using scraper and extract meaningful content
-    let document = Html::parse_fragment(text);
-    let mut result = String::new();
+    // First unescape HTML entities, then convert HTML to plain text
+    let unescaped = html_escape::decode_html_entities(text);
+    let converted = from_read(unescaped.as_bytes(), 120);
     
+    // Replace blockquotes
+    let mut result = converted.replace("> ", "│ ");
     
-    // Handle tables first
-    let table_selector = Selector::parse("table").unwrap();
-    for table in document.select(&table_selector) {
-        let unicode_table = render_html_table_to_unicode(&table.html());
-        result.push_str(&unicode_table);
-        result.push('\n');
+    // Remove markdown reference links
+    let re_refs = Regex::new(r"\n\n\[\d+\]:.*").unwrap();
+    result = re_refs.replace_all(&result, "").to_string();
+    
+    // Convert markdown links to plain text
+    // [text][num] -> text
+    let re_ref_links = Regex::new(r"\[([^\]]+)\]\[\d+\]").unwrap();
+    result = re_ref_links.replace_all(&result, "$1").to_string();
+    
+    // [text](url) -> text
+    let re_inline_links = Regex::new(r"\[([^\]]+)\]\([^)]+\)").unwrap();
+    result = re_inline_links.replace_all(&result, "$1").to_string();
+    
+    // Convert numbered lists to avoid tree-render converting them back to HTML
+    let re_numbered = Regex::new(r"^(\d+)\. ").unwrap();
+    let mut lines = Vec::new();
+    for line in result.lines() {
+        lines.push(re_numbered.replace(line, "[$1] ").to_string());
     }
     
-    // Handle ordered lists
-    let ol_selector = Selector::parse("ol").unwrap();
-    for ol in document.select(&ol_selector) {
-        let formatted_list = render_html_list_to_text(&ol.html(), true);
-        result.push_str(&formatted_list);
-        result.push('\n');
-    }
+    let mut final_result = lines.join("\n");
     
-    // Handle unordered lists  
-    let ul_selector = Selector::parse("ul").unwrap();
-    for ul in document.select(&ul_selector) {
-        let formatted_list = render_html_list_to_text(&ul.html(), false);
-        result.push_str(&formatted_list);
-        result.push('\n');
-    }
+    // Remove any remaining HTML tags that might slip through
+    let re_html = Regex::new(r"<[^>]*>").unwrap();
+    final_result = re_html.replace_all(&final_result, "").to_string();
     
-    // Handle paragraphs and other text content (but skip those inside lists/tables)
-    let p_selector = Selector::parse("p").unwrap();
-    for p in document.select(&p_selector) {
-        // Skip paragraphs that are inside list items
-        let mut is_inside_list = false;
-        let mut parent = p.parent();
-        while let Some(parent_node) = parent {
-            if let Some(parent_element) = parent_node.value().as_element() {
-                if parent_element.name() == "li" || parent_element.name() == "ol" || parent_element.name() == "ul" {
-                    is_inside_list = true;
-                    break;
-                }
-            }
-            parent = parent_node.parent();
-        }
-        
-        if !is_inside_list {
-            let text_content = p.text().collect::<Vec<_>>().join(" ").trim().to_string();
-            if !text_content.is_empty() {
-                result.push_str(&text_content);
-                result.push('\n');
-            }
-        }
-    }
+    // Keep beautiful unicode table characters now that tree-render is fixed
     
-    // Handle blockquotes
-    let blockquote_selector = Selector::parse("blockquote").unwrap();
-    for blockquote in document.select(&blockquote_selector) {
-        let text_content = blockquote.text().collect::<Vec<_>>().join(" ").trim().to_string();
-        if !text_content.is_empty() {
-            result.push_str("> ");
-            result.push_str(&text_content);
-            result.push('\n');
-        }
-    }
-    
-    // If no structured content was found, fall back to extracting all text
-    if result.trim().is_empty() {
-        result = document.root_element().text().collect::<Vec<_>>().join(" ");
-    }
-    
-    // Clean up excessive whitespace while preserving intentional line breaks
-    let lines: Vec<&str> = result.lines().collect();
-    let mut cleaned_lines = Vec::new();
-    
-    for line in lines {
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            cleaned_lines.push(trimmed);
-        } else if !cleaned_lines.is_empty() && !cleaned_lines.last().unwrap().is_empty() {
-            // Preserve single empty lines but not multiple consecutive ones
-            cleaned_lines.push("");
-        }
-    }
-    
-    // Remove trailing empty lines
-    while cleaned_lines.last() == Some(&"") {
-        cleaned_lines.pop();
-    }
-    
-    // Remove leading empty lines  
-    while cleaned_lines.first() == Some(&"") {
-        cleaned_lines.remove(0);
-    }
-    
-    cleaned_lines.join("\n")
+    final_result
 }
 
-fn render_html_table_to_unicode(html: &str) -> String {
-    let document = Html::parse_fragment(html);
-    let tr_selector = Selector::parse("tr").unwrap();
-    let td_selector = Selector::parse("td, th").unwrap();
-    
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    
-    for tr in document.select(&tr_selector) {
-        let mut row = Vec::new();
-        for cell in tr.select(&td_selector) {
-            row.push(cell.text().collect::<Vec<_>>().join(" ").trim().to_string());
-        }
-        if !row.is_empty() {
-            rows.push(row);
-        }
-    }
-    
-    if rows.is_empty() {
-        return html.to_string();
-    }
-    
-    // Create unicode table using comfy-table
-    let mut table = Table::new();
-    table.load_preset(UTF8_FULL);
-    table.apply_modifier(UTF8_ROUND_CORNERS);
-    
-    for (i, row) in rows.iter().enumerate() {
-        if i == 0 {
-            // First row as header
-            table.set_header(row);
-        } else {
-            table.add_row(row);
-        }
-    }
-    
-    table.to_string()
-}
-
-fn render_html_list_to_text(html: &str, ordered: bool) -> String {
-    let document = Html::parse_fragment(html);
-    let li_selector = Selector::parse("li").unwrap();
-    
-    let mut result = String::new();
-    let mut counter = 1;
-    
-    for li in document.select(&li_selector) {
-        let text = li.text().collect::<Vec<_>>().join(" ").trim().to_string();
-        if !text.is_empty() {
-            if ordered {
-                result.push_str(&format!("[{}] {}\n", counter, text));
-                counter += 1;
-            } else {
-                result.push_str(&format!("• {}\n", text));
-            }
-        }
-    }
-    
-    result.trim_end().to_string()
-}
 
 fn get_submission_and_comment_id(url: &str) -> Result<(String, Option<String>)> {
     let parsed = Url::parse(url)?;
@@ -343,19 +227,8 @@ fn parse_comment_to_tree(comment: &Value) -> Option<CommentTree> {
         return None;
     }
     
-    // Use body_html field which contains the actual HTML content
-    let body = if let Some(body_html) = data.get("body_html").and_then(|v| v.as_str()) {
-        // Decode HTML entities from the body_html field
-        body_html
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&amp;", "&")
-            .replace("&quot;", "\"")
-            .replace("&#39;", "'")
-    } else {
-        // Fallback to regular body field
-        data.get("body")?.as_str()?.to_string()
-    };
+    // Use body_html field which contains HTML that we can convert to text
+    let body = data.get("body_html")?.as_str()?.to_string();
     
     if body.is_empty() || body == "[deleted]" || body == "[removed]" {
         return None;
@@ -404,22 +277,11 @@ fn parse_comment_to_json(comment: &Value) -> CommentJson {
         .and_then(|a| a.as_str())
         .unwrap_or("[deleted]")
         .to_string();
-    // Use body_html field which contains the actual HTML content
-    let body = if let Some(body_html) = data.get("body_html").and_then(|v| v.as_str()) {
-        // Decode HTML entities from the body_html field
-        body_html
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&amp;", "&")
-            .replace("&quot;", "\"")
-            .replace("&#39;", "'")
-    } else {
-        // Fallback to regular body field
-        data.get("body")
-            .and_then(|b| b.as_str())
-            .unwrap_or("")
-            .to_string()
-    };
+    // Use body_html field which contains HTML that we can convert to text
+    let body = data.get("body_html")
+        .and_then(|b| b.as_str())
+        .unwrap_or("")
+        .to_string();
     let score = data.get("score")
         .and_then(|s| s.as_i64())
         .unwrap_or(0);
