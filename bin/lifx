@@ -379,7 +379,7 @@ impl LifxController {
         if !self.brightness_memory_file.exists() {
             return None;
         }
-        
+
         let data = std::fs::read_to_string(&self.brightness_memory_file).ok()?;
         let memory: HashMap<u64, u16> = serde_json::from_str(&data).ok()?;
         memory.get(&target).copied()
@@ -427,21 +427,21 @@ impl LifxController {
             for light in lights {
                 let device = LifxDevice::new(light.target, light.ip_addr)?;
                 let brightness = self.get_remembered_brightness(light.target).unwrap_or(65535);
-                
+
                 let current_color = self.get_light_color(&device).await.unwrap_or(HSBK {
                     hue: 0,
                     saturation: 0,
                     brightness: 65535,
                     kelvin: 3500,
                 });
-                
+
                 let restored_color = HSBK {
                     hue: current_color.hue,
                     saturation: current_color.saturation,
                     brightness,
                     kelvin: current_color.kelvin,
                 };
-                
+
                 let message = Message::LightSetColor {
                     reserved: 0,
                     color: restored_color,
@@ -449,7 +449,7 @@ impl LifxController {
                 };
                 device.send_message(message)
                     .with_context(|| format!("Failed to turn on {}", light.label))?;
-                    
+
                 println!("{}: on", light.label);
             }
         } else {
@@ -461,29 +461,29 @@ impl LifxController {
             } else {
                 HashMap::new()
             };
-            
+
             for light in lights {
                 let device = LifxDevice::new(light.target, light.ip_addr)?;
-                
+
                 let current_color = self.get_light_color(&device).await.unwrap_or(HSBK {
                     hue: 0,
                     saturation: 0,
                     brightness: 65535,
                     kelvin: 3500,
                 });
-                
+
                 // Save brightness if not already 0
                 if current_color.brightness > 0 {
                     memory.insert(light.target, current_color.brightness);
                 }
-                
+
                 let off_color = HSBK {
                     hue: current_color.hue,
                     saturation: current_color.saturation,
                     brightness: 0,
                     kelvin: current_color.kelvin,
                 };
-                
+
                 let message = Message::LightSetColor {
                     reserved: 0,
                     color: off_color,
@@ -491,10 +491,10 @@ impl LifxController {
                 };
                 device.send_message(message)
                     .with_context(|| format!("Failed to turn off {}", light.label))?;
-                    
+
                 println!("{}: off", light.label);
             }
-            
+
             // Save memory file once
             let data = serde_json::to_string_pretty(&memory)
                 .context("Failed to serialize brightness memory")?;
