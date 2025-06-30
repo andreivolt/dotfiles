@@ -1,120 +1,571 @@
-#!/usr/bin/env -S uv run --script --quiet
-# /// script
-# dependencies = [
-#   "praw>=7.8",
-#   "rich>=13.0",
-#   "sh",
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! clap = { version = "4", features = ["derive"] }
+//! roux = "2"
+//! serde = { version = "1", features = ["derive"] }
+//! serde_json = "1"
+//! chrono = "0.4"
+//! url = "2"
+//! anyhow = "1"
+//! tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+//! dirs = "5"
+//! sha2 = "0.10"
+//! hex = "0.4"
+//! comfy-table = "7.1"
+//! scraper = "0.20"
+//! ```
 
-"""Fetch and display Reddit comments in a formatted view."""
+use anyhow::{anyhow, Result};
+use chrono::{DateTime, Local, TimeZone, Utc};
+use clap::Parser;
+use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Table};
+use roux::Subreddit;
+use scraper::{Html, Selector};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+use url::Url;
 
-import os
-import praw
-import argparse
-import json
-from urllib.parse import urlparse
-from pathlib import Path
-from datetime import datetime
-import sys
+#[derive(Parser)]
+#[command(about = "Fetch and display Reddit comments in a formatted view")]
+struct Args {
+    /// The Reddit submission or comment URL
+    url: Option<String>,
+    
+    /// Output the comment tree in JSON format
+    #[arg(long)]
+    json: bool,
+    
+    /// Clear the cache and exit
+    #[arg(long)]
+    clear_cache: bool,
+    
+    /// Skip cache and fetch fresh data
+    #[arg(short = 'x')]
+    skip_cache: bool,
+}
 
-def build_comment_tree_json(comment):
-    comment_data = {
-        'author': str(comment.author),
-        'body': comment.body,
-        'created_utc': datetime.fromtimestamp(comment.created_utc).isoformat(),
-        'score': comment.score,
-        'replies': []
+#[derive(Serialize)]
+struct CommentTree {
+    id: String,
+    author: String,
+    time: String,
+    text: String,
+    children: Vec<CommentTree>,
+}
+
+#[derive(Serialize)]
+struct CommentJson {
+    author: String,
+    body: String,
+    created_utc: String,
+    score: i64,
+    replies: Vec<CommentJson>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CacheEntry {
+    data: Value,
+    timestamp: i64,
+}
+
+fn get_cache_dir() -> Result<PathBuf> {
+    let cache_dir = dirs::cache_dir()
+        .ok_or_else(|| anyhow!("Could not determine cache directory"))?
+        .join("reddit-comments");
+    
+    if !cache_dir.exists() {
+        fs::create_dir_all(&cache_dir)?;
     }
+    
+    Ok(cache_dir)
+}
 
-    if hasattr(comment, 'replies'):
-        for reply in comment.replies:
-            comment_data['replies'].append(build_comment_tree_json(reply))
-
-    return comment_data
-
-def reddit_to_tree_format(comment):
-    """Convert Reddit comment to tree format expected by comment_tree library"""
-    # Skip deleted, removed, or empty comments
-    try:
-        if (not comment or
-            not hasattr(comment, 'author') or
-            not comment.author or
-            str(comment.author) in ['[deleted]', 'None'] or
-            not hasattr(comment, 'body') or
-            not comment.body or
-            comment.body.strip() in ['[deleted]', '[removed]', ''] or
-            not hasattr(comment, 'id') or
-            not comment.id):
-            return None
-    except:
-        return None
-
-    timestamp = datetime.fromtimestamp(comment.created_utc).strftime('%Y-%m-%d %H:%M')
-
-    comment_data = {
-        'id': comment.id,
-        'author': str(comment.author),
-        'time': timestamp,
-        'text': comment.body.strip(),
-        'children': []
+fn get_cache_key(submission_id: &str, comment_id: Option<&str>) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(submission_id.as_bytes());
+    if let Some(cid) = comment_id {
+        hasher.update(cid.as_bytes());
     }
+    hex::encode(hasher.finalize())
+}
 
-    if hasattr(comment, 'replies') and comment.replies:
-        for reply in comment.replies:
-            converted_reply = reddit_to_tree_format(reply)
-            if converted_reply:  # Only add non-None replies
-                comment_data['children'].append(converted_reply)
+fn get_cached_data(submission_id: &str, comment_id: Option<&str>) -> Result<Option<Value>> {
+    let cache_dir = get_cache_dir()?;
+    let cache_key = get_cache_key(submission_id, comment_id);
+    let cache_file = cache_dir.join(format!("{}.json", cache_key));
+    
+    if !cache_file.exists() {
+        return Ok(None);
+    }
+    
+    let cache_content = fs::read_to_string(&cache_file)?;
+    let cache_entry: CacheEntry = serde_json::from_str(&cache_content)?;
+    
+    // Check if cache is less than 1 hour old
+    let now = chrono::Utc::now().timestamp();
+    if now - cache_entry.timestamp < 3600 {
+        Ok(Some(cache_entry.data))
+    } else {
+        // Cache expired, remove it
+        let _ = fs::remove_file(&cache_file);
+        Ok(None)
+    }
+}
 
-    return comment_data
+fn save_to_cache(submission_id: &str, comment_id: Option<&str>, data: &Value) -> Result<()> {
+    let cache_dir = get_cache_dir()?;
+    let cache_key = get_cache_key(submission_id, comment_id);
+    let cache_file = cache_dir.join(format!("{}.json", cache_key));
+    
+    let cache_entry = CacheEntry {
+        data: data.clone(),
+        timestamp: chrono::Utc::now().timestamp(),
+    };
+    
+    let cache_content = serde_json::to_string(&cache_entry)?;
+    fs::write(&cache_file, cache_content)?;
+    
+    Ok(())
+}
 
-def get_submission_and_comment_id_from_url(url):
-    parsed_url = urlparse(url)
-    if 'reddit.com' in parsed_url.netloc or 'old.reddit.com' in parsed_url.netloc:
-        path_segments = parsed_url.path.split('/')
-        if len(path_segments) >= 6 and path_segments[3] == 'comments':
-            submission_id = path_segments[4]
-            comment_id = path_segments[6] if len(path_segments) >= 7 else None
-            return submission_id, comment_id
-    return None, None
+fn clear_cache() -> Result<()> {
+    let cache_dir = get_cache_dir()?;
+    
+    if cache_dir.exists() {
+        for entry in fs::read_dir(&cache_dir)? {
+            let entry = entry?;
+            if entry.path().extension().map(|s| s == "json").unwrap_or(false) {
+                fs::remove_file(entry.path())?;
+            }
+        }
+        println!("Cache cleared successfully");
+    } else {
+        println!("No cache directory found");
+    }
+    
+    Ok(())
+}
 
-# Parse arguments
-parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('url', help='The Reddit submission or comment URL')
-parser.add_argument('--json', action='store_true', help='Output the comment tree in JSON format')
-args = parser.parse_args()
+fn render_html_table_to_unicode(html: &str) -> String {
+    // Extract table content using basic string parsing
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut current_row: Vec<String> = Vec::new();
+    let mut current_cell = String::new();
+    let mut in_table = false;
+    let mut in_row = false;
+    let mut in_cell = false;
+    
+    let mut chars = html.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '<' {
+            // Parse tag
+            let mut tag = String::new();
+            while let Some(ch) = chars.next() {
+                if ch == '>' {
+                    break;
+                }
+                tag.push(ch);
+            }
+            
+            match tag.to_lowercase().as_str() {
+                "table" => in_table = true,
+                "/table" => {
+                    if in_cell {
+                        current_row.push(current_cell.trim().to_string());
+                        current_cell.clear();
+                        in_cell = false;
+                    }
+                    if in_row && !current_row.is_empty() {
+                        rows.push(current_row.clone());
+                        current_row.clear();
+                        in_row = false;
+                    }
+                    in_table = false;
+                },
+                "tr" => {
+                    if in_table {
+                        in_row = true;
+                    }
+                },
+                "/tr" => {
+                    if in_cell {
+                        current_row.push(current_cell.trim().to_string());
+                        current_cell.clear();
+                        in_cell = false;
+                    }
+                    if in_row && !current_row.is_empty() {
+                        rows.push(current_row.clone());
+                        current_row.clear();
+                    }
+                    in_row = false;
+                },
+                "td" | "th" => {
+                    if in_row {
+                        in_cell = true;
+                    }
+                },
+                "/td" | "/th" => {
+                    if in_cell {
+                        current_row.push(current_cell.trim().to_string());
+                        current_cell.clear();
+                        in_cell = false;
+                    }
+                },
+                _ => {}
+            }
+        } else if in_cell {
+            current_cell.push(ch);
+        }
+    }
+    
+    if rows.is_empty() {
+        return html.to_string();
+    }
+    
+    // Create unicode table using comfy-table
+    let mut table = Table::new();
+    table.load_preset(UTF8_FULL);
+    table.apply_modifier(UTF8_ROUND_CORNERS);
+    
+    for (i, row) in rows.iter().enumerate() {
+        if i == 0 {
+            // First row as header
+            table.set_header(row);
+        } else {
+            table.add_row(row);
+        }
+    }
+    
+    table.to_string()
+}
 
-submission_id, comment_id = get_submission_and_comment_id_from_url(args.url)
-if not submission_id:
-    print("Invalid submission or comment URL.")
-    sys.exit(1)
+fn clean_comment_text(text: &str) -> String {
+    let mut result = text.to_string();
+    
+    // First convert HTML entities
+    result = result
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+        .replace("&#39;", "'");
+    
+    // Handle HTML tables - convert to unicode tables
+    while let Some(table_start) = result.find("<table>") {
+        if let Some(table_end) = result[table_start..].find("</table>") {
+            let table_html = &result[table_start..table_start + table_end + 8]; // +8 for "</table>"
+            let unicode_table = render_html_table_to_unicode(table_html);
+            result.replace_range(table_start..table_start + table_end + 8, &unicode_table);
+        } else {
+            break;
+        }
+    }
+    
+    // Handle ordered lists - convert to numbered list with proper line breaks  
+    let mut list_counter = 1;
+    while let Some(ol_start) = result.find("<ol>") {
+        if let Some(ol_end) = result[ol_start..].find("</ol>") {
+            let ol_content = &result[ol_start + 4..ol_start + ol_end]; // +4 for "<ol>"
+            let mut formatted_list = String::new();
+            
+            for item in ol_content.split("<li>") {
+                if let Some(li_end) = item.find("</li>") {
+                    let li_content = &item[..li_end].trim();
+                    if !li_content.is_empty() {
+                        formatted_list.push_str(&format!("{}. {}\n", list_counter, li_content));
+                        list_counter += 1;
+                    }
+                }
+            }
+            
+            result.replace_range(ol_start..ol_start + ol_end + 5, &formatted_list); // +5 for "</ol>"
+        } else {
+            break;
+        }
+        list_counter = 1; // Reset for next list
+    }
+    
+    // Handle unordered lists - convert to bullet list with proper line breaks
+    while let Some(ul_start) = result.find("<ul>") {
+        if let Some(ul_end) = result[ul_start..].find("</ul>") {
+            let ul_content = &result[ul_start + 4..ul_start + ul_end]; // +4 for "<ul>"
+            let mut formatted_list = String::new();
+            
+            for item in ul_content.split("<li>") {
+                if let Some(li_end) = item.find("</li>") {
+                    let li_content = &item[..li_end].trim();
+                    if !li_content.is_empty() {
+                        formatted_list.push_str(&format!("• {}\n", li_content));
+                    }
+                }
+            }
+            
+            result.replace_range(ul_start..ul_start + ul_end + 5, &formatted_list); // +5 for "</ul>"
+        } else {
+            break;
+        }
+    }
+    
+    // Handle basic HTML tags
+    result = result
+        .replace("<br>", "\n")
+        .replace("<br/>", "\n")
+        .replace("<br />", "\n")
+        .replace("<p>", "\n")
+        .replace("</p>", "\n");
+    
+    // Clean up excessive whitespace while preserving intentional line breaks
+    let lines: Vec<&str> = result.lines().collect();
+    let mut cleaned_lines = Vec::new();
+    
+    for line in lines {
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            cleaned_lines.push(trimmed);
+        } else if !cleaned_lines.is_empty() && !cleaned_lines.last().unwrap().is_empty() {
+            // Preserve single empty lines but not multiple consecutive ones
+            cleaned_lines.push("");
+        }
+    }
+    
+    // Remove trailing empty lines
+    while cleaned_lines.last() == Some(&"") {
+        cleaned_lines.pop();
+    }
+    
+    // Remove leading empty lines  
+    while cleaned_lines.first() == Some(&"") {
+        cleaned_lines.remove(0);
+    }
+    
+    cleaned_lines.join("\n")
+}
 
-reddit = praw.Reddit(
-    client_id=os.getenv('REDDIT_CLIENT_ID'),
-    client_secret=os.getenv('REDDIT_CLIENT_SECRET'),
-    user_agent='_',
-    username=os.getenv('REDDIT_USERNAME'),
-    password=os.getenv('REDDIT_PASSWORD')
-)
+fn get_submission_and_comment_id(url: &str) -> Result<(String, Option<String>)> {
+    let parsed = Url::parse(url)?;
+    
+    if let Some(host) = parsed.host_str() {
+        if host.contains("reddit.com") || host.contains("old.reddit.com") {
+            let segments: Vec<&str> = parsed.path_segments()
+                .ok_or_else(|| anyhow!("Invalid URL path"))?
+                .collect();
+            
+            // Handle /r/subreddit/comments/submission_id/title/comment_id format
+            if segments.len() >= 5 && segments[0] == "r" && segments[2] == "comments" {
+                let submission_id = segments[3].to_string();
+                let comment_id = if segments.len() >= 6 && !segments[5].is_empty() {
+                    Some(segments[5].to_string())
+                } else {
+                    None
+                };
+                return Ok((submission_id, comment_id));
+            }
+        }
+    }
+    
+    Err(anyhow!("Invalid Reddit URL"))
+}
 
-submission = reddit.submission(id=submission_id)
-submission.comments.replace_more(limit=None)
+fn parse_comment_to_tree(comment: &Value) -> Option<CommentTree> {
+    let data = comment.get("data")?;
+    
+    // Skip deleted/removed/empty comments
+    let author = data.get("author")?.as_str()?;
+    if author == "[deleted]" || author == "None" {
+        return None;
+    }
+    
+    let body = data.get("body")?.as_str()?;
+    if body.is_empty() || body == "[deleted]" || body == "[removed]" {
+        return None;
+    }
+    
+    let id = data.get("id")?.as_str()?;
+    let created_utc = data.get("created_utc")?.as_f64()?;
+    let timestamp = Utc.timestamp_opt(created_utc as i64, 0).single()?;
+    let local_time = DateTime::<Local>::from(timestamp);
+    
+    let mut children = Vec::new();
+    if let Some(replies) = data.get("replies") {
+        if let Some(replies_obj) = replies.as_object() {
+            if let Some(listing_data) = replies_obj.get("data") {
+                if let Some(listing_children) = listing_data.get("children") {
+                    if let Some(listing_array) = listing_children.as_array() {
+                        for reply in listing_array {
+                            if reply.get("kind").and_then(|k| k.as_str()) == Some("t1") {
+                                if let Some(child) = parse_comment_to_tree(reply) {
+                                    children.push(child);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    Some(CommentTree {
+        id: id.to_string(),
+        author: author.to_string(),
+        time: local_time.format("%Y-%m-%d %H:%M").to_string(),
+        text: clean_comment_text(body),
+        children,
+    })
+}
 
-if comment_id:
-    comment = reddit.comment(id=comment_id)
-    comment.refresh()
-    comments = [comment]
-else:
-    comments = submission.comments
+fn parse_comment_to_json(comment: &Value) -> CommentJson {
+    let data = &comment["data"];
+    
+    let author = data.get("author")
+        .and_then(|a| a.as_str())
+        .unwrap_or("[deleted]")
+        .to_string();
+    let body = data.get("body")
+        .and_then(|b| b.as_str())
+        .unwrap_or("")
+        .to_string();
+    let score = data.get("score")
+        .and_then(|s| s.as_i64())
+        .unwrap_or(0);
+    let created_utc = data.get("created_utc")
+        .and_then(|c| c.as_f64())
+        .unwrap_or(0.0);
+    let timestamp = Utc.timestamp_opt(created_utc as i64, 0).single()
+        .unwrap_or_else(Utc::now);
+    
+    let mut replies = Vec::new();
+    if let Some(replies_val) = data.get("replies") {
+        if let Some(replies_obj) = replies_val.as_object() {
+            if let Some(listing_data) = replies_obj.get("data") {
+                if let Some(listing_children) = listing_data.get("children") {
+                    if let Some(listing_array) = listing_children.as_array() {
+                        for reply in listing_array {
+                            if reply.get("kind").and_then(|k| k.as_str()) == Some("t1") {
+                                replies.push(parse_comment_to_json(reply));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    CommentJson {
+        author,
+        body: clean_comment_text(&body),
+        created_utc: timestamp.to_rfc3339(),
+        score,
+        replies,
+    }
+}
 
-if args.json:
-    comment_tree = [build_comment_tree_json(comment) for comment in comments]
-    print(json.dumps(comment_tree))
-else:
-    tree_comments = [reddit_to_tree_format(comment) for comment in comments]
-    # Filter out None values from deleted/removed comments
-    tree_comments = [comment for comment in tree_comments if comment is not None]
-
-    # Use tree-render via sh
-    import sh
-    print(sh.Command('tree-render')('--author=author', '--timestamp=time', '--content=text', '--replies=children', _in=json.dumps(tree_comments)), end='')
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+    
+    // Handle clear cache command
+    if args.clear_cache {
+        return clear_cache();
+    }
+    
+    let url = args.url.ok_or_else(|| anyhow!("URL is required"))?;
+    let (submission_id, comment_id) = get_submission_and_comment_id(&url)?;
+    
+    // Try to get from cache first (unless skip_cache is set)
+    let comments_value = if args.skip_cache {
+        None
+    } else {
+        get_cached_data(&submission_id, comment_id.as_deref())?
+    };
+    
+    let comments_value = if let Some(cached_data) = comments_value {
+        cached_data
+    } else {
+        // Fetch fresh data
+        let subreddit = Subreddit::new("all");
+        let comments_response = subreddit.article_comments(&submission_id, None, Some(500)).await?;
+        let comments_value: Value = serde_json::to_value(&comments_response)?;
+        
+        // Save to cache
+        if let Err(e) = save_to_cache(&submission_id, comment_id.as_deref(), &comments_value) {
+            eprintln!("Warning: Failed to save to cache: {}", e);
+        }
+        
+        comments_value
+    };
+    
+    // The roux response structure is: { data: { children: [...] } }
+    let comments = if let Some(cid) = comment_id {
+        // Find specific comment in the tree
+        let mut found_comments = Vec::new();
+        
+        // Check if comments_value has the expected structure
+        if let Some(data) = comments_value.get("data") {
+            if let Some(children) = data.get("children").and_then(|c| c.as_array()) {
+                for comment in children {
+                    if comment.get("data").and_then(|d| d.get("id")).and_then(|id| id.as_str()) == Some(&cid) {
+                        found_comments.push(comment.clone());
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if found_comments.is_empty() {
+            return Err(anyhow!("Comment not found"));
+        }
+        found_comments
+    } else {
+        // Get all comments - handle roux response structure
+        if let Some(data) = comments_value.get("data") {
+            if let Some(children) = data.get("children").and_then(|c| c.as_array()) {
+                children.iter()
+                    .filter(|c| c.get("kind").and_then(|k| k.as_str()) == Some("t1"))
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        }
+    };
+    
+    if args.json {
+        let comment_tree: Vec<CommentJson> = comments.iter()
+            .map(parse_comment_to_json)
+            .collect();
+        println!("{}", serde_json::to_string(&comment_tree)?);
+    } else {
+        let tree_comments: Vec<CommentTree> = comments.iter()
+            .filter_map(parse_comment_to_tree)
+            .collect();
+        
+        let json_input = serde_json::to_string(&tree_comments)?;
+        
+        let mut child = Command::new("tree-render")
+            .arg("--author=author")
+            .arg("--timestamp=time")
+            .arg("--content=text")
+            .arg("--replies=children")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()?;
+        
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(json_input.as_bytes())?;
+        }
+        
+        child.wait()?;
+    }
+    
+    Ok(())
+}
