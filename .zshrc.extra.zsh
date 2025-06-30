@@ -20,6 +20,7 @@ setopt numeric_glob_sort
 READNULLCMD=$PAGER
 
 alias -g C='| wc -l'
+alias -g G="| rg"
 alias -g H='| head'
 alias -g L="| $PAGER"
 alias -g N="&> /dev/null"
