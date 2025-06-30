@@ -151,174 +151,76 @@ fn clear_cache() -> Result<()> {
     Ok(())
 }
 
-fn render_html_table_to_unicode(html: &str) -> String {
-    // Extract table content using basic string parsing
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    let mut current_row: Vec<String> = Vec::new();
-    let mut current_cell = String::new();
-    let mut in_table = false;
-    let mut in_row = false;
-    let mut in_cell = false;
+fn clean_comment_text(text: &str) -> String {
+    // Parse HTML using scraper and extract meaningful content
+    let document = Html::parse_fragment(text);
+    let mut result = String::new();
     
-    let mut chars = html.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '<' {
-            // Parse tag
-            let mut tag = String::new();
-            while let Some(ch) = chars.next() {
-                if ch == '>' {
+    
+    // Handle tables first
+    let table_selector = Selector::parse("table").unwrap();
+    for table in document.select(&table_selector) {
+        let unicode_table = render_html_table_to_unicode(&table.html());
+        result.push_str(&unicode_table);
+        result.push('\n');
+    }
+    
+    // Handle ordered lists
+    let ol_selector = Selector::parse("ol").unwrap();
+    for ol in document.select(&ol_selector) {
+        let formatted_list = render_html_list_to_text(&ol.html(), true);
+        result.push_str(&formatted_list);
+        result.push('\n');
+    }
+    
+    // Handle unordered lists  
+    let ul_selector = Selector::parse("ul").unwrap();
+    for ul in document.select(&ul_selector) {
+        let formatted_list = render_html_list_to_text(&ul.html(), false);
+        result.push_str(&formatted_list);
+        result.push('\n');
+    }
+    
+    // Handle paragraphs and other text content (but skip those inside lists/tables)
+    let p_selector = Selector::parse("p").unwrap();
+    for p in document.select(&p_selector) {
+        // Skip paragraphs that are inside list items
+        let mut is_inside_list = false;
+        let mut parent = p.parent();
+        while let Some(parent_node) = parent {
+            if let Some(parent_element) = parent_node.value().as_element() {
+                if parent_element.name() == "li" || parent_element.name() == "ol" || parent_element.name() == "ul" {
+                    is_inside_list = true;
                     break;
                 }
-                tag.push(ch);
             }
-            
-            match tag.to_lowercase().as_str() {
-                "table" => in_table = true,
-                "/table" => {
-                    if in_cell {
-                        current_row.push(current_cell.trim().to_string());
-                        current_cell.clear();
-                        in_cell = false;
-                    }
-                    if in_row && !current_row.is_empty() {
-                        rows.push(current_row.clone());
-                        current_row.clear();
-                        in_row = false;
-                    }
-                    in_table = false;
-                },
-                "tr" => {
-                    if in_table {
-                        in_row = true;
-                    }
-                },
-                "/tr" => {
-                    if in_cell {
-                        current_row.push(current_cell.trim().to_string());
-                        current_cell.clear();
-                        in_cell = false;
-                    }
-                    if in_row && !current_row.is_empty() {
-                        rows.push(current_row.clone());
-                        current_row.clear();
-                    }
-                    in_row = false;
-                },
-                "td" | "th" => {
-                    if in_row {
-                        in_cell = true;
-                    }
-                },
-                "/td" | "/th" => {
-                    if in_cell {
-                        current_row.push(current_cell.trim().to_string());
-                        current_cell.clear();
-                        in_cell = false;
-                    }
-                },
-                _ => {}
+            parent = parent_node.parent();
+        }
+        
+        if !is_inside_list {
+            let text_content = p.text().collect::<Vec<_>>().join(" ").trim().to_string();
+            if !text_content.is_empty() {
+                result.push_str(&text_content);
+                result.push('\n');
             }
-        } else if in_cell {
-            current_cell.push(ch);
         }
     }
     
-    if rows.is_empty() {
-        return html.to_string();
-    }
-    
-    // Create unicode table using comfy-table
-    let mut table = Table::new();
-    table.load_preset(UTF8_FULL);
-    table.apply_modifier(UTF8_ROUND_CORNERS);
-    
-    for (i, row) in rows.iter().enumerate() {
-        if i == 0 {
-            // First row as header
-            table.set_header(row);
-        } else {
-            table.add_row(row);
+    // Handle blockquotes
+    let blockquote_selector = Selector::parse("blockquote").unwrap();
+    for blockquote in document.select(&blockquote_selector) {
+        let text_content = blockquote.text().collect::<Vec<_>>().join(" ").trim().to_string();
+        if !text_content.is_empty() {
+            result.push_str("> ");
+            result.push_str(&text_content);
+            result.push('\n');
         }
     }
     
-    table.to_string()
-}
-
-fn clean_comment_text(text: &str) -> String {
-    let mut result = text.to_string();
-    
-    // First convert HTML entities
-    result = result
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .replace("&#x27;", "'")
-        .replace("&#39;", "'");
-    
-    // Handle HTML tables - convert to unicode tables
-    while let Some(table_start) = result.find("<table>") {
-        if let Some(table_end) = result[table_start..].find("</table>") {
-            let table_html = &result[table_start..table_start + table_end + 8]; // +8 for "</table>"
-            let unicode_table = render_html_table_to_unicode(table_html);
-            result.replace_range(table_start..table_start + table_end + 8, &unicode_table);
-        } else {
-            break;
-        }
+    // If no structured content was found, fall back to extracting all text
+    if result.trim().is_empty() {
+        result = document.root_element().text().collect::<Vec<_>>().join(" ");
     }
-    
-    // Handle ordered lists - convert to numbered list with proper line breaks  
-    let mut list_counter = 1;
-    while let Some(ol_start) = result.find("<ol>") {
-        if let Some(ol_end) = result[ol_start..].find("</ol>") {
-            let ol_content = &result[ol_start + 4..ol_start + ol_end]; // +4 for "<ol>"
-            let mut formatted_list = String::new();
-            
-            for item in ol_content.split("<li>") {
-                if let Some(li_end) = item.find("</li>") {
-                    let li_content = &item[..li_end].trim();
-                    if !li_content.is_empty() {
-                        formatted_list.push_str(&format!("{}. {}\n", list_counter, li_content));
-                        list_counter += 1;
-                    }
-                }
-            }
-            
-            result.replace_range(ol_start..ol_start + ol_end + 5, &formatted_list); // +5 for "</ol>"
-        } else {
-            break;
-        }
-        list_counter = 1; // Reset for next list
-    }
-    
-    // Handle unordered lists - convert to bullet list with proper line breaks
-    while let Some(ul_start) = result.find("<ul>") {
-        if let Some(ul_end) = result[ul_start..].find("</ul>") {
-            let ul_content = &result[ul_start + 4..ul_start + ul_end]; // +4 for "<ul>"
-            let mut formatted_list = String::new();
-            
-            for item in ul_content.split("<li>") {
-                if let Some(li_end) = item.find("</li>") {
-                    let li_content = &item[..li_end].trim();
-                    if !li_content.is_empty() {
-                        formatted_list.push_str(&format!("• {}\n", li_content));
-                    }
-                }
-            }
-            
-            result.replace_range(ul_start..ul_start + ul_end + 5, &formatted_list); // +5 for "</ul>"
-        } else {
-            break;
-        }
-    }
-    
-    // Handle basic HTML tags
-    result = result
-        .replace("<br>", "\n")
-        .replace("<br/>", "\n")
-        .replace("<br />", "\n")
-        .replace("<p>", "\n")
-        .replace("</p>", "\n");
     
     // Clean up excessive whitespace while preserving intentional line breaks
     let lines: Vec<&str> = result.lines().collect();
@@ -345,6 +247,66 @@ fn clean_comment_text(text: &str) -> String {
     }
     
     cleaned_lines.join("\n")
+}
+
+fn render_html_table_to_unicode(html: &str) -> String {
+    let document = Html::parse_fragment(html);
+    let tr_selector = Selector::parse("tr").unwrap();
+    let td_selector = Selector::parse("td, th").unwrap();
+    
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    
+    for tr in document.select(&tr_selector) {
+        let mut row = Vec::new();
+        for cell in tr.select(&td_selector) {
+            row.push(cell.text().collect::<Vec<_>>().join(" ").trim().to_string());
+        }
+        if !row.is_empty() {
+            rows.push(row);
+        }
+    }
+    
+    if rows.is_empty() {
+        return html.to_string();
+    }
+    
+    // Create unicode table using comfy-table
+    let mut table = Table::new();
+    table.load_preset(UTF8_FULL);
+    table.apply_modifier(UTF8_ROUND_CORNERS);
+    
+    for (i, row) in rows.iter().enumerate() {
+        if i == 0 {
+            // First row as header
+            table.set_header(row);
+        } else {
+            table.add_row(row);
+        }
+    }
+    
+    table.to_string()
+}
+
+fn render_html_list_to_text(html: &str, ordered: bool) -> String {
+    let document = Html::parse_fragment(html);
+    let li_selector = Selector::parse("li").unwrap();
+    
+    let mut result = String::new();
+    let mut counter = 1;
+    
+    for li in document.select(&li_selector) {
+        let text = li.text().collect::<Vec<_>>().join(" ").trim().to_string();
+        if !text.is_empty() {
+            if ordered {
+                result.push_str(&format!("[{}] {}\n", counter, text));
+                counter += 1;
+            } else {
+                result.push_str(&format!("• {}\n", text));
+            }
+        }
+    }
+    
+    result.trim_end().to_string()
 }
 
 fn get_submission_and_comment_id(url: &str) -> Result<(String, Option<String>)> {
@@ -381,7 +343,20 @@ fn parse_comment_to_tree(comment: &Value) -> Option<CommentTree> {
         return None;
     }
     
-    let body = data.get("body")?.as_str()?;
+    // Use body_html field which contains the actual HTML content
+    let body = if let Some(body_html) = data.get("body_html").and_then(|v| v.as_str()) {
+        // Decode HTML entities from the body_html field
+        body_html
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+    } else {
+        // Fallback to regular body field
+        data.get("body")?.as_str()?.to_string()
+    };
+    
     if body.is_empty() || body == "[deleted]" || body == "[removed]" {
         return None;
     }
@@ -410,11 +385,14 @@ fn parse_comment_to_tree(comment: &Value) -> Option<CommentTree> {
         }
     }
     
+    let cleaned_text = clean_comment_text(&body);
+    
+    
     Some(CommentTree {
         id: id.to_string(),
         author: author.to_string(),
         time: local_time.format("%Y-%m-%d %H:%M").to_string(),
-        text: clean_comment_text(body),
+        text: cleaned_text,
         children,
     })
 }
@@ -426,10 +404,22 @@ fn parse_comment_to_json(comment: &Value) -> CommentJson {
         .and_then(|a| a.as_str())
         .unwrap_or("[deleted]")
         .to_string();
-    let body = data.get("body")
-        .and_then(|b| b.as_str())
-        .unwrap_or("")
-        .to_string();
+    // Use body_html field which contains the actual HTML content
+    let body = if let Some(body_html) = data.get("body_html").and_then(|v| v.as_str()) {
+        // Decode HTML entities from the body_html field
+        body_html
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+    } else {
+        // Fallback to regular body field
+        data.get("body")
+            .and_then(|b| b.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
     let score = data.get("score")
         .and_then(|s| s.as_i64())
         .unwrap_or(0);
