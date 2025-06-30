@@ -1,47 +1,93 @@
-#!/usr/bin/env -S uv run --script --quiet
-"""Upload text or files to dpaste.org pastebin service."""
-# /// script
-# dependencies = [
-#   "pyperclip",
-#   "requests",
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! clap = { version = "4.0", features = ["derive"] }
+//! reqwest = { version = "0.11", features = ["json", "multipart"] }
+//! tokio = { version = "1.0", features = ["full"] }
+//! anyhow = "1.0"
+//! arboard = "3.0"
+//! ```
 
+use anyhow::Result;
+use clap::Parser;
+use std::io::{self, Read};
 
-import argparse
-import sys
-import requests
-import webbrowser
-import pyperclip
+#[derive(Parser)]
+#[command(about = "Upload text to dpaste.org")]
+struct Args {
+    /// File to upload (reads from stdin if not provided)
+    #[arg(short, long)]
+    file: Option<String>,
 
+    /// Syntax highlighting
+    #[arg(short, long, default_value = "text")]
+    syntax: String,
 
-parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('-s', '--syntax', default='text')
-parser.add_argument('-t', '--title', default='')
-parser.add_argument('-e', '--expiry', default='7', choices=['1', '7', '30', '365'])
-parser.add_argument('-f', '--file', type=argparse.FileType('r'), default=sys.stdin)
-parser.add_argument('-o', '--open', action='store_true')
-parser.add_argument('-c', '--copy', action='store_true')
-args = parser.parse_args()
+    /// Title for the paste
+    #[arg(short, long, default_value = "")]
+    title: String,
 
-content = args.file.read()
-if args.file != sys.stdin:
-    args.file.close()
+    /// Expiry in days (1, 7, 30, 365)
+    #[arg(short, long, default_value = "7", value_parser = validate_expiry)]
+    expiry: u32,
 
-data = {
-    'content': content,
-    'syntax': args.syntax,
-    'title': args.title,
-    'expiry_days': args.expiry
+    /// Open URL in browser
+    #[arg(short, long)]
+    open: bool,
+
+    /// Copy URL to clipboard
+    #[arg(short, long)]
+    copy: bool,
 }
 
-response = requests.post('https://dpaste.org/api/', data=data)
-url = response.text.strip().strip('"') + '/raw'
+fn validate_expiry(s: &str) -> Result<u32, String> {
+    match s.parse::<u32>() {
+        Ok(days) if [1, 7, 30, 365].contains(&days) => Ok(days),
+        _ => Err("Expiry must be 1, 7, 30, or 365 days".to_string()),
+    }
+}
 
-print(url)
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
 
-if args.copy:
-    pyperclip.copy(url)
+    let content = match &args.file {
+        Some(path) => std::fs::read_to_string(path)?,
+        None => {
+            let mut buffer = String::new();
+            io::stdin().read_to_string(&mut buffer)?;
+            buffer
+        }
+    };
 
-if args.open:
-    webbrowser.open(url)
+    let client = reqwest::Client::new();
+    let form = reqwest::multipart::Form::new()
+        .text("content", content)
+        .text("syntax", args.syntax)
+        .text("title", args.title)
+        .text("expiry_days", args.expiry.to_string());
+
+    let response = client
+        .post("https://dpaste.org/api/")
+        .multipart(form)
+        .send()
+        .await?;
+
+    let url = response.text().await?;
+    let raw_url = format!("{}/raw", url.trim().trim_matches('"'));
+
+    if args.copy {
+        if let Err(_) = arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&raw_url)) {
+            eprintln!("Warning: Failed to copy to clipboard");
+        }
+    }
+
+    if args.open {
+        if let Err(_) = std::process::Command::new("open").arg(&raw_url).spawn() {
+            eprintln!("Warning: Failed to open URL in browser");
+        }
+    }
+
+    println!("{}", raw_url);
+    Ok(())
+}
