@@ -1,8 +1,6 @@
 require("hs.ipc")
 
-local toggleApp = require("toggle_app")
-
-require("hotkeys")
+local ghostty = require("ghostty")
 
 hs.loadSpoon("SpoonInstall")
 spoon.SpoonInstall:updateAllRepos()
@@ -17,15 +15,41 @@ spoon.SpoonInstall:andUse("WinWin", {
   repo = "default",
 })
 
-local function handleGhosttyResize()
-  local ghostty = hs.application.get("ghostty")
-  if not ghostty then return end
+local function toggleDarkMode()
+	hs.osascript.applescript([[
+        tell application "System Events"
+            tell appearance preferences
+                set dark mode to not dark mode
+            end tell
+        end tell
+    ]])
+end
 
-  local mainWindow = ghostty:mainWindow()
+hs.hotkey.bind({}, "²", function()
+	ghostty.toggleVisibility()
+end)
+
+hs.hotkey.bind({ "alt" }, "²", function()
+	ghostty.toggleMonitor()
+end)
+
+hs.hotkey.bind({ "ctrl", "cmd" }, "v", function()
+	hs.execute("/Users/andrei/bin/vision -c", true)
+end)
+
+hs.hotkey.bind({ "ctrl", "cmd" }, "d", function()
+	toggleDarkMode()
+end)
+
+local function handleGhosttyResize()
+  local ghosttyApp = hs.application.get("ghostty")
+  if not ghosttyApp then return end
+
+  local mainWindow = ghosttyApp:mainWindow()
   if not mainWindow then return end
 
   if #hs.screen.allScreens() > 1 then
-    toggleApp.toggleAppMonitor()
+    ghostty.toggleMonitor()
   else
     mainWindow:maximize()
   end
@@ -44,10 +68,10 @@ hs.ipc.cliInstall()
 if hs.ipc then
   hs.ipc.handler = function(str)
     if str == "toggle-terminal" then
-      toggleApp.toggleAppVisibility()
+      ghostty.toggleVisibility()
       return "Toggled terminal visibility"
     elseif str == "toggle-monitor" then
-      toggleApp.toggleAppMonitor()
+      ghostty.toggleMonitor()
       return "Moved terminal to other monitor"
     else
       return "Unknown command: " .. str
