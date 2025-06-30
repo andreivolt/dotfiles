@@ -7,7 +7,6 @@
 //! serde_json = "1.0"
 //! clap = { version = "4.0", features = ["derive"] }
 //! crossterm = "0.27"
-//! pulldown-cmark = "0.10"
 //! textwrap = "0.16"
 //! terminal_size = "0.3"
 //! md5 = "0.7"
@@ -19,7 +18,6 @@ use std::process;
 
 use clap::Parser;
 use crossterm::style::{Color, SetBackgroundColor, SetForegroundColor, ResetColor};
-use pulldown_cmark::{Parser as MarkdownParser, Options, html};
 use serde_json::Value;
 use terminal_size::{Width, terminal_size};
 use textwrap::wrap;
@@ -168,29 +166,8 @@ impl MarkdownRenderer {
     }
 
     fn render(&self, text: &str) -> String {
-        // For simplicity, we'll do basic markdown processing
-        // In a full implementation, you might want more sophisticated rendering
-        let parser = MarkdownParser::new_ext(text, Options::empty());
-        let mut html_output = String::new();
-        html::push_html(&mut html_output, parser);
-
-        // Convert HTML back to plain text (simplified)
-        // This is a basic implementation - you might want a more sophisticated HTML->text converter
-        let plain_text = html_output
-            .replace("<p>", "")
-            .replace("</p>", "\n")
-            .replace("<strong>", "**")
-            .replace("</strong>", "**")
-            .replace("<em>", "*")
-            .replace("</em>", "*")
-            .replace("<code>", "`")
-            .replace("</code>", "`")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&amp;", "&");
-
-        // Wrap text to specified width
-        let wrapped_lines: Vec<String> = plain_text.lines()
+        // Just wrap text to specified width - no markdown/HTML processing
+        let wrapped_lines: Vec<String> = text.lines()
             .flat_map(|line| {
                 if line.trim().is_empty() {
                     vec![String::new()]

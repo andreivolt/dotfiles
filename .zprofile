@@ -35,5 +35,5 @@ path=(
 
 source ~/.config/env
 
-ln -fs ~/Library/CloudStorage/GoogleDrive-andrei.volt@gmail.com/"My Drive" ~/drive
+ln -sfn ~/Library/CloudStorage/GoogleDrive-andrei.volt@gmail.com/My\ Drive ~/drive
 rm -f ~/"Google Drive"
