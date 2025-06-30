@@ -3,6 +3,7 @@ export CURL_CA_BUNDLE=~/.local/ca-certificates/combined-ca-bundle.pem
 export DELTA_PAGER='less -R'
 export DENO_NO_UPDATE_CHECK=1
 export EDITOR=nvim
+export ENABLE_BACKGROUND_TASKS=1 # Claude Code
 export GPG_TTY="$(tty)"
 export LESS='--RAW-CONTROL-CHARS --LONG-PROMPT --ignore-case --no-init --quit-if-one-screen'
 export MANPAGER='nvim +Man!'
@@ -17,7 +18,6 @@ export XDG_CONFIG_HOME=~/.config
 export XDG_DATA_HOME=~/.local
 export XDG_RUNTIME_DIR=$TMPDIR
 export XDG_STATE_HOME=~/.local/state
-export ENABLE_BACKGROUND_TASKS=1 # Claude Code
 
 path=(
   ~/bin(N)
@@ -34,3 +34,6 @@ path=(
 [[ "$OSTYPE" == darwin* ]] && source ~/.zsh.d/homebrew.sh
 
 source ~/.config/env
+
+ln -fs ~/Library/CloudStorage/GoogleDrive-andrei.volt@gmail.com/My\ Drive drive
+rm -f ~/Google\ Drive
