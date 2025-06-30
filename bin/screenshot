@@ -5,9 +5,11 @@
 //! tempfile = "3.8"
 //! is-terminal = "0.4"
 //! anyhow = "1.0"
+//! chrono = { version = "0.4", features = ["serde"] }
 //! ```
 
 use anyhow::{Result, bail};
+use chrono::Utc;
 use clap::{Parser, ValueEnum};
 use is_terminal::IsTerminal;
 use std::{fs, io::{self, Write}, process::Command};
@@ -34,15 +36,19 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     let filename = args.filename.filter(|f| f.ends_with(".png"));
-    let output_mode = match (filename.as_ref(), io::stdout().is_terminal()) {
-        (Some(_), _) => OutputMode::File,
-        (None, true) => OutputMode::Clipboard,
-        (None, false) => OutputMode::Stdout,
+    let (output_mode, auto_filename) = match (filename.as_ref(), io::stdout().is_terminal()) {
+        (Some(_), _) => (OutputMode::File, None),
+        (None, true) => {
+            let timestamp = Utc::now().format("%Y-%m-%d_%H-%M-%S");
+            let auto_name = format!("screenshot_{}.png", timestamp);
+            (OutputMode::File, Some(auto_name))
+        },
+        (None, false) => (OutputMode::Stdout, None),
     };
 
     let (cmd, opt) = match (args.target, cfg!(target_os = "macos"), cfg!(target_os = "linux")) {
         (Target::Selection, true, _) => ("screencapture", "-i"),
-        (Target::Window, true, _) => ("screencapture", "-W"),
+        (Target::Window, true, _) => ("screencapture", "-Wo"),
         (Target::Full, true, _) => ("screencapture", ""),
         (Target::Selection, _, true) => ("grimshot", "save area"),
         (Target::Window, _, true) => ("grimshot", "save window"),
@@ -50,10 +56,7 @@ fn main() -> Result<()> {
         _ => bail!("Unsupported OS"),
     };
 
-    let (file_path, _temp) = if matches!(output_mode, OutputMode::Clipboard) && cfg!(target_os = "macos") {
-        Command::new("sh").arg("-c").arg(format!("{cmd} -c {opt}")).status()?;
-        (None, None)
-    } else {
+    let (file_path, _temp) = {
         let temp = tempfile::Builder::new()
             .prefix("screenshot-")
             .suffix(".png")
@@ -74,17 +77,20 @@ fn main() -> Result<()> {
                 (None, Some(temp))
             }
             OutputMode::File => {
-                let dest = filename.unwrap();
+                let dest = filename.or(auto_filename).unwrap();
                 fs::copy(&path, &dest)?;
                 (Some(fs::canonicalize(&dest)?), Some(temp))
             }
-            _ => (Some(path), Some(temp))
         };
 
         result
     };
 
     if !matches!(output_mode, OutputMode::Stdout) {
+        if let Some(path) = &file_path {
+            println!("Screenshot saved to: {}", path.display());
+        }
+        
         let notify_cmd = if cfg!(target_os = "macos") {
             file_path.as_ref().map(|p| format!(
                 "terminal-notifier -title 'Screenshot' -message 'Screenshot taken' -open 'file://{}' -contentImage '{}'",
@@ -103,7 +109,6 @@ fn main() -> Result<()> {
 }
 
 enum OutputMode {
-    File,
-    Clipboard,
+    File, 
     Stdout,
 }
