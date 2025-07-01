@@ -1,216 +1,218 @@
-#!/usr/bin/env -S uv run --script --quiet
-"""Extract text from images using AI vision models."""
-# /// script
-# dependencies = [
-#   "pyperclip",
-#   "rich",
-#   "sh",
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! clap = { version = "4.5", features = ["derive"] }
+//! tokio = { version = "1.0", features = ["full"] }
+//! anyhow = "1.0"
+//! serde = { version = "1.0", features = ["derive"] }
+//! serde_json = "1.0"
+//! mime_guess = "2.0"
+//! copypasta = "0.10"
+//! tempfile = "3.0"
+//! base64 = "0.22"
+//! genai = "0.1"
+//! is-terminal = "0.4"
+//! regex = "1.10"
+//! ```
 
-import argparse
-from sh import Command, ErrorReturnCode
-import sys
-import tempfile
-from pathlib import Path
-from rich.console import Console
-from rich.markdown import Markdown
-import pyperclip
+use anyhow::{anyhow, Result};
+use base64::{engine::general_purpose, Engine as _};
+use clap::Parser;
+use copypasta::{ClipboardContext, ClipboardProvider};
+use genai::chat::{ChatMessage, ChatRequest, MessageContent, ContentPart, ChatOptions};
+use genai::Client;
+use is_terminal::IsTerminal;
+use mime_guess::from_path;
+use std::fs;
+use std::io::{self, Read};
+use std::path::PathBuf;
+use std::process::Command;
+use tempfile::NamedTempFile;
 
+#[derive(Parser)]
+#[command(name = "ocr")]
+#[command(about = "Extract text from images using AI vision models")]
+#[command(arg_required_else_help = false)]
+struct Args {
+    /// Image file to extract text from (defaults to stdin if not provided)
+    image_file: Option<PathBuf>,
 
-def _looks_like_markdown(text):
-    """Simple heuristic to detect if text contains markdown formatting."""
-    markdown_indicators = [
-        '# ', '## ', '### ',
-        '**', '__',
-        '*', '_',
-        '- ', '* ',
-        '```',
-        '[', '](', '![',
-        '|',
-    ]
+    /// Preserve original layout as closely as possible
+    #[arg(short, long)]
+    layout: bool,
 
-    # Check for multiple indicators to avoid false positives
-    indicator_count = sum(1 for indicator in markdown_indicators if indicator in text)
-    return indicator_count >= 2
+    /// Custom prompt to append to the default OCR prompt
+    #[arg(short, long)]
+    prompt: Option<String>,
 
+    /// Copy text to clipboard
+    #[arg(short, long)]
+    copy: bool,
 
-def get_mime_type(file_path):
-    """Get MIME type of file using the file command."""
-    try:
-        file_cmd = Command("file")
-        return file_cmd("--mime-type", "-b", str(file_path)).strip()
-    except ErrorReturnCode:
-        return None
+    /// Take a screenshot first using the screenshot script
+    #[arg(short, long)]
+    screenshot: bool,
 
+    /// LLM model to use for OCR (e.g., gpt-4o, claude-3-5-sonnet-20241022)
+    #[arg(short, long, default_value = "gpt-4o")]
+    model: String,
+}
 
-def run_llm_ocr(image_path, mode, custom_prompt=None, copy_to_clipboard=False, model=None):
-    """Run LLM command with appropriate prompt and attachment."""
-    function_description = "You are an AI assistant specialized in optical character recognition (OCR) and text extraction from images."
+fn get_mime_type(file_path: &PathBuf) -> Option<String> {
+    from_path(file_path).first().map(|mime| mime.to_string())
+}
 
-    if mode == "readable":
-        base_prompt = "OCR this image and extract just the text. Return only the extracted text with no additional formatting, explanation, or commentary."
-    else:  # layout mode
-        base_prompt = "OCR this image and preserve the original layout as closely as possible. Maintain spacing, alignment, and visual structure exactly as shown in the image."
+fn take_screenshot() -> Result<PathBuf> {
+    let temp_file = NamedTempFile::with_suffix(".png")?;
+    let temp_path = temp_file.path().to_path_buf();
 
-    if custom_prompt:
-        prompt = f"{function_description}\n\n{base_prompt}\n\nAdditional instructions: {custom_prompt}"
-    else:
-        prompt = f"{function_description}\n\n{base_prompt}"
+    let output = Command::new("screenshot")
+        .arg("selection")
+        .arg(&temp_path)
+        .output()?;
 
-    mime_type = get_mime_type(image_path)
-    if not mime_type:
-        print(f"Error: Could not determine MIME type for '{image_path}'", file=sys.stderr)
-        return 1
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("Screenshot command failed: {}", stderr));
+    }
 
-    if not mime_type.startswith("image/"):
-        print(f"Error: '{image_path}' is not an image file (detected: {mime_type})", file=sys.stderr)
-        return 1
+    if !temp_path.exists() || fs::metadata(&temp_path)?.len() == 0 {
+        return Err(anyhow!("Screenshot was not created or is empty"));
+    }
 
-    try:
-        # Capture output to determine if we should render as markdown
-        llm_cmd = Command("llm")
-        cmd_args = ["--extract", "--at", str(image_path), mime_type, "--no-log"]
-        if model:
-            cmd_args.extend(["-m", model])
-        cmd_args.append(prompt)
-        output = llm_cmd(*cmd_args)
+    // Keep the file alive by forgetting the NamedTempFile
+    std::mem::forget(temp_file);
+    Ok(temp_path)
+}
 
-        if copy_to_clipboard:
-            pyperclip.copy(output)
-            print("Text copied to clipboard")
-        else:
-            print(output, end='')
+async fn run_ocr(
+    image_path: &PathBuf,
+    layout_mode: bool,
+    custom_prompt: Option<&str>,
+    model: &str,
+) -> Result<String> {
+    let function_description = "You are an AI assistant specialized in optical character recognition (OCR) and text extraction from images.";
 
-        return 0
-    except sh.ErrorReturnCode as e:
-        print(f"Error running LLM command: {e}", file=sys.stderr)
-        return 1
-    except FileNotFoundError:
-        print("Error: 'llm' command not found. Please install it first.", file=sys.stderr)
-        return 1
+    let base_prompt = if layout_mode {
+        "OCR this image and preserve the original layout as closely as possible. Maintain spacing, alignment, and visual structure exactly as shown in the image."
+    } else {
+        "OCR this image and extract just the text. Return only the extracted text with no additional formatting, explanation, or commentary."
+    };
 
+    let prompt = if let Some(custom) = custom_prompt {
+        format!("{}\n\n{}\n\nAdditional instructions: {}", function_description, base_prompt, custom)
+    } else {
+        format!("{}\n\n{}", function_description, base_prompt)
+    };
 
-parser = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    let mime_type = get_mime_type(image_path)
+        .ok_or_else(|| anyhow!("Could not determine MIME type for '{}'", image_path.display()))?;
 
-parser.add_argument(
-    "image_file",
-    nargs="?",
-    help="Image file to extract text from (defaults to stdin if not provided)"
-)
+    if !mime_type.starts_with("image/") {
+        return Err(anyhow!("'{}' is not an image file (detected: {})", image_path.display(), mime_type));
+    }
 
-parser.add_argument(
-    "-l", "--layout",
-    action="store_true",
-    help="Preserve original layout as closely as possible"
-)
+    // Read and encode image
+    let image_data = fs::read(image_path)?;
+    let base64_image = general_purpose::STANDARD.encode(&image_data);
+    let data_url = format!("data:{};base64,{}", mime_type, base64_image);
 
-parser.add_argument(
-    "-p", "--prompt",
-    help="Custom prompt to append to the default OCR prompt. This allows additional instructions that work alongside the base OCR functionality"
-)
+    // Create chat request with image
+    let parts = vec![
+        ContentPart::from_text(prompt),
+        ContentPart::from_image_url(&mime_type, data_url)
+    ];
+    let content = MessageContent::from_parts(parts);
+    let chat_req = ChatRequest::new(vec![
+        ChatMessage::user(content)
+    ]);
 
-parser.add_argument(
-    "-c", "--copy",
-    action="store_true",
-    help="Copy text to clipboard"
-)
+    let client = Client::default();
+    let model_name = model;
 
-parser.add_argument(
-    "-s", "--screenshot",
-    action="store_true",
-    help="Take a screenshot first using the screenshot script"
-)
+    // Check if we have the necessary API key for the model
+    let needs_api_key = match model_name {
+        m if m.starts_with("gpt") => std::env::var("OPENAI_API_KEY").is_err(),
+        m if m.starts_with("claude") => std::env::var("ANTHROPIC_API_KEY").is_err(),
+        m if m.starts_with("gemini") => std::env::var("GEMINI_API_KEY").is_err(),
+        _ => false,
+    };
 
-parser.add_argument(
-    "-m", "--model",
-    help="LLM model to use for OCR (e.g., gpt-4o, claude-3-5-sonnet-20241022)"
-)
+    if needs_api_key {
+        return Err(anyhow!("API key not found for model '{}'", model_name));
+    }
 
-args = parser.parse_args()
+    // Use temperature 0 for deterministic OCR results
+    let options = ChatOptions::default().with_temperature(0.0);
 
-# Default to readable mode, layout if flag is set
-mode = "layout" if args.layout else "readable"
+    let chat_res = client.exec_chat(model_name, chat_req, Some(&options)).await
+        .map_err(|e| anyhow!("LLM request failed: {}", e))?;
 
-# Handle screenshot option
-if args.screenshot:
-    if args.image_file:
-        print("Error: Cannot specify both --screenshot and image file", file=sys.stderr)
-        sys.exit(1)
+    Ok(chat_res.content_text_as_str().unwrap_or("NO ANSWER").to_string())
+}
 
-    try:
-        # Create screenshot command - assumes 'screenshot' is in PATH or bin directory
-        screenshot_cmd = Command("screenshot")
+fn extract_code_blocks(text: &str) -> Vec<String> {
+    use regex::Regex;
 
-        # Create temporary file for screenshot
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
-            temp_screenshot_path = Path(temp_file.name)
+    let re = Regex::new(r"```[^\n]*\n([\s\S]*?)```").unwrap();
+    re.captures_iter(text)
+        .map(|cap| cap[1].trim().to_string())
+        .collect()
+}
 
-        # Use filename mode to ensure screenshot is saved to file
-        screenshot_cmd("selection", str(temp_screenshot_path))
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
 
-        if not temp_screenshot_path.exists() or temp_screenshot_path.stat().st_size == 0:
-            print("Error: Screenshot was not created or is empty", file=sys.stderr)
-            sys.exit(1)
+    let image_path = if args.screenshot {
+        if args.image_file.is_some() {
+            return Err(anyhow!("Cannot specify both --screenshot and image file"));
+        }
+        take_screenshot()?
+    } else if let Some(path) = args.image_file {
+        if !path.exists() {
+            return Err(anyhow!("File '{}' not found", path.display()));
+        }
+        if !path.is_file() {
+            return Err(anyhow!("'{}' is not a file", path.display()));
+        }
+        path
+    } else {
+        // Read from stdin
+        if io::stdin().is_terminal() {
+            return Err(anyhow!("No image file specified and stdin is empty"));
+        }
 
-        screenshot_path = temp_screenshot_path
+        let mut data = Vec::new();
+        io::stdin().read_to_end(&mut data)?;
+        if data.is_empty() {
+            return Err(anyhow!("No data received from stdin"));
+        }
 
-        # Process the screenshot
-        result = run_llm_ocr(screenshot_path, mode, args.prompt, args.copy, args.model)
+        let temp_file = NamedTempFile::new()?;
+        fs::write(temp_file.path(), data)?;
+        temp_file.path().to_path_buf()
+    };
 
-        # Clean up screenshot file
-        try:
-            screenshot_path.unlink()
-        except:
-            pass
+    let result = run_ocr(&image_path, args.layout, args.prompt.as_deref(), &args.model).await?;
 
-        sys.exit(result)
+    // Extract code blocks if present
+    let extracted = extract_code_blocks(&result);
+    let output = if !extracted.is_empty() {
+        extracted.join("\n\n")
+    } else {
+        result.clone()
+    };
 
-    except Exception as e:
-        print(f"Error taking screenshot: {e}", file=sys.stderr)
-        sys.exit(1)
+    if args.copy {
+        let mut ctx = ClipboardContext::new()
+            .map_err(|e| anyhow!("Failed to access clipboard: {}", e))?;
+        ctx.set_contents(output.clone())
+            .map_err(|e| anyhow!("Failed to copy to clipboard: {}", e))?;
+        println!("Text copied to clipboard");
+    } else {
+        print!("{}", output);
+    }
 
-# Handle stdin input
-if not args.image_file:
-    if sys.stdin.isatty():
-        print("Error: No image file specified and stdin is empty", file=sys.stderr)
-        sys.exit(1)
-
-    # Read from stdin and write to temporary file
-    try:
-        data = sys.stdin.buffer.read()
-        if not data:
-            print("Error: No data received from stdin", file=sys.stderr)
-            sys.exit(1)
-
-        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            temp_file.write(data)
-            temp_path = Path(temp_file.name)
-    except Exception as e:
-        print(f"Error reading from stdin: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        result = run_llm_ocr(temp_path, mode, args.prompt, args.copy, args.model)
-        sys.exit(result)
-    finally:
-        # Clean up temp file
-        try:
-            temp_path.unlink()
-        except:
-            pass
-
-# Handle file input
-
-image_path = Path(args.image_file)
-if not image_path.exists():
-    print(f"Error: File '{args.image_file}' not found", file=sys.stderr)
-    sys.exit(1)
-
-if not image_path.is_file():
-    print(f"Error: '{args.image_file}' is not a file", file=sys.stderr)
-    sys.exit(1)
-
-result = run_llm_ocr(image_path, mode, args.prompt, args.copy, args.model)
-sys.exit(result)
+    Ok(())
+}

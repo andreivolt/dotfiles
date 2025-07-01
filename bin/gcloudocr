@@ -1,123 +1,179 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! clap = { version = "4", features = ["derive"] }
+//! google-cloud-vision-v1 = "0.4"
+//! google-cloud-auth = "0.17"
+//! tokio = { version = "1", features = ["full"] }
+//! anyhow = "1"
+//! tempfile = "3"
+//! arboard = "3"
+//! bytes = "1"
+//! ```
 
-require 'json'
-require 'tempfile'
-require 'optparse'
+use clap::Parser;
+use google_cloud_vision_v1::client::ImageAnnotator;
+use google_cloud_vision_v1::model::{
+    AnnotateImageRequest, Feature, Image, TextAnnotation,
+    feature::Type
+};
+use std::io::{self, Read};
+use std::process::Command;
+use anyhow::{Result, Context};
+use arboard::Clipboard;
+use bytes::Bytes;
 
-def detect_text(path, use_layout = false)
-  cmd = if use_layout
-    "gcloud --project andreivolt ml vision detect-document '#{path}' --format=json"
-  else
-    "gcloud --project andreivolt ml vision detect-text '#{path}' --format=json"
-  end
+#[derive(Parser)]
+#[command(about = "OCR tool using Google Cloud Vision API")]
+struct Args {
+    /// Input file (reads from stdin if not provided)
+    file: Option<String>,
 
-  output = `#{cmd}`
+    /// Take screenshot
+    #[arg(short, long)]
+    screenshot: bool,
 
-  if $?.success?
-    result = JSON.parse(output)
-    response = result['responses'][0]
+    /// Preserve layout using document detection
+    #[arg(short, long)]
+    layout: bool,
 
-    if use_layout && response['fullTextAnnotation']
-      format_with_layout(response['fullTextAnnotation'])
-    elsif response['fullTextAnnotation'] && response['fullTextAnnotation']['text']
-      response['fullTextAnnotation']['text']
-    elsif response['textAnnotations'] && response['textAnnotations'].length > 0
-      response['textAnnotations'].map { |annotation| annotation['description'] }.join(' ')
-    else
-      "No text detected"
-    end
-  else
-    $stderr.puts "Error: #{output}"
-    exit 1
-  end
-end
+    /// Copy text to clipboard
+    #[arg(short, long)]
+    copy: bool,
+}
 
-def format_with_layout(annotation)
-  return annotation['text'] unless annotation['pages']
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
 
-  # Collect all words with their positions
-  positioned_words = []
+    let image_data = if args.screenshot {
+        let output = Command::new("screenshot")
+            .output()
+            .context("Failed to take screenshot")?;
 
-  annotation['pages'].each do |page|
-    page['blocks']&.each do |block|
-      block['paragraphs']&.each do |paragraph|
-        paragraph['words']&.each do |word|
-          word_text = word['symbols']&.map { |s| s['text'] }&.join('')
-          next if word_text.strip.empty?
+        if !output.status.success() {
+            return Err(anyhow::anyhow!("Screenshot failed: {}", String::from_utf8_lossy(&output.stderr)));
+        }
 
-          # Get bounding box
-          if word['boundingBox'] && word['boundingBox']['vertices']
-            vertices = word['boundingBox']['vertices']
-            x = vertices.map { |v| v['x'] || 0 }.min
-            y = vertices.map { |v| v['y'] || 0 }.min
+        output.stdout
+    } else if let Some(file) = args.file {
+        std::fs::read(&file)?
+    } else {
+        let mut buffer = Vec::new();
+        io::stdin().read_to_end(&mut buffer)?;
+        buffer
+    };
 
-            positioned_words << {
-              text: word_text,
-              x: x,
-              y: y
+    let result = detect_text(image_data, args.layout).await?;
+
+    if args.copy {
+        let mut clipboard = Clipboard::new()?;
+        clipboard.set_text(&result)?;
+        println!("Text copied to clipboard");
+    } else {
+        println!("{}", result);
+    }
+
+    Ok(())
+}
+
+async fn detect_text(image_data: Vec<u8>, use_layout: bool) -> Result<String> {
+    if image_data.is_empty() {
+        return Err(anyhow::anyhow!("No image data provided"));
+    }
+
+    let client = ImageAnnotator::builder().build().await?;
+
+    let image = Image::new()
+        .set_content(Bytes::from(image_data));
+
+    let feature = Feature::new()
+        .set_type(if use_layout {
+            Type::DocumentTextDetection
+        } else {
+            Type::TextDetection
+        })
+        .set_max_results(1)
+        .set_model("builtin/stable".to_string());
+
+    let annotate_request = AnnotateImageRequest::new()
+        .set_image(image)
+        .set_features(vec![feature]);
+
+    let response = client
+        .batch_annotate_images()
+        .set_requests(vec![annotate_request])
+        .send()
+        .await?;
+
+    if let Some(resp) = response.responses.first() {
+        if use_layout {
+            if let Some(annotation) = &resp.full_text_annotation {
+                return Ok(format_with_layout(annotation));
             }
-          end
-        end
-      end
-    end
-  end
+        }
 
-  # Sort by Y position (top to bottom), then X position (left to right)
-  positioned_words.sort! { |a, b| [a[:y], a[:x]] <=> [b[:y], b[:x]] }
+        if let Some(annotation) = &resp.full_text_annotation {
+            return Ok(annotation.text.clone());
+        }
 
-  # Group into lines based on Y coordinate proximity
-  lines = []
-  current_line = []
-  current_y = nil
-  line_threshold = 10 # pixels
+        if let Some(first) = resp.text_annotations.first() {
+            return Ok(first.description.clone());
+        }
+    }
 
-  positioned_words.each do |word|
-    if current_y.nil? || (word[:y] - current_y).abs <= line_threshold
-      current_line << word
-      current_y = word[:y] if current_y.nil?
-    else
-      # Sort current line by X coordinate and add to lines
-      current_line.sort_by! { |w| w[:x] }
-      lines << current_line.map { |w| w[:text] }.join(' ')
-      current_line = [word]
-      current_y = word[:y]
-    end
-  end
+    Ok("No text detected".to_string())
+}
 
-  # Add the last line
-  if !current_line.empty?
-    current_line.sort_by! { |w| w[:x] }
-    lines << current_line.map { |w| w[:text] }.join(' ')
-  end
+fn format_with_layout(annotation: &TextAnnotation) -> String {
+    if annotation.pages.is_empty() {
+        return annotation.text.clone();
+    }
 
-  lines.join("\n")
-end
+    let mut positioned_words: Vec<_> = annotation.pages.iter()
+        .flat_map(|page| &page.blocks)
+        .flat_map(|block| &block.paragraphs)
+        .flat_map(|paragraph| &paragraph.words)
+        .filter_map(|word| {
+            let word_text: String = word.symbols.iter()
+                .map(|s| s.text.as_str())
+                .collect();
 
+            if word_text.trim().is_empty() {
+                return None;
+            }
 
-options = {}
-OptionParser.new do |opts|
-  opts.banner = "Usage: gcloudocr [options] [file]"
+            word.bounding_box.as_ref().map(|bbox| {
+                let x = bbox.vertices.iter().map(|v| v.x).min().unwrap_or(0);
+                let y = bbox.vertices.iter().map(|v| v.y).min().unwrap_or(0);
+                (word_text, x, y)
+            })
+        })
+        .collect();
 
-  opts.on("-s", "--screenshot", "Take screenshot") do
-    options[:screenshot] = true
-  end
+    positioned_words.sort_by_key(|&(_, x, y)| (y, x));
 
-  opts.on("-l", "--layout", "Preserve layout using document detection") do
-    options[:layout] = true
-  end
-end.parse!
+    let mut lines = Vec::new();
+    let mut current_line = Vec::new();
+    let mut current_y: Option<i32> = None;
+    let line_threshold = 10;
 
-if options[:screenshot]
-  temp_file = Tempfile.new(['screenshot', '.png'])
-  temp_path = temp_file.path
-  temp_file.close
-  `screencapture -i -s '#{temp_path}'`
-  puts detect_text(temp_path, options[:layout])
-elsif ARGV[0]
-  puts detect_text(ARGV[0], options[:layout])
-else
-  Tempfile.open('input') do |f|
-    f.write($stdin.read)
-    puts detect_text(f.path, options[:layout])
-  end
-end
+    for (text, x, y) in positioned_words {
+        if current_y.map_or(true, |cy| (y - cy).abs() <= line_threshold) {
+            current_line.push((text, x));
+            current_y = current_y.or(Some(y));
+        } else {
+            current_line.sort_by_key(|&(_, x): &(String, i32)| x);
+            lines.push(current_line.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" "));
+            current_line = vec![(text, x)];
+            current_y = Some(y);
+        }
+    }
+
+    if !current_line.is_empty() {
+        current_line.sort_by_key(|&(_, x): &(String, i32)| x);
+        lines.push(current_line.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" "));
+    }
+
+    lines.join("\n")
+}

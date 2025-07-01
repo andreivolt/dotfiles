@@ -1,195 +1,316 @@
-#!/usr/bin/env -S uv run --script --quiet
-"""Text translation using AI models."""
-# /// script
-# requires-python = ">=3.11"
-# dependencies = [
-#   "click",
-#   "pysbd",
-#   "sh",
-#   "tiktoken",
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! Text translation using AI models with parallel processing and caching
+//!
+//! ```cargo
+//! [dependencies]
+//! tiktoken-rs = "0.5"
+//! sha2 = "0.10"
+//! directories = "5"
+//! genai = "0.1"
+//! tokio = { version = "1", features = ["full"] }
+//! clap = { version = "4", features = ["derive"] }
+//! futures = "0.3"
+//! serde = { version = "1.0", features = ["derive"] }
+//! serde_json = "1.0"
+//! regex = "1"
+//! ```
 
+use std::collections::HashMap;
+use std::fs;
+use std::io::{self, Read};
+use std::path::PathBuf;
+use std::process::exit;
+use std::sync::Arc;
+use tiktoken_rs::{cl100k_base, get_bpe_from_model, CoreBPE};
+use sha2::{Sha256, Digest};
+use directories::ProjectDirs;
+use genai::chat::{ChatMessage, ChatRequest, ChatOptions};
+use genai::Client;
+use clap::Parser;
+use futures::future::join_all;
+use regex::Regex;
 
-import sys
-from typing import List, Tuple
-import click
-import pysbd
-import tiktoken
-from sh import Command, ErrorReturnCode
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
+#[derive(Parser)]
+#[command(name = "translate")]
+#[command(about = "Translate text using AI models with parallel processing")]
+struct Args {
+    #[arg(short = 't', long, help = "Target language for translation")]
+    target_lang: String,
+    
+    #[arg(short = 'm', long, default_value = "gemini-2.5-flash", help = "Model to use")]
+    model: String,
+    
+    #[arg(long, default_value = "2000", help = "Max tokens per chunk")]
+    max_tokens: usize,
+    
+    #[arg(short = 'v', long, help = "Verbose output")]
+    verbose: bool,
+    
+    #[arg(short = 'l', long, default_value = "en", help = "Source language")]
+    lang: String,
+    
+    #[arg(short = 'p', long, help = "Additional context or adjustments for translation")]
+    prompt: Option<String>,
+    
+    #[arg(long, default_value = "5", help = "Maximum number of parallel requests")]
+    max_parallel: usize,
+}
 
-class TextChunker:
-    def __init__(self, max_tokens: int = 2000, model: str = "gpt-4", lang: str = "en"):
-        """Initialize text chunker with token limits for translation."""
-        self.max_tokens = max_tokens
-        self.segmenter = pysbd.Segmenter(language=lang, clean=False)
+struct TextChunker {
+    max_tokens: usize,
+    tokenizer: CoreBPE,
+    sentence_endings: Regex,
+}
 
-        try:
-            # Try to get encoder for the specific model
-            self.encoder = tiktoken.encoding_for_model(model)
-        except:
-            # Fallback to cl100k_base (used by GPT-4)
-            self.encoder = tiktoken.get_encoding("cl100k_base")
+impl TextChunker {
+    fn new(max_tokens: usize, model: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let tokenizer = match get_bpe_from_model(model) {
+            Ok(bpe) => bpe,
+            Err(_) => cl100k_base()?,
+        };
+        
+        let sentence_endings = Regex::new(r"[.!?]+\s+")?;
+        
+        Ok(TextChunker {
+            max_tokens,
+            tokenizer,
+            sentence_endings,
+        })
+    }
+    
+    fn count_tokens(&self, text: &str) -> usize {
+        self.tokenizer.encode_with_special_tokens(text).len()
+    }
+    
+    fn split_into_sentences(&self, text: &str) -> Vec<String> {
+        self.sentence_endings
+            .split(text)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+    
+    fn chunk_by_sentences(&self, text: &str) -> Vec<String> {
+        let sentences = self.split_into_sentences(text);
+        let mut chunks = Vec::new();
+        let mut current_chunk = Vec::new();
+        let mut current_tokens = 0;
+        
+        for sentence in sentences {
+            let sentence_tokens = self.count_tokens(&sentence);
+            
+            if sentence_tokens > self.max_tokens {
+                if !current_chunk.is_empty() {
+                    chunks.push(current_chunk.join(" "));
+                    current_chunk.clear();
+                    current_tokens = 0;
+                }
+                chunks.push(sentence);
+            } else if current_tokens + sentence_tokens > self.max_tokens {
+                if !current_chunk.is_empty() {
+                    chunks.push(current_chunk.join(" "));
+                }
+                current_chunk = vec![sentence];
+                current_tokens = sentence_tokens;
+            } else {
+                current_chunk.push(sentence);
+                current_tokens += sentence_tokens;
+            }
+        }
+        
+        if !current_chunk.is_empty() {
+            chunks.push(current_chunk.join(" "));
+        }
+        
+        chunks
+    }
+}
 
-    def count_tokens(self, text: str) -> int:
-        """Count tokens in text."""
-        return len(self.encoder.encode(text))
+fn get_cache_dir() -> PathBuf {
+    if let Some(proj_dirs) = ProjectDirs::from("", "", "translate") {
+        proj_dirs.cache_dir().to_path_buf()
+    } else {
+        PathBuf::from(".cache/translate")
+    }
+}
 
-    def chunk_by_sentences(self, text: str) -> List[str]:
-        """Chunk text by sentences while respecting token limits."""
-        # Split into sentences using pysbd
-        sentences = self.segmenter.segment(text)
+fn hash_request(chunk: &str, target_lang: &str, model: &str, custom_prompt: &Option<String>) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(chunk.as_bytes());
+    hasher.update(target_lang.as_bytes());
+    hasher.update(model.as_bytes());
+    if let Some(prompt) = custom_prompt {
+        hasher.update(prompt.as_bytes());
+    }
+    format!("{:x}", hasher.finalize())
+}
 
-        chunks = []
-        current_chunk = []
-        current_tokens = 0
-
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-
-            sentence_tokens = self.count_tokens(sentence)
-
-            # If single sentence exceeds limit, add it as its own chunk
-            if sentence_tokens > self.max_tokens:
-                if current_chunk:
-                    chunks.append(' '.join(current_chunk))
-                    current_chunk = []
-                    current_tokens = 0
-                chunks.append(sentence)
-            # If adding sentence would exceed limit, start new chunk
-            elif current_tokens + sentence_tokens > self.max_tokens:
-                if current_chunk:
-                    chunks.append(' '.join(current_chunk))
-                current_chunk = [sentence]
-                current_tokens = sentence_tokens
-            # Otherwise add to current chunk
-            else:
-                current_chunk.append(sentence)
-                current_tokens += sentence_tokens
-
-        # Add remaining sentences
-        if current_chunk:
-            chunks.append(' '.join(current_chunk))
-
-        return chunks
-
-def translate_chunk(chunk: str, target_lang: str, model: str, llm_command: str, chunk_id: int, custom_prompt: str = None) -> Tuple[int, str]:
-    """Translate a single chunk using LLM CLI."""
-    base_prompt = f"Translate the following text to {target_lang}."
-    if custom_prompt:
-        base_prompt += f"\n\n{custom_prompt}"
-
-    prompt = f"""{base_prompt}
+async fn translate_chunk_cached(
+    chunk: String,
+    target_lang: String,
+    model: String,
+    custom_prompt: Option<String>,
+    client: Arc<Client>,
+    chunk_id: usize,
+) -> (usize, Result<String, String>) {
+    let cache_dir = get_cache_dir();
+    if let Err(e) = fs::create_dir_all(&cache_dir) {
+        return (chunk_id, Err(format!("Failed to create cache directory: {}", e)));
+    }
+    
+    let cache_hash = hash_request(&chunk, &target_lang, &model, &custom_prompt);
+    let cache_file = cache_dir.join(format!("{}.txt", cache_hash));
+    
+    if cache_file.exists() {
+        if let Ok(cached_result) = fs::read_to_string(&cache_file) {
+            return (chunk_id, Ok(cached_result));
+        }
+    }
+    
+    let base_prompt = format!("Translate the following text to {}.", target_lang);
+    let full_prompt = if let Some(custom) = &custom_prompt {
+        format!("{}\n\n{}", base_prompt, custom)
+    } else {
+        base_prompt
+    };
+    
+    let prompt = format!(
+        "{}
 Only output the translation, no explanations or comments.
 
 Text to translate:
-{chunk}"""
-
-    try:
-        # Create command object
-        llm = Command(llm_command)
-
-        # Run the command with arguments
-        result = llm("-m", model, prompt)
-
-        return chunk_id, result.strip()
-    except ErrorReturnCode as e:
-        return chunk_id, f"[ERROR translating chunk {chunk_id}: {e.stderr.decode() if e.stderr else str(e)}]"
-    except Exception as e:
-        return chunk_id, f"[ERROR translating chunk {chunk_id}: {str(e)}]"
-
-def parallel_translate(chunks: List[str], target_lang: str, model: str,
-                      llm_command: str, custom_prompt: str = None) -> List[str]:
-    """Translate chunks in parallel with limited concurrency."""
-    results = []
-
-    # Use ThreadPoolExecutor for parallel execution
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        # Submit all translation tasks
-        future_to_chunk = {
-            executor.submit(translate_chunk, chunk, target_lang, model, llm_command, i, custom_prompt): i
-            for i, chunk in enumerate(chunks)
+{}",
+        full_prompt, chunk
+    );
+    
+    let chat_req = ChatRequest::new(vec![
+        ChatMessage::system("You are a helpful translation assistant."),
+        ChatMessage::user(prompt),
+    ]);
+    
+    let mut options = ChatOptions::default();
+    options.temperature = Some(0.3);
+    
+    match client.exec_chat(&model, chat_req, Some(&options)).await {
+        Ok(chat_res) => {
+            if let Some(content) = chat_res.content_text_as_str() {
+                let result = content.trim().to_string();
+                let _ = fs::write(&cache_file, &result);
+                (chunk_id, Ok(result))
+            } else {
+                (chunk_id, Err("No content in response".to_string()))
+            }
         }
+        Err(e) => (chunk_id, Err(format!("Translation error: {}", e))),
+    }
+}
 
-        # Collect results as they complete
-        for future in as_completed(future_to_chunk):
-            try:
-                result = future.result()
-                results.append(result)
-            except Exception as exc:
-                chunk_id = future_to_chunk[future]
-                results.append((chunk_id, f"[ERROR translating chunk {chunk_id}: {str(exc)}]"))
+async fn parallel_translate(
+    chunks: Vec<String>,
+    target_lang: String,
+    model: String,
+    custom_prompt: Option<String>,
+    max_parallel: usize,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let client = Arc::new(Client::default());
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(max_parallel));
+    
+    let tasks: Vec<_> = chunks
+        .into_iter()
+        .enumerate()
+        .map(|(i, chunk)| {
+            let client = Arc::clone(&client);
+            let target_lang = target_lang.clone();
+            let model = model.clone();
+            let custom_prompt = custom_prompt.clone();
+            let semaphore = Arc::clone(&semaphore);
+            
+            tokio::spawn(async move {
+                let _permit = semaphore.acquire().await.unwrap();
+                translate_chunk_cached(chunk, target_lang, model, custom_prompt, client, i).await
+            })
+        })
+        .collect();
+    
+    let results = join_all(tasks).await;
+    let mut translations: HashMap<usize, String> = HashMap::new();
+    
+    for result in results {
+        match result {
+            Ok((chunk_id, Ok(translation))) => {
+                translations.insert(chunk_id, translation);
+            }
+            Ok((chunk_id, Err(error))) => {
+                translations.insert(chunk_id, format!("[ERROR translating chunk {}: {}]", chunk_id, error));
+            }
+            Err(e) => {
+                return Err(format!("Task execution error: {}", e).into());
+            }
+        }
+    }
+    
+    let mut sorted_translations: Vec<_> = translations.into_iter().collect();
+    sorted_translations.sort_by_key(|&(id, _)| id);
+    
+    Ok(sorted_translations.into_iter().map(|(_, translation)| translation).collect())
+}
 
-    # Sort results by chunk ID to maintain order
-    results.sort(key=lambda x: x[0])
-
-    return [result[1] for result in results]
-
-@click.command()
-@click.option('--target-lang', '-t', required=True, help='Target language for translation')
-@click.option('--model', '-m', default='gpt-4o', help='Model to use')
-@click.option('--max-tokens', default=2000, help='Max tokens per chunk')
-@click.option('--llm-command', '-c', default='llm', help='LLM CLI command')
-@click.option('--verbose', '-v', is_flag=True, help='Verbose output')
-@click.option('--lang', '-l', default='en', help='Source language (en, es, fr, de, it, nl, pl, ru, ar, fa, ur, hi, zh, ja)')
-@click.option('--prompt', '-p', help='Additional context or adjustments for translation')
-def main(target_lang: str, model: str, max_tokens: int,
-         llm_command: str, verbose: bool, lang: str, prompt: str):
-    """
-    Translate text from stdin using parallel LLM calls.
-
-    Reads text from stdin, chunks it by sentences respecting token limits,
-    and translates in parallel using the specified LLM CLI tool.
-
-    Example:
-        cat document.txt | ./translate.py -t Spanish -m gpt-4o -p 10
-
-        # For French source text:
-        cat french.txt | ./translate.py -t English -l fr
-
-        # Using Gemini with larger chunks:
-        cat document.txt | ./translate.py -t German -m gemini-2.0-flash --max-tokens 20000
-    """
-    # Read from stdin
-    text = sys.stdin.read()
-
-    if not text.strip():
-        click.echo("Error: No input text provided", err=True)
-        sys.exit(1)
-
-    # Initialize chunker
-    chunker = TextChunker(max_tokens=max_tokens, model=model, lang=lang)
-
-    # Chunk the text
-    if verbose:
-        click.echo(f"Chunking text with max {max_tokens} tokens per chunk...", err=True)
-        click.echo(f"Source language: {lang}", err=True)
-
-    chunks = chunker.chunk_by_sentences(text)
-
-    if verbose:
-        click.echo(f"Created {len(chunks)} chunks", err=True)
-        for i, chunk in enumerate(chunks):
-            tokens = chunker.count_tokens(chunk)
-            click.echo(f"  Chunk {i+1}: {tokens} tokens", err=True)
-
-    # Translate chunks in parallel
-    if verbose:
-        click.echo(f"\nTranslating to {target_lang} using {model}...", err=True)
-        click.echo(f"Max parallel requests: 5", err=True)
-
-    # Run parallel translation
-    translations = parallel_translate(chunks, target_lang, model, llm_command, prompt)
-
-    # Output translated text
-    output = '\n\n'.join(translations)
-    click.echo(output)
-
-    if verbose:
-        click.echo(f"\nTranslation complete!", err=True)
-
-main()
+#[tokio::main]
+async fn main() {
+    let args = Args::parse();
+    
+    let mut text = String::new();
+    
+    match io::stdin().read_to_string(&mut text) {
+        Ok(_) => {},
+        Err(e) => {
+            eprintln!("Error reading from stdin: {}", e);
+            exit(1);
+        }
+    }
+    
+    if text.trim().is_empty() {
+        eprintln!("Error: No input text provided");
+        exit(1);
+    }
+    
+    let chunker = match TextChunker::new(args.max_tokens, &args.model) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error initializing chunker: {}", e);
+            exit(1);
+        }
+    };
+    
+    if args.verbose {
+        eprintln!("Chunking text with max {} tokens per chunk...", args.max_tokens);
+        eprintln!("Source language: {}", args.lang);
+    }
+    
+    let chunks = chunker.chunk_by_sentences(&text);
+    
+    if args.verbose {
+        eprintln!("Created {} chunks", chunks.len());
+        for (i, chunk) in chunks.iter().enumerate() {
+            let tokens = chunker.count_tokens(chunk);
+            eprintln!("  Chunk {}: {} tokens", i + 1, tokens);
+        }
+        eprintln!("\nTranslating to {} using {}...", args.target_lang, args.model);
+        eprintln!("Max parallel requests: {}", args.max_parallel);
+    }
+    
+    match parallel_translate(chunks, args.target_lang, args.model, args.prompt, args.max_parallel).await {
+        Ok(translations) => {
+            let output = translations.join("\n\n");
+            println!("{}", output);
+            
+            if args.verbose {
+                eprintln!("\nTranslation complete!");
+            }
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            exit(1);
+        }
+    }
+}

@@ -144,52 +144,41 @@ return {
     })
 
     cmp.setup.cmdline(":", {
-      mapping = cmp.mapping.preset.cmdline({
-        ['<Tab>'] = {
-          c = function(_)
-            if cmp.visible() then
-              if #cmp.get_entries() == 1 then
-                cmp.confirm({ select = true })
-              else
-                cmp.select_next_item()
+      mapping = cmp.mapping.preset.cmdline(),
+      sources = cmp.config.sources({
+        { 
+          name = "path",
+          option = {
+            get_cwd = function()
+              local line = vim.fn.getcmdline()
+              if line:match('^%s*!') then
+                return nil -- Disable for shell commands
               end
-            else
-              cmp.complete()
-              if #cmp.get_entries() == 1 then
-                cmp.confirm({ select = true })
-              end
+              return vim.fn.getcwd()
             end
-          end,
-        },
-        ["<C-j>"] = {
-          c = function(fallback)
-            if cmp.visible() then
-              cmp.select_next_item()
-            else
-              fallback()
-            end
-          end,
-        },
-        ["<C-k>"] = {
-          c = function(fallback)
-            if cmp.visible() then
-              cmp.select_prev_item()
-            else
-              fallback()
-            end
-          end,
-        },
-        -- TODO
-        -- ["<c-y>"] = cmp.mapping.confirm {
-        --   behavior = cmp.ConfirmBehavior.Insert,
-        --   select = true
-        -- }
+          }
+        }
+      }, {
+        { 
+          name = "cmdline",
+          option = {
+            ignore_cmds = { '!*' }
+          }
+        }
       }),
-      sources = cmp.config.sources(
-        { { name = "cmdline" } },
-        { { name = "path" } }
-      )
+      matching = { disallow_symbol_nonprefix_matching = false },
+      enabled = function()
+        local line = vim.fn.getcmdline()
+        return not line:match('^%s*!')
+      end
     })
+
+    -- cmp.setup.cmdline("/", {
+    --   mapping = cmp.mapping.preset.cmdline(),
+    --   sources = {
+    --     { name = "buffer" }
+    --   }
+    -- })
 
     cmp.setup.cmdline('/', {
       mapping = {

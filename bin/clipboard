@@ -2,7 +2,6 @@
 //! ```cargo
 //! [dependencies]
 //! clap = { version = "4.5", features = ["derive"] }
-//! serde_json = "1.0"
 //! anyhow = "1.0"
 //! dirs = "5.0"
 //! plist = "1.7"
@@ -12,7 +11,7 @@ use anyhow::{Result, bail, Context};
 use clap::Parser;
 use std::{
     collections::HashSet,
-    io::Write,
+    io::{Write, IsTerminal},
     process::{Command, Stdio},
 };
 use plist::Value as PlistValue;
@@ -25,9 +24,6 @@ struct Args {
 
     #[arg(short, long, help = "Echo selected item to stdout (default)")]
     echo: bool,
-
-    #[arg(short, long, value_enum, default_value = "plain", help = "Output format")]
-    format: Format,
 
     #[arg(short, long, help = "Limit number of items shown")]
     number: Option<usize>,
@@ -42,12 +38,6 @@ struct Args {
     no_unique: bool,
 }
 
-#[derive(Clone, clap::ValueEnum)]
-enum Format {
-    Plain,
-    Json,
-    Csv,
-}
 
 fn get_jumpcut_data() -> Result<Vec<String>> {
     let jumpcut_file = dirs::home_dir()
@@ -155,7 +145,7 @@ fn run_fzf(items: &[String], _copy_mode: bool) -> Result<String> {
     Ok(encoded_result.replace("\\n", "\n").replace("\\t", "\t"))
 }
 
-fn output_result(selection: &str, format: Format, copy_mode: bool) -> Result<()> {
+fn output_result(selection: &str, copy_mode: bool) -> Result<()> {
     if selection.is_empty() {
         return Ok(());
     }
@@ -178,18 +168,7 @@ fn output_result(selection: &str, format: Format, copy_mode: bool) -> Result<()>
             let _ = hs.wait();
         }
     } else {
-        match format {
-            Format::Json => {
-                let json = serde_json::json!({"content": selection});
-                println!("{}", json);
-            }
-            Format::Csv => {
-                println!("\"{}\"", selection.replace('"', "\"\""));
-            }
-            Format::Plain => {
-                println!("{}", selection);
-            }
-        }
+        println!("{}", selection);
     }
 
     Ok(())
@@ -207,8 +186,16 @@ fn main() -> Result<()> {
         !args.no_unique,
     );
 
+    // If stdout is not a terminal (being piped), output all items instead of using fzf
+    if !std::io::stdout().is_terminal() {
+        for item in &filtered_items {
+            println!("{}", item);
+        }
+        return Ok(());
+    }
+
     let selection = run_fzf(&filtered_items, args.copy)?;
-    output_result(&selection, args.format, args.copy)?;
+    output_result(&selection, args.copy)?;
 
     Ok(())
 }

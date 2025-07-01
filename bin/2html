@@ -34,15 +34,15 @@ def process_full_html(content, title):
     """Convert markdown to HTML and process with single-file-cli"""
     # Get initial HTML from yarn build
     html_content = convert_markdown_to_html(content, title)
-    
+
     # Create temp file for single-file processing
     with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as temp_file:
         temp_path = temp_file.name
         temp_file.write(html_content)
-    
+
     temp_output = f"{temp_path}.singlefile.html"
     browser = os.environ.get('BROWSER')
-    
+
     try:
         if browser:
             try:
@@ -50,7 +50,7 @@ def process_full_html(content, title):
                        f'--browser-executable-path={browser}',
                        f'file://{temp_path}',
                        temp_output)
-                
+
                 if Path(temp_output).exists() and Path(temp_output).stat().st_size > 0:
                     with open(temp_output) as f:
                         result = f.read()
@@ -66,7 +66,7 @@ def process_full_html(content, title):
             os.unlink(temp_path)
         if Path(temp_output).exists():
             os.unlink(temp_output)
-    
+
     return result
 
 parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)

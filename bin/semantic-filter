@@ -1,0 +1,90 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# dependencies = [
+#   "sh",
+#   "joblib",
+#   "platformdirs"
+# ]
+# ///
+
+import sys
+import argparse
+import json
+from sh import llm
+from platformdirs import user_cache_dir
+from joblib import Memory
+
+cache_dir = user_cache_dir("semantic-filter")
+memory = Memory(cache_dir, verbose=0)
+
+parser = argparse.ArgumentParser(description='Filter text semantically based on a prompt using LLM')
+parser.add_argument('prompt', help='The prompt to filter by')
+parser.add_argument('-p', '--paragraphs', action='store_true', help='Filter by paragraphs instead of lines')
+parser.add_argument('-n', '--top-n', type=int, help='Return only top N most relevant items')
+parser.add_argument('-m', '--model', default='gpt-4o', help='LLM model to use')
+parser.add_argument('-v', '--verbose', action='store_true', help='Show reasoning')
+args = parser.parse_args()
+
+input_text = sys.stdin.read()
+
+if args.paragraphs:
+    items = [p for p in input_text.split('\n\n') if p.strip()]
+else:
+    items = [line for line in input_text.split('\n') if line.strip()]
+
+if not items:
+    sys.exit(0)
+
+
+@memory.cache
+def filter_text(text, filter_prompt, model, paragraphs, top_n, verbose):
+    """Filter text semantically using LLM with caching"""
+    system_prompt = f"""You are a semantic text filter. Given text content and a filter prompt, you must return only the parts that are semantically relevant to the prompt.
+
+Filter prompt: {filter_prompt}
+
+Instructions:
+- Return the filtered text directly, not as JSON
+- Keep only {'paragraphs' if paragraphs else 'lines'} that are relevant to the filter prompt
+- You can filter out off-topic sentences within paragraphs if needed
+- Maintain the original formatting and structure
+- Do not add any commentary or explanations
+{f'- Return at most {top_n} most relevant items' if top_n else ''}
+{f'- First provide a brief reasoning section starting with "REASONING:" on its own line, then after a blank line provide the filtered text' if verbose else ''}
+
+Respond with the filtered text only."""
+
+    result = llm('prompt', '-m', model, '-s', system_prompt, text)
+    return str(result).strip()
+
+if args.paragraphs:
+    formatted_text = "\n\n".join(items)
+else:
+    formatted_text = "\n".join(items)
+
+result = filter_text(formatted_text, args.prompt, args.model, args.paragraphs, args.top_n, args.verbose)
+
+# Handle verbose output
+if args.verbose and result.startswith("REASONING:"):
+    parts = result.split("\n\n", 1)
+    if len(parts) == 2:
+        reasoning_lines = parts[0].split("\n")
+        reasoning = "\n".join(reasoning_lines[1:])  # Skip "REASONING:" line
+        print(f"# Reasoning: {reasoning}\n", file=sys.stderr)
+        output = parts[1]
+    else:
+        output = result
+else:
+    output = result
+
+# Ensure blank lines between paragraphs
+lines = output.split('\n')
+formatted_output = []
+for line in lines:
+    if line.strip():  # Non-empty line
+        formatted_output.append(line)
+        formatted_output.append('')  # Add blank line after each paragraph
+# Remove trailing blank line if present
+if formatted_output and formatted_output[-1] == '':
+    formatted_output.pop()
+print('\n'.join(formatted_output))
