@@ -1,286 +1,467 @@
-#!/usr/bin/env -S uv run --script --quiet
-"""Render tree-structured data in terminal."""
-# /// script
-# dependencies = [
-#   "rich>=13.0",
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! Render tree-structured data in terminal.
+//!
+//! ```cargo
+//! [dependencies]
+//! serde = { version = "1.0", features = ["derive"] }
+//! serde_json = "1.0"
+//! clap = { version = "4.0", features = ["derive"] }
+//! crossterm = "0.27"
+//! textwrap = "0.16"
+//! terminal_size = "0.3"
+//! md5 = "0.7"
+//! ```
 
+use std::env;
+use std::io::{self, Read};
+use std::process;
 
-import json
-import sys
-import hashlib
-import shutil
-import io
-import argparse
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.text import Text
-from rich.color import Color
+use clap::Parser;
+use crossterm::style::{Color, SetBackgroundColor, SetForegroundColor, ResetColor};
+use serde_json::Value;
+use terminal_size::{Width, terminal_size};
+use textwrap::wrap;
 
-def get_author_color(author):
-    """Get a consistent background color with high contrast for white text"""
-    # Return empty string if not outputting to terminal
-    if not sys.stdout.isatty():
-        return ""
+#[derive(Parser, Debug)]
+#[command(about = "Render tree-structured data in terminal")]
+struct Args {
+    #[arg(long, default_value = "user", help = "Field name for comment author")]
+    author: String,
 
-    # Dark saturated colors that provide good contrast with white text
-    colors = [
-        Color.from_rgb(139, 0, 0),    # Dark red
-        Color.from_rgb(0, 100, 0),    # Dark green
-        Color.from_rgb(0, 0, 139),    # Dark blue
-        Color.from_rgb(128, 0, 128),  # Purple
-        Color.from_rgb(255, 140, 0),  # Dark orange
-        Color.from_rgb(220, 20, 60),  # Crimson
-        Color.from_rgb(25, 25, 112),  # Midnight blue
-        Color.from_rgb(128, 128, 0),  # Olive
-        Color.from_rgb(75, 0, 130),   # Indigo
-        Color.from_rgb(0, 128, 128),  # Teal
-        Color.from_rgb(165, 42, 42),  # Brown
-        Color.from_rgb(72, 61, 139),  # Dark slate blue
-    ]
-    # Use hash of author name to get consistent color
-    author_hash = int(hashlib.md5(author.encode()).hexdigest(), 16)
-    color = colors[author_hash % len(colors)]
-    rgb = color.get_truecolor()
-    return f"\033[48;2;{rgb.red};{rgb.green};{rgb.blue}m"
+    #[arg(long, default_value = "timeAgo", help = "Field name for comment timestamp")]
+    timestamp: String,
 
-def render_markdown(text, width):
-    """Render markdown using rich and return plain text with ANSI codes"""
-    # Disable colors if not outputting to terminal
-    force_terminal = sys.stdout.isatty()
-    console = Console(width=width, file=io.StringIO(), force_terminal=force_terminal)
-    md = Markdown(text)
-    console.print(md, end="")
-    return console.file.getvalue()
+    #[arg(long, default_value = "text", help = "Field name for comment content")]
+    content: String,
 
-def print_comment_tree(comments, field_map):
-    """Print a tree structure of nested comments with proper indentation and spacing."""
+    #[arg(long, default_value = "children", help = "Field name for comment replies")]
+    replies: String,
 
-    def get_field(comment, field_type):
-        """Get field value using field mapping."""
-        field_name = field_map.get(field_type, field_type)
-        return comment.get(field_name, '')
+    #[arg(long, help = "Field name for header/story data")]
+    header: Option<String>,
+}
 
-    def print_comment(comment, prefix="", is_last=True, is_root=False):
-        # Check if this starts a back-and-forth conversation to flatten
-        conversation = []
-        current = comment
-        remaining_children = []
+#[derive(Debug, Clone)]
+struct FieldMap {
+    author: String,
+    timestamp: String,
+    content: String,
+    replies: String,
+}
 
-        # Collect linear conversation chain
-        while current:
-            conversation.append({
-                'author': get_field(current, 'author') or '[deleted]',
-                'time': get_field(current, 'timestamp'),
-                'text': get_field(current, 'content')
-            })
-
-            children = get_field(current, 'replies') or current.get('children', [])
-            if not children:
-                break
-            elif len(children) == 1:
-                child = children[0]
-                # Continue if different author for back-and-forth
-                if (get_field(child, 'author') or '[deleted]') != (get_field(current, 'author') or '[deleted]'):
-                    current = child
-                else:
-                    # Same author child - stop conversation here
-                    remaining_children = children
-                    break
-            else:
-                # Multiple children - check if they're all from same author
-                authors = set((get_field(child, 'author') or '[deleted]') for child in children)
-                if len(authors) == 1:
-                    # All children same author
-                    next_author = list(authors)[0]
-                    if next_author != (get_field(current, 'author') or '[deleted]'):
-                        # Different author, merge all children into one and continue
-                        merged_child = children[0].copy()
-                        texts = []
-                        all_grandchildren = []
-                        for child in children:
-                            child_text = get_field(child, 'content')
-                            if child_text:
-                                texts.append(child_text)
-                            child_children = get_field(child, 'replies') or child.get('children', [])
-                            all_grandchildren.extend(child_children)
-                        merged_child[field_map.get('content', 'content')] = '\n\n'.join(texts)
-                        merged_child[field_map.get('replies', 'children')] = all_grandchildren
-                        current = merged_child
-                    else:
-                        # Same author children - stop conversation
-                        remaining_children = children
-                        break
-                else:
-                    # Multiple different authors - stop conversation here
-                    remaining_children = children
-                    break
-
-        # Check if this is actually a back-and-forth conversation (alternating authors)
-        is_alternating = True
-        if len(conversation) >= 3:
-            for i in range(1, len(conversation)):
-                if conversation[i]['author'] == conversation[i-1]['author']:
-                    is_alternating = False
-                    break
-
-        # If we have a meaningful alternating conversation (3+ exchanges), flatten it
-        if len(conversation) >= 3 and is_alternating:
-            # Print the first author's info with bright background
-            author_color = get_author_color(get_field(comment, 'author') or '[deleted]')
-            reset = "\033[0m" if sys.stdout.isatty() else ""
-            name = f"{author_color}{get_field(comment, 'author') or '[deleted]'}{reset} ({get_field(comment, 'timestamp')})"
-            if is_root:
-                print(f"{name}")
-            else:
-                symbol = "└── " if is_last else "├── "
-                print(f"{prefix}{symbol}{name}")
-
-            # Print the flattened conversation
-            terminal_width = shutil.get_terminal_size().columns
-            if is_root:
-                text_prefix = ""
-            else:
-                text_prefix = prefix + ("    " if is_last else "│   ")
-            available_width = max(40, terminal_width - len(text_prefix))
-
-            for i, msg in enumerate(conversation):
-                if msg['text']:
-                    # Add author label with bright background
-                    if i > 0:
-                        author_color = get_author_color(msg['author'])
-                        reset = "\033[0m" if sys.stdout.isatty() else ""
-                        print(f"{text_prefix}{author_color}{msg['author']}{reset} ({msg['time']})")
-
-                    rendered_text = render_markdown(msg['text'], available_width)
-
-                    lines = rendered_text.rstrip().split('\n')
-                    for line in lines:
-                        if line.strip():
-                            print(f"{text_prefix}{line}")
-
-                    # Add newline after each comment
-                    if rendered_text.strip():
-                        print(f"{text_prefix}")
-
-            # Use the remaining children we collected
-        else:
-            # Normal single comment rendering with bright background
-            author_color = get_author_color(get_field(comment, 'author') or '[deleted]')
-            reset = "\033[0m" if sys.stdout.isatty() else ""
-            name = f"{author_color}{get_field(comment, 'author') or '[deleted]'}{reset} ({get_field(comment, 'timestamp')})"
-            if is_root:
-                print(f"{name}")
-            else:
-                symbol = "└── " if is_last else "├── "
-                print(f"{prefix}{symbol}{name}")
-
-            comment_text = get_field(comment, 'content')
-            if comment_text:
-                terminal_width = shutil.get_terminal_size().columns
-                if is_root:
-                    text_prefix = ""
-                else:
-                    text_prefix = prefix + ("    " if is_last else "│   ")
-                available_width = max(40, terminal_width - len(text_prefix))
-
-                rendered_text = render_markdown(comment_text, available_width)
-
-                lines = rendered_text.rstrip().split('\n')
-                for line in lines:
-                    if line.strip():
-                        print(f"{text_prefix}{line}")
-
-                # Add newline after each comment
-                if rendered_text.strip():
-                    print(f"{text_prefix}")
-
-            remaining_children = get_field(comment, 'replies') or comment.get('children', [])
-
-        # Print remaining children
-        if remaining_children:
-            for i, child in enumerate(remaining_children):
-                if is_root:
-                    child_prefix = ""
-                else:
-                    child_prefix = prefix + ("    " if is_last else "│   ")
-                child_is_last = (i == len(remaining_children) - 1)
-                print_comment(child, child_prefix, child_is_last)
-
-    for i, comment in enumerate(comments):
-        is_last = (i == len(comments) - 1)
-        print_comment(comment, "", is_last, True)
-
-def render_comment_tree(data, field_map, header_key=None):
-    """Render comment tree using field mapping."""
-    console = Console()
-
-    # Handle header if present
-    if header_key and header_key in data and data[header_key]:
-        story = data[header_key]
-        console.print(f"[bold]{story.get('title', 'No title')}[/bold]")
-        if story.get('url'):
-            console.print(f"[dim]{story['url']}[/dim]")
-        points = story.get('points', 0)
-        user = story.get('user', 'unknown')
-        console.print(f"[yellow]{points} points[/yellow] [dim]by {user}[/dim]")
-        console.print()
-
-    # Get comments from data
-    comments = data.get('comments', data) if isinstance(data, dict) else data
-    
-    # If data is a list, treat it as comments directly
-    if isinstance(comments, list):
-        comment_list = comments
-    else:
-        comment_list = []
-    
-    if not comment_list:
-        console.print("[dim]No comments[/dim]")
-        return
-
-    print_comment_tree(comment_list, field_map)
-
-def main():
-    """Read JSON from stdin and render as tree."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--author', default='user', help='Field name for comment author')
-    parser.add_argument('--timestamp', default='timeAgo', help='Field name for comment timestamp')
-    parser.add_argument('--content', default='text', help='Field name for comment content')
-    parser.add_argument('--replies', default='children', help='Field name for comment replies')
-    parser.add_argument('--header', help='Field name for header/story data')
-    
-    args = parser.parse_args()
-    
-    # Build field mapping from CLI args
-    field_map = {
-        'author': args.author,
-        'timestamp': args.timestamp,
-        'content': args.content,
-        'replies': args.replies
+impl FieldMap {
+    fn new(args: &Args) -> Self {
+        Self {
+            author: args.author.clone(),
+            timestamp: args.timestamp.clone(),
+            content: args.content.clone(),
+            replies: args.replies.clone(),
+        }
     }
-    
-    try:
-        # Read JSON from stdin
-        input_data = sys.stdin.read()
-        if not input_data.strip():
-            print("Error: No input provided", file=sys.stderr)
-            sys.exit(1)
+}
 
-        data = json.loads(input_data)
+#[derive(Debug, Clone)]
+struct Comment {
+    data: Value,
+}
 
-        # Render the tree
-        render_comment_tree(data, field_map, args.header)
+impl Comment {
+    fn new(data: Value) -> Self {
+        Self { data }
+    }
 
-    except json.JSONDecodeError as e:
-        print(f"Error: Invalid JSON - {e}", file=sys.stderr)
-        sys.exit(1)
-    except KeyboardInterrupt:
-        sys.exit(0)
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    fn get_field(&self, field_map: &FieldMap, field_type: &str) -> String {
+        let field_name = match field_type {
+            "author" => &field_map.author,
+            "timestamp" => &field_map.timestamp,
+            "content" => &field_map.content,
+            "replies" => &field_map.replies,
+            _ => field_type,
+        };
 
-if __name__ == "__main__":
-    main()
+        self.data.get(field_name)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    }
+
+    fn get_children(&self, field_map: &FieldMap) -> Vec<Comment> {
+        let replies_field = &field_map.replies;
+        let empty_vec = vec![];
+        let children_data = self.data.get(replies_field)
+            .or_else(|| self.data.get("children"))
+            .and_then(|v| v.as_array())
+            .unwrap_or(&empty_vec);
+
+        children_data.iter()
+            .map(|child| Comment::new(child.clone()))
+            .collect()
+    }
+}
+
+struct ColorManager {
+    colors: Vec<Color>,
+    no_color: bool,
+    is_tty: bool,
+}
+
+impl ColorManager {
+    fn new() -> Self {
+        let no_color = env::var("NO_COLOR").is_ok();
+        let is_tty = crossterm::tty::IsTty::is_tty(&io::stdout());
+
+        let colors = vec![
+            Color::Rgb { r: 139, g: 0, b: 0 },    // Dark red
+            Color::Rgb { r: 0, g: 100, b: 0 },    // Dark green
+            Color::Rgb { r: 0, g: 0, b: 139 },    // Dark blue
+            Color::Rgb { r: 128, g: 0, b: 128 },  // Purple
+            Color::Rgb { r: 255, g: 140, b: 0 },  // Dark orange
+            Color::Rgb { r: 220, g: 20, b: 60 },  // Crimson
+            Color::Rgb { r: 25, g: 25, b: 112 },  // Midnight blue
+            Color::Rgb { r: 128, g: 128, b: 0 },  // Olive
+            Color::Rgb { r: 75, g: 0, b: 130 },   // Indigo
+            Color::Rgb { r: 0, g: 128, b: 128 },  // Teal
+            Color::Rgb { r: 165, g: 42, b: 42 },  // Brown
+            Color::Rgb { r: 72, g: 61, b: 139 },  // Dark slate blue
+        ];
+
+        Self { colors, no_color, is_tty }
+    }
+
+    fn get_author_color(&self, author: &str) -> Option<Color> {
+        if !self.is_tty || self.no_color {
+            return None;
+        }
+
+        let digest = md5::compute(author.as_bytes());
+        let hash = u128::from_be_bytes(digest.0);
+        let color_index = (hash as usize) % self.colors.len();
+        Some(self.colors[color_index])
+    }
+
+    fn format_author(&self, author: &str, timestamp: &str) -> String {
+        if let Some(color) = self.get_author_color(author) {
+            format!("{}{}{} ({}){}",
+                SetBackgroundColor(color),
+                SetForegroundColor(Color::White),
+                author,
+                timestamp,
+                ResetColor
+            )
+        } else {
+            format!("{} ({})", author, timestamp)
+        }
+    }
+}
+
+struct MarkdownRenderer {
+    width: usize,
+    no_color: bool,
+}
+
+impl MarkdownRenderer {
+    fn new(width: usize) -> Self {
+        let no_color = env::var("NO_COLOR").is_ok() || !crossterm::tty::IsTty::is_tty(&io::stdout());
+        Self { width, no_color }
+    }
+
+    fn render(&self, text: &str) -> String {
+        // Just wrap text to specified width - no markdown/HTML processing
+        let wrapped_lines: Vec<String> = text.lines()
+            .flat_map(|line| {
+                if line.trim().is_empty() {
+                    vec![String::new()]
+                } else {
+                    wrap(line, self.width).into_iter().map(|s| s.to_string()).collect()
+                }
+            })
+            .collect();
+
+        wrapped_lines.join("\n")
+    }
+}
+
+#[derive(Debug)]
+struct ConversationMessage {
+    author: String,
+    timestamp: String,
+    text: String,
+}
+
+struct ConversationDetector;
+
+impl ConversationDetector {
+    fn extract_conversation(comment: &Comment, field_map: &FieldMap) -> (Vec<ConversationMessage>, Vec<Comment>) {
+        let mut conversation = Vec::new();
+        let mut current = comment.clone();
+        let mut remaining_children = Vec::new();
+
+        loop {
+            let author = current.get_field(field_map, "author");
+            let author = if author.is_empty() { "[deleted]".to_string() } else { author };
+
+            conversation.push(ConversationMessage {
+                author: author.clone(),
+                timestamp: current.get_field(field_map, "timestamp"),
+                text: current.get_field(field_map, "content"),
+            });
+
+            let children = current.get_children(field_map);
+            if children.is_empty() {
+                break;
+            } else if children.len() == 1 {
+                let child = &children[0];
+                let child_author = child.get_field(field_map, "author");
+                let child_author = if child_author.is_empty() { "[deleted]".to_string() } else { child_author };
+
+                if child_author != author {
+                    current = child.clone();
+                } else {
+                    remaining_children = children;
+                    break;
+                }
+            } else {
+                // Multiple children - check if they're all from same author
+                let authors: std::collections::HashSet<String> = children.iter()
+                    .map(|child| {
+                        let a = child.get_field(field_map, "author");
+                        if a.is_empty() { "[deleted]".to_string() } else { a }
+                    })
+                    .collect();
+
+                if authors.len() == 1 {
+                    let next_author = authors.iter().next().unwrap();
+                    if next_author != &author {
+                        // Merge all children into one
+                        let mut texts = Vec::new();
+                        let mut all_grandchildren = Vec::new();
+
+                        for child in &children {
+                            let child_text = child.get_field(field_map, "content");
+                            if !child_text.is_empty() {
+                                texts.push(child_text);
+                            }
+                            all_grandchildren.extend(child.get_children(field_map));
+                        }
+
+                        // Create merged child (simplified - using first child as base)
+                        let mut merged_data = children[0].data.clone();
+                        if let Some(obj) = merged_data.as_object_mut() {
+                            obj.insert(field_map.content.clone(), Value::String(texts.join("\n\n")));
+                            obj.insert(field_map.replies.clone(), serde_json::to_value(&all_grandchildren.iter().map(|c| &c.data).collect::<Vec<_>>()).unwrap_or(Value::Array(vec![])));
+                        }
+                        current = Comment::new(merged_data);
+                    } else {
+                        remaining_children = children;
+                        break;
+                    }
+                } else {
+                    remaining_children = children;
+                    break;
+                }
+            }
+        }
+
+        (conversation, remaining_children)
+    }
+
+    fn is_alternating_conversation(conversation: &[ConversationMessage]) -> bool {
+        if conversation.len() < 3 {
+            return false;
+        }
+
+        for i in 1..conversation.len() {
+            if conversation[i].author == conversation[i-1].author {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+struct TreeRenderer {
+    field_map: FieldMap,
+    color_manager: ColorManager,
+    terminal_width: usize,
+}
+
+impl TreeRenderer {
+    fn new(field_map: FieldMap) -> Self {
+        let terminal_width = terminal_size()
+            .map(|(Width(w), _)| w as usize)
+            .unwrap_or(80);
+
+        Self {
+            field_map,
+            color_manager: ColorManager::new(),
+            terminal_width,
+        }
+    }
+
+    fn render_header(&self, data: &Value, header_key: &str) {
+        if let Some(story) = data.get(header_key) {
+            let title = story.get("title").and_then(|v| v.as_str()).unwrap_or("No title");
+            println!("{}", title); // In a full implementation, you'd add bold formatting
+
+            if let Some(url) = story.get("url").and_then(|v| v.as_str()) {
+                println!("{}", url); // In a full implementation, you'd add dim formatting
+            }
+
+            let points = story.get("points").and_then(|v| v.as_u64()).unwrap_or(0);
+            let user = story.get("user").and_then(|v| v.as_str()).unwrap_or("unknown");
+            println!("{} points by {}", points, user); // In a full implementation, you'd add color formatting
+            println!();
+        }
+    }
+
+    fn render_comment_tree(&self, comments: &[Comment]) {
+        for (i, comment) in comments.iter().enumerate() {
+            let is_last = i == comments.len() - 1;
+            self.print_comment(comment, "", is_last, true);
+        }
+    }
+
+    fn print_comment(&self, comment: &Comment, prefix: &str, is_last: bool, is_root: bool) {
+        let (conversation, remaining_children) = ConversationDetector::extract_conversation(comment, &self.field_map);
+
+        if conversation.len() >= 3 && ConversationDetector::is_alternating_conversation(&conversation) {
+            // Render flattened conversation
+            let author = if conversation[0].author.is_empty() { "[deleted]".to_string() } else { conversation[0].author.clone() };
+            let name = self.color_manager.format_author(&author, &conversation[0].timestamp);
+
+            if is_root {
+                println!("{}", name);
+            } else {
+                let symbol = if is_last { "└── " } else { "├── " };
+                println!("{}{}{}", prefix, symbol, name);
+            }
+
+            let text_prefix = if is_root {
+                String::new()
+            } else {
+                format!("{}{}", prefix, if is_last { "    " } else { "│   " })
+            };
+
+            let available_width = self.terminal_width.saturating_sub(text_prefix.len()).max(40);
+            let renderer = MarkdownRenderer::new(available_width);
+
+            for (i, msg) in conversation.iter().enumerate() {
+                if !msg.text.is_empty() {
+                    if i > 0 {
+                        let author_name = self.color_manager.format_author(&msg.author, &msg.timestamp);
+                        println!("{}{}", text_prefix, author_name);
+                    }
+
+                    let rendered_text = renderer.render(&msg.text);
+                    for line in rendered_text.lines() {
+                        if !line.trim().is_empty() {
+                            println!("{}{}", text_prefix, line);
+                        }
+                    }
+
+                    if !rendered_text.trim().is_empty() {
+                        println!("{}", text_prefix);
+                    }
+                }
+            }
+        } else {
+            // Render single comment
+            let author = comment.get_field(&self.field_map, "author");
+            let author = if author.is_empty() { "[deleted]".to_string() } else { author };
+            let timestamp = comment.get_field(&self.field_map, "timestamp");
+            let name = self.color_manager.format_author(&author, &timestamp);
+
+            if is_root {
+                println!("{}", name);
+            } else {
+                let symbol = if is_last { "└── " } else { "├── " };
+                println!("{}{}{}", prefix, symbol, name);
+            }
+
+            let comment_text = comment.get_field(&self.field_map, "content");
+            if !comment_text.is_empty() {
+                let text_prefix = if is_root {
+                    String::new()
+                } else {
+                    format!("{}{}", prefix, if is_last { "    " } else { "│   " })
+                };
+
+                let available_width = self.terminal_width.saturating_sub(text_prefix.len()).max(40);
+                let renderer = MarkdownRenderer::new(available_width);
+                let rendered_text = renderer.render(&comment_text);
+
+                for line in rendered_text.lines() {
+                    if !line.trim().is_empty() {
+                        println!("{}{}", text_prefix, line);
+                    }
+                }
+
+                if !rendered_text.trim().is_empty() {
+                    println!("{}", text_prefix);
+                }
+            }
+        }
+
+        // Print remaining children
+        if !remaining_children.is_empty() {
+            for (i, child) in remaining_children.iter().enumerate() {
+                let child_prefix = if is_root {
+                    String::new()
+                } else {
+                    format!("{}{}", prefix, if is_last { "    " } else { "│   " })
+                };
+                let child_is_last = i == remaining_children.len() - 1;
+                self.print_comment(child, &child_prefix, child_is_last, false);
+            }
+        }
+    }
+}
+
+fn main() {
+    let args = Args::parse();
+    let field_map = FieldMap::new(&args);
+
+    // Read JSON from stdin
+    let mut input = String::new();
+    if let Err(e) = io::stdin().read_to_string(&mut input) {
+        eprintln!("Error reading stdin: {}", e);
+        process::exit(1);
+    }
+
+    if input.trim().is_empty() {
+        eprintln!("Error: No input provided");
+        process::exit(1);
+    }
+
+    // Parse JSON
+    let data: Value = match serde_json::from_str(&input) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("Error: Invalid JSON - {}", e);
+            process::exit(1);
+        }
+    };
+
+    let renderer = TreeRenderer::new(field_map);
+
+    // Handle header if present
+    if let Some(header_key) = &args.header {
+        renderer.render_header(&data, header_key);
+    }
+
+    // Get comments from data
+    let comments = if let Some(comments_array) = data.get("comments").and_then(|v| v.as_array()) {
+        comments_array.iter().map(|c| Comment::new(c.clone())).collect()
+    } else if let Some(data_array) = data.as_array() {
+        data_array.iter().map(|c| Comment::new(c.clone())).collect()
+    } else {
+        vec![]
+    };
+
+    if comments.is_empty() {
+        println!("No comments");
+        return;
+    }
+
+    renderer.render_comment_tree(&comments);
+}

@@ -1,41 +1,73 @@
 require("hs.ipc")
 
-hs.loadSpoon("SpoonInstall")
+local ghostty = require("ghostty")
 
+hs.loadSpoon("SpoonInstall")
 spoon.SpoonInstall:updateAllRepos()
 
-local screen = require("hs.screen")
-local application = require("hs.application")
-
-local toggleApp = require("toggle_app")
-require("hotkeys")
-
 spoon.SpoonInstall:andUse("ReloadConfiguration", {
-  repo = "default", -- Repository where the spoon is located
-  watch_paths = {
-    hs.configdir, -- Default Hammerspoon config directory
-  },
+  repo = "default",
+  watch_paths = { hs.configdir },
 })
-
 spoon.ReloadConfiguration:start()
 
-spoon.SpoonInstall:andUse("WinWin", {
-  repo = "default", -- Repository where WinWin is located
-})
+local function toggleDarkMode()
+	hs.osascript.applescript([[
+        tell application "System Events"
+            tell appearance preferences
+                set dark mode to not dark mode
+            end tell
+        end tell
+    ]])
+end
 
-local redshift = require("redshift")
-redshift.init()
+hs.hotkey.bind({}, "²", function()
+	ghostty.toggleVisibility()
+end)
 
--- CLI setup
+hs.hotkey.bind({ "alt" }, "²", function()
+	ghostty.toggleMonitor()
+end)
+
+hs.hotkey.bind({ "ctrl", "cmd" }, "v", function()
+	hs.execute("/Users/andrei/bin/vision -c", true)
+end)
+
+hs.hotkey.bind({ "ctrl", "cmd" }, "d", function()
+	toggleDarkMode()
+end)
+
+local function handleGhosttyResize()
+  local ghosttyApp = hs.application.get("ghostty")
+  if not ghosttyApp then return end
+
+  local mainWindow = ghosttyApp:mainWindow()
+  if not mainWindow then return end
+
+  if #hs.screen.allScreens() > 1 then
+    ghostty.toggleMonitor()
+  else
+    mainWindow:maximize()
+  end
+end
+
+hs.screen.watcher.new(function()
+  hs.timer.doAfter(0.5, handleGhosttyResize)
+end):start()
+
+hs.spaces.watcher.new(function()
+  hs.timer.doAfter(0.5, handleGhosttyResize)
+end):start()
+
 hs.ipc.cliInstall()
 
 if hs.ipc then
   hs.ipc.handler = function(str)
     if str == "toggle-terminal" then
-      toggleApp.toggleAppVisibility()
+      ghostty.toggleVisibility()
       return "Toggled terminal visibility"
     elseif str == "toggle-monitor" then
-      toggleApp.toggleAppMonitor()
+      ghostty.toggleMonitor()
       return "Moved terminal to other monitor"
     else
       return "Unknown command: " .. str

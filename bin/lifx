@@ -1,666 +1,941 @@
-#!/usr/bin/env -S uv run --script --quiet
-"""Control LIFX smart lights via LAN protocol."""
-# /// script
-# dependencies = [
-#     "click",
-#     "lifxlan",
-#     "sh",
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! Control LIFX smart lights via LAN protocol using lifx-core.
+//!
+//! ```cargo
+//! [dependencies]
+//! lifx-core = "0.4.0"
+//! clap = { version = "4.0", features = ["derive"] }
+//! tokio = { version = "1.0", features = ["full"] }
+//! serde = { version = "1.0", features = ["derive"] }
+//! serde_json = "1.0"
+//! anyhow = "1.0"
+//! dirs = "5.0"
+//! uuid = { version = "1.0", features = ["v4"] }
+//! colored = "2.0"
+//! dialoguer = { version = "0.11", features = ["fuzzy-select"] }
+//! ```
 
+use anyhow::{anyhow, Context, Result};
+use clap::{Parser, Subcommand};
+use lifx_core::{BuildOptions, Message, RawMessage, HSBK};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::net::UdpSocket as TokioUdpSocket;
+use tokio::time::timeout;
 
-import os
-import sys
-import json
-import sh
-import colorsys
-from pathlib import Path
-from lifxlan import LifxLAN, Light, BLUE, GREEN, RED, YELLOW, ORANGE, PURPLE, CYAN, WHITE
-import click
+// LIFX Protocol Constants
+const LIFX_PORT: u16 = 56700;
+const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(3);
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 
-# LIFX App themed colors
-LIFX_THEMES = {
-    "sunset": "12,75,80,2500",
-    "candlelight": "35,100,25,1500",
-    "fireplace": "25,100,40,2000",
-    "dawn": "25,60,60,3000",
-    "reading": "0,0,80,4000",
-    "concentrate": "0,0,100,6500",
-    "energize": "200,100,100,5500",
-    "relax": "240,30,50,2700",
-    "sleep": "0,100,5,2000",
-    "romantic": "330,70,30,2200",
-    "party": "300,100,100,3500",
-    "movie": "240,100,20,2700",
-    "forest": "120,80,60,3500",
-    "ocean": "200,100,70,4000",
-    "spring": "90,70,80,4500",
-    "autumn": "30,90,70,2800",
+// Color themes from the original script
+const LIFX_THEMES: &[(&str, &str)] = &[
+    ("sunset", "12,75,80,2500"),
+    ("candlelight", "35,100,25,1500"),
+    ("fireplace", "25,100,40,2000"),
+    ("dawn", "25,60,60,3000"),
+    ("reading", "0,0,80,4000"),
+    ("concentrate", "0,0,100,6500"),
+    ("energize", "200,100,100,5500"),
+    ("relax", "240,30,50,2700"),
+    ("sleep", "0,100,5,2000"),
+    ("romantic", "330,70,30,2200"),
+    ("party", "300,100,100,3500"),
+    ("movie", "240,100,20,2700"),
+    ("forest", "120,80,60,3500"),
+    ("ocean", "200,100,70,4000"),
+    ("spring", "90,70,80,4500"),
+    ("autumn", "30,90,70,2800"),
+];
+
+// Predefined colors with HSBK values
+const PREDEFINED_COLORS: &[(&str, &str)] = &[
+    ("red", "0,100,100,3500"),
+    ("green", "120,100,100,3500"),
+    ("blue", "240,100,100,3500"),
+    ("yellow", "60,100,100,3500"),
+    ("orange", "36,100,100,3500"),
+    ("purple", "280,100,100,3500"),
+    ("cyan", "180,100,100,3500"),
+    ("white", "0,0,100,3500"),
+];
+
+#[derive(Parser)]
+#[command(name = "lifx")]
+#[command(about = "Control LIFX smart lights via LAN protocol")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    /// Apply to all lights
+    #[arg(short = 'a', long = "all")]
+    all_lights: bool,
+
+    /// Apply to specific light names
+    #[arg(short = 'n', long = "name")]
+    names: Vec<String>,
+
+    /// Apply to lights in group
+    #[arg(short = 'g', long = "group")]
+    group: Option<String>,
+
+    /// Transition duration in seconds
+    #[arg(short = 'd', long = "duration", default_value = "0")]
+    duration: f32,
 }
 
-PREDEFINED_COLORS = {
-    "Red": RED,
-    "Green": GREEN,
-    "Blue": BLUE,
-    "Yellow": YELLOW,
-    "Orange": ORANGE,
-    "Purple": PURPLE,
-    "Cyan": CYAN,
-    "White": WHITE,
+#[derive(Subcommand)]
+enum Commands {
+    /// List discovered lights
+    List {
+        /// Force rescan for devices
+        #[arg(short = 'r', long = "rescan")]
+        rescan: bool,
+    },
+    /// Turn lights on
+    On,
+    /// Turn lights off
+    Off,
+    /// Set light color
+    Color {
+        /// Color specification (HSBK, kelvin, theme, or predefined)
+        color: Option<String>,
+    },
+    /// Set brightness (0-100)
+    Brightness {
+        level: u8,
+    },
+    /// Increase brightness
+    Brighter {
+        #[arg(default_value = "10")]
+        amount: u8,
+    },
+    /// Decrease brightness
+    Dimmer {
+        #[arg(default_value = "10")]
+        amount: u8,
+    },
+    /// Make lights warmer
+    Warmer {
+        #[arg(default_value = "100")]
+        amount: u16,
+    },
+    /// Make lights cooler
+    Cooler {
+        #[arg(default_value = "100")]
+        amount: u16,
+    },
+    /// Clear device cache
+    ClearCache,
 }
 
-HSBK_COLOR_OPTIONS = [
-    ("Bright Red", "0,100,100,3500"),
-    ("Deep Red", "0,100,50,3500"),
-    ("Orange Red", "24,100,100,3500"),
-    ("Orange", "48,100,100,3500"),
-    ("Golden Yellow", "72,100,100,3500"),
-    ("Bright Yellow", "96,100,100,3500"),
-    ("Yellow Green", "120,100,100,3500"),
-    ("Lime Green", "144,100,100,3500"),
-    ("Bright Green", "120,100,100,3500"),
-    ("Forest Green", "120,100,50,3500"),
-    ("Cyan Green", "168,100,100,3500"),
-    ("Aqua Cyan", "180,100,100,3500"),
-    ("Sky Blue", "216,100,100,3500"),
-    ("Bright Blue", "240,100,100,3500"),
-    ("Deep Blue", "240,100,50,3500"),
-    ("Royal Blue", "264,100,100,3500"),
-    ("Purple Blue", "288,100,100,3500"),
-    ("Bright Purple", "300,100,100,3500"),
-    ("Deep Purple", "300,100,50,3500"),
-    ("Magenta", "324,100,100,3500"),
-    ("Pink", "336,50,100,3500"),
-    ("Hot Pink", "336,100,100,3500"),
-    ("Warm White", "0,0,100,2700"),
-    ("Soft White", "0,0,100,3200"),
-    ("Daylight White", "0,0,100,5500"),
-    ("Cool White", "0,0,100,6500"),
-    ("Dim Warm", "0,0,25,2700"),
-    ("Cozy Orange", "36,50,70,2700"),
-    ("Sunset", "12,75,80,2500"),
-    ("Lavender", "280,40,80,3500"),
-]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct CachedLight {
+    label: String,
+    target: u64,
+    ip_addr: IpAddr,
+    mac_addr: [u8; 6],
+    power: Option<u16>,
+    color: Option<CachedHSBK>,
+}
 
-CACHE_FILE_NAME = "lifx.json"
-LAST_USED_FILE_NAME = "lifx_last_used.json"
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct CachedHSBK {
+    hue: u16,
+    saturation: u16,
+    brightness: u16,
+    kelvin: u16,
+}
 
-def get_cache_file_path():
-    xdg_state_home = os.environ.get('XDG_STATE_HOME', Path.home() / '.local' / 'state')
-    cache_dir = Path(xdg_state_home)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_file = cache_dir / CACHE_FILE_NAME
-    return cache_file
+impl From<HSBK> for CachedHSBK {
+    fn from(hsbk: HSBK) -> Self {
+        CachedHSBK {
+            hue: hsbk.hue,
+            saturation: hsbk.saturation,
+            brightness: hsbk.brightness,
+            kelvin: hsbk.kelvin,
+        }
+    }
+}
 
-def load_cache(cache_file):
-    try:
-        with open(cache_file, 'r') as f:
-            cached_lights = json.load(f)
-        return cached_lights
-    except:
-        return None
+impl From<CachedHSBK> for HSBK {
+    fn from(cached: CachedHSBK) -> Self {
+        HSBK {
+            hue: cached.hue,
+            saturation: cached.saturation,
+            brightness: cached.brightness,
+            kelvin: cached.kelvin,
+        }
+    }
+}
 
-def save_cache(cache_file, lights):
-    try:
-        with open(cache_file, 'w') as f:
-            json.dump([{
-                'label': light.get_label(),
-                'ip_addr': light.get_ip_addr(),
-                'mac_addr': light.get_mac_addr(),
-                'power': light.get_power(),
-                'color': light.get_color(),
-            } for light in lights], f, indent=4)
-    except:
-        pass
+#[derive(Debug)]
+struct LifxDevice {
+    target: u64,
+    ip_addr: IpAddr,
+    socket: Arc<UdpSocket>,
+}
 
-def get_last_used_file_path():
-    xdg_state_home = os.environ.get('XDG_STATE_HOME', Path.home() / '.local' / 'state')
-    cache_dir = Path(xdg_state_home)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    last_used_file = cache_dir / LAST_USED_FILE_NAME
-    return last_used_file
+impl LifxDevice {
+    fn new(target: u64, ip_addr: IpAddr) -> Result<Self> {
+        let socket = UdpSocket::bind("0.0.0.0:0")
+            .context("Failed to bind UDP socket")?;
+        socket.set_read_timeout(Some(COMMAND_TIMEOUT))?;
 
-def save_last_used_lights(lights):
-    try:
-        last_used_file = get_last_used_file_path()
-        with open(last_used_file, 'w') as f:
-            json.dump([{
-                'label': light.get_label(),
-                'ip_addr': light.get_ip_addr(),
-                'mac_addr': light.get_mac_addr(),
-            } for light in lights], f, indent=4)
-    except:
-        pass
+        Ok(LifxDevice {
+            target,
+            ip_addr,
+            socket: Arc::new(socket),
+        })
+    }
 
-def load_last_used_lights():
-    try:
-        last_used_file = get_last_used_file_path()
-        with open(last_used_file, 'r') as f:
-            last_used_data = json.load(f)
-        lights = []
-        for light_data in last_used_data:
-            try:
-                light = Light(light_data['mac_addr'], light_data['ip_addr'])
-                lights.append(light)
-            except:
-                pass
-        return lights
-    except:
-        return None
+    fn send_message(&self, message: Message) -> Result<()> {
+        let build_options = BuildOptions {
+            target: Some(self.target),
+            res_required: false,
+            ack_required: false,
+            ..Default::default()
+        };
+        let raw_message = RawMessage::build(&build_options, message)
+            .context("Failed to build message")?;
 
-def kelvin_to_hsbk(kelvin):
-    try:
-        kelvin = int(kelvin[:-1])
-    except:
-        return None
-    if kelvin > 9000:
-        kelvin = 9000
+        let bytes = raw_message.pack().context("Failed to pack message")?;
+        let addr = SocketAddr::new(self.ip_addr, LIFX_PORT);
+        self.socket.send_to(&bytes, addr)
+            .context("Failed to send message")?;
 
-    if kelvin < 1500:
-        # Emulate warmer temperatures with red hue and saturation
-        # Map 1000K-1499K to increasing saturation and red hue
-        virtual_temp = max(1000, kelvin)
-        temp_factor = (1500 - virtual_temp) / 500.0  # 0 to 1 as we go from 1500K to 1000K
+        Ok(())
+    }
 
-        hue = 0  # Red
-        saturation = min(100, temp_factor * 80)  # Up to 80% saturation at 1000K
-        brightness = 100
-        actual_kelvin = 1500  # LIFX hardware limit
-        return [hue, saturation, brightness, actual_kelvin]
-    else:
-        hue = 0
-        saturation = 0
-        brightness = 100
-        return [hue, saturation, brightness, kelvin]
+    fn send_message_with_response(&self, message: Message) -> Result<Vec<u8>> {
+        let build_options = BuildOptions {
+            target: Some(self.target),
+            res_required: true,
+            ack_required: false,
+            ..Default::default()
+        };
+        let raw_message = RawMessage::build(&build_options, message)
+            .context("Failed to build message")?;
 
-def intuitive_to_lifx_hsbk(h, s, b, k):
-    """Convert intuitive HSBK (0-360, 0-100, 0-100, kelvin) to LIFX format (0-65535)"""
-    lifx_h = int(h / 360 * 65535)
-    lifx_s = int(s / 100 * 65535)
-    lifx_b = int(b / 100 * 65535)
-    return [lifx_h, lifx_s, lifx_b, k]
+        let bytes = raw_message.pack().context("Failed to pack message")?;
+        let addr = SocketAddr::new(self.ip_addr, LIFX_PORT);
+        self.socket.send_to(&bytes, addr)
+            .context("Failed to send message")?;
 
-def hsbk_to_rgb(h, s, b, k):
-    """Convert HSBK to RGB for color preview (ignores kelvin for now)"""
-    if s == 0:  # White light - approximate kelvin to RGB
-        if k <= 3000:
-            return (255, 180, 107)  # Warm white
-        elif k <= 4000:
-            return (255, 214, 170)  # Neutral white
-        else:
-            return (255, 244, 229)  # Cool white
-    else:
-        # Convert HSB to RGB
-        r, g, b_rgb = colorsys.hsv_to_rgb(h/360, s/100, b/100)
-        return (int(r*255), int(g*255), int(b_rgb*255))
+        let mut buf = [0; 1024];
+        let (len, _) = self.socket.recv_from(&mut buf)
+            .context("Failed to receive response")?;
 
-def rgb_to_ansi(r, g, b):
-    """Convert RGB to ANSI color code"""
-    return f"\033[38;2;{r};{g};{b}m██\033[0m"
+        Ok(buf[..len].to_vec())
+    }
 
-def get_virtual_kelvin(current_color):
-    """Extract virtual kelvin from current light state, accounting for sub-1500K emulation"""
-    current_kelvin = current_color[3]
-    current_saturation = current_color[1] / 65535 * 100
-    current_hue = current_color[0] / 65535 * 360
+    fn query_message(&self, message: Message) -> Result<Message> {
+        let data = self.send_message_with_response(message)?;
+        let raw_msg = RawMessage::unpack(&data)?;
+        let message = Message::from_raw(&raw_msg)?;
+        Ok(message)
+    }
+}
 
-    if current_kelvin == 1500 and current_saturation > 5 and abs(current_hue) < 30:
-        # Likely emulating sub-1500K temperature
-        # Map saturation back to virtual kelvin: 80% sat = 1000K, 0% sat = 1500K
-        temp_factor = current_saturation / 80.0
-        virtual_kelvin = int(1500 - (temp_factor * 500))
-        return max(1000, virtual_kelvin)
-    else:
-        return current_kelvin
+struct LifxController {
+    cache_file: PathBuf,
+    last_used_file: PathBuf,
+    brightness_memory_file: PathBuf,
+}
 
-def set_virtual_kelvin(light, virtual_kelvin, current_color, duration_ms):
-    """Set light to virtual kelvin temperature, handling sub-1500K emulation"""
-    if virtual_kelvin < 1500:
-        # Emulate warmer temperature with red hue and saturation
-        temp_factor = (1500 - virtual_kelvin) / 500.0
-        hue = 0  # Red
-        saturation = min(100, temp_factor * 80)
-        brightness = current_color[2] / 65535 * 100
-        actual_kelvin = 1500
+impl LifxController {
+    fn new() -> Result<Self> {
+        let state_dir = dirs::state_dir()
+            .or_else(|| dirs::home_dir().map(|d| d.join(".local/state")))
+            .ok_or_else(|| anyhow!("Cannot determine state directory"))?;
 
-        new_color = intuitive_to_lifx_hsbk(hue, saturation, brightness, actual_kelvin)
-        light.set_color(new_color, duration=duration_ms)
-        return f"{virtual_kelvin}K (emulated)"
-    else:
-        # Normal kelvin temperature - revert to pure white
-        brightness = current_color[2] / 65535 * 100
-        new_color = intuitive_to_lifx_hsbk(0, 0, brightness, virtual_kelvin)  # Pure white
-        light.set_color(new_color, duration=duration_ms)
-        return f"{virtual_kelvin}K"
+        std::fs::create_dir_all(&state_dir)
+            .context("Failed to create state directory")?;
 
-def add_duration_option(f):
-    return click.option(
-        '--duration', '-d',
-        type=float,
-        default=0.0,
-        show_default=True,
-        help='Transition duration in seconds'
-    )(f)
+        Ok(LifxController {
+            cache_file: state_dir.join("lifx.json"),
+            last_used_file: state_dir.join("lifx_last_used.json"),
+            brightness_memory_file: state_dir.join("lifx_brightness_memory.json"),
+        })
+    }
 
-def add_target_options(f):
-    f = click.option(
-        '--all', '-a',
-        'all_lights',
-        is_flag=True,
-        default=False,
-        help='Apply actions to all discovered lights.'
-    )(f)
-    f = click.option(
-        '--group', '-g',
-        type=str,
-        help='Specify a group name to apply actions.'
-    )(f)
-    f = click.option(
-        '--name', '-n',
-        multiple=True,
-        help='Specify the name(s) of the light(s) to control.'
-    )(f)
-    return f
+    async fn discover_lights(&self, use_cache: bool) -> Result<Vec<CachedLight>> {
+        if use_cache && self.cache_file.exists() {
+            if let Ok(cached) = self.load_cache() {
+                return Ok(cached);
+            }
+        }
 
-@click.group(invoke_without_command=True)
-@add_target_options
-@click.pass_context
-def cli(ctx, all_lights, group, name):
-    ctx.ensure_object(dict)
-    ctx.obj['all_lights'] = all_lights
-    ctx.obj['group'] = group
-    ctx.obj['name'] = name
+        println!("Discovering LIFX lights...");
+        let discovered = self.perform_discovery().await?;
+        self.save_cache(&discovered)?;
+        Ok(discovered)
+    }
 
-    # Check if script was called as 'on' or 'off' (via symlink or argv[0])
-    script_name = os.path.basename(sys.argv[0])
-    if script_name in ['on', 'off']:
-        power_command(all_lights=all_lights, group=group, name=name, duration=0.0, state=script_name)
-        return
+    async fn perform_discovery(&self) -> Result<Vec<CachedLight>> {
+        let socket = TokioUdpSocket::bind("0.0.0.0:0").await
+            .context("Failed to bind UDP socket")?;
+        socket.set_broadcast(true)
+            .context("Failed to enable broadcast")?;
 
-@cli.command(name='list', short_help='List lights.')
-@click.option('--rescan', '-r',
-              is_flag=True,
-              default=False,
-              help='Invalidate cache and rescan for devices.')
-def list_lights(rescan):
-    lifx = LifxLAN()
-    cache_file = get_cache_file_path()
-    if rescan or not cache_file.exists():
-        lights = lifx.get_lights()
-        save_cache(cache_file, lights)
-    else:
-        cached_lights = load_cache(cache_file)
-        if cached_lights:
-            lights = []
-            for light_data in cached_lights:
-                try:
-                    light = Light(light_data['mac_addr'], light_data['ip_addr'])
-                    lights.append(light)
-                except:
-                    pass
-            if not lights:
-                lights = lifx.get_lights()
-                save_cache(cache_file, lights)
+        // Send GetService message to discover devices
+        let build_options = BuildOptions {
+            target: None, // Broadcast to all devices
+            res_required: false,
+            ack_required: false,
+            ..Default::default()
+        };
+        let discovery_message = RawMessage::build(&build_options, Message::GetService)
+            .context("Failed to build discovery message")?;
 
-    if not lights:
-        print("No LIFX lights found on the network.")
-        return
+        let bytes = discovery_message.pack().context("Failed to pack discovery message")?;
+        let broadcast_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), LIFX_PORT);
+        socket.send_to(&bytes, broadcast_addr).await
+            .context("Failed to send discovery message")?;
 
-    for light in lights:
-        try:
-            label = light.get_label()
-            power = "On" if light.get_power() > 0 else "Off"
-            color = light.get_color()
+        let mut discovered = Vec::new();
+        let mut seen_targets = HashSet::new();
+        let deadline = Instant::now() + DISCOVERY_TIMEOUT;
 
-            if color and power == "On":
-                h = color[0]/65535*360
-                s = color[1]/65535*100
-                b = color[2]/65535*100
-                k = color[3]
+        while Instant::now() < deadline {
+            let remaining = deadline.duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
 
-                # Generate color preview
-                r, g, b_rgb = hsbk_to_rgb(h, s, b, k)
-                color_preview = rgb_to_ansi(r, g, b_rgb)
+            let mut buf = [0; 1024];
+            match timeout(remaining, socket.recv_from(&mut buf)).await {
+                Ok(Ok((len, addr))) => {
+                    if let Ok(device) = self.process_discovery_response(&buf[..len], addr.ip()).await {
+                        // Only add if we haven't seen this target before
+                        if seen_targets.insert(device.target) {
+                            discovered.push(device);
+                        }
+                    }
+                }
+                _ => break,
+            }
+        }
 
-                # Format color info concisely
-                if s < 5:  # Essentially white
-                    color_info = f"{k}K white"
-                else:
-                    color_info = f"{h:.0f}°, {s:.0f}%, {k}K"
+        Ok(discovered)
+    }
 
-                brightness_str = f"{b:.0f}%"
-            else:
-                color_preview = "  "  # No color preview when off
-                color_info = "Off" if power == "Off" else "Unknown"
-                brightness_str = "0%" if power == "Off" else "?"
+    async fn process_discovery_response(&self, data: &[u8], ip: IpAddr) -> Result<CachedLight> {
+        // Parse the response using RawMessage::unpack
+        let raw_msg = RawMessage::unpack(data).context("Failed to unpack discovery response")?;
 
-            print(f"{color_preview} {label:<20} {power:<3} {brightness_str:<4} {color_info}")
-        except:
-            print(f"   {label:<20} ?   ?    Connection failed")
+        // Extract target from frame address
+        let target = raw_msg.frame_addr.target;
 
-@cli.command(name='clear-cache', short_help='Clear device cache.')
-def clear_cache():
-    """Clear the device cache to force a fresh scan on next use."""
-    cache_file = get_cache_file_path()
-    last_used_file = get_last_used_file_path()
+        // For now, just create a basic entry - we'll get details later during listing
+        Ok(CachedLight {
+            label: format!("LIFX Light {}", target & 0xFFFF),
+            target,
+            ip_addr: ip,
+            mac_addr: [0; 6], // Would be extracted from frame address
+            power: None,
+            color: None,
+        })
+    }
 
-    files_removed = []
-    if cache_file.exists():
-        cache_file.unlink()
-        files_removed.append("device cache")
+    fn load_cache(&self) -> Result<Vec<CachedLight>> {
+        let data = std::fs::read_to_string(&self.cache_file)
+            .context("Failed to read cache file")?;
+        let cached: Vec<CachedLight> = serde_json::from_str(&data)
+            .context("Failed to parse cache file")?;
+        Ok(cached)
+    }
 
-    if last_used_file.exists():
-        last_used_file.unlink()
-        files_removed.append("last used lights")
+    fn save_cache(&self, lights: &[CachedLight]) -> Result<()> {
+        let data = serde_json::to_string_pretty(lights)
+            .context("Failed to serialize cache")?;
+        std::fs::write(&self.cache_file, data)
+            .context("Failed to write cache file")?;
+        Ok(())
+    }
 
-    if files_removed:
-        print(f"Cleared: {', '.join(files_removed)}")
-    else:
-        print("No cache files found to clear")
+    fn save_last_used(&self, lights: &[CachedLight]) -> Result<()> {
+        let data = serde_json::to_string_pretty(lights)
+            .context("Failed to serialize last used")?;
+        std::fs::write(&self.last_used_file, data)
+            .context("Failed to write last used file")?;
+        Ok(())
+    }
 
-@cli.command(name='on', short_help='Turn lights on.')
-@add_target_options
-@add_duration_option
-@click.pass_context
-def on(ctx, all_lights, group, name, duration):
-    all_lights = all_lights or ctx.obj.get('all_lights')
-    group = group or ctx.obj.get('group')
-    name = name or ctx.obj.get('name')
-    power_command(all_lights=all_lights, group=group, name=name, duration=duration, state='on')
-
-@cli.command(name='off', short_help='Turn lights off.')
-@add_target_options
-@add_duration_option
-@click.pass_context
-def off(ctx, all_lights, group, name, duration):
-    all_lights = all_lights or ctx.obj.get('all_lights')
-    group = group or ctx.obj.get('group')
-    name = name or ctx.obj.get('name')
-    power_command(all_lights=all_lights, group=group, name=name, duration=duration, state='off')
-
-def power_command(all_lights, group, name, duration, state):
-    lifx, lights = get_lights(all_lights, group, name)
-    duration_ms = int(duration * 1000)  # Convert seconds to milliseconds
-    try:
-        for light in lights:
-            light.set_power(state, duration=duration_ms)
-            print(f"{light.get_label()}: {state}")
-        save_last_used_lights(lights)
-    except:
-        print("Failed to set power.")
-
-@cli.command(name='color', short_help='Set color.')
-@add_target_options
-@add_duration_option
-@click.argument('color_arg', type=str, required=False)
-@click.pass_context
-def color(ctx, all_lights, group, name, duration, color_arg):
-    all_lights = all_lights or ctx.obj.get('all_lights')
-    group = group or ctx.obj.get('group')
-    name = name or ctx.obj.get('name')
-    lifx, lights = get_lights(all_lights, group, name)
-
-    if not color_arg:
-        # Use fzf to select from predefined HSBK colors
-        options = []
-        max_name_len = max(len(name) for name, _ in HSBK_COLOR_OPTIONS)
-        for name, hsbk in HSBK_COLOR_OPTIONS:
-            h, s, b, k = map(float, hsbk.split(','))
-            r, g, b_rgb = hsbk_to_rgb(h, s, b, k)
-            color_preview = rgb_to_ansi(r, g, b_rgb)
-            formatted_hsbk = f"{h:>3.0f},{s:>3.0f},{b:>3.0f},{k:>4.0f}"
-            options.append(f"{color_preview} {name:<{max_name_len}} - {formatted_hsbk}")
-
-        try:
-            # Use sh library for fzf interaction
-            fzf = sh.fzf('--prompt=Select color: ', '--height=20', '--ansi', _in='\n'.join(options))
-            selected = fzf.strip()
-            if selected:
-                # Extract HSBK values from selection (after the last ' - ')
-                color_arg = selected.split(' - ')[-1]
-            else:
-                print("No color selected.")
-                sys.exit(1)
-        except sh.ErrorReturnCode:
-            print("Color selection cancelled.")
-            sys.exit(0)
-        except sh.CommandNotFound:
-            print("Error: fzf is required for interactive color selection.")
-            print("Install with: brew install fzf")
-            sys.exit(1)
-        except Exception as e:
-            print(f"Error during color selection: {e}")
-            sys.exit(1)
-
-    if color_arg.endswith('k'):
-        color_value = kelvin_to_hsbk(color_arg)
-        if not color_value:
-            print(f"Invalid kelvin format: '{color_arg}'. Use format like '3500k'.")
-            sys.exit(1)
-    elif color_arg in PREDEFINED_COLORS:
-        color_value = PREDEFINED_COLORS[color_arg]
-    elif color_arg.lower() in LIFX_THEMES:
-        h, s, b, k = map(float, LIFX_THEMES[color_arg.lower()].split(','))
-        color_value = intuitive_to_lifx_hsbk(h, s, b, k)
-    else:
-        try:
-            h, s, b, k = map(float, color_arg.split(','))
-            if not (0 <= h <= 360 and 0 <= s <= 100 and 0 <= b <= 100 and 1500 <= k <= 9000):
-                print("HSBK values out of range.")
-                print("Hue: 0-360°, Saturation: 0-100%, Brightness: 0-100%, Kelvin: 1500-9000")
-                sys.exit(1)
-            color_value = intuitive_to_lifx_hsbk(h, s, b, k)
-        except:
-            print(f"Invalid color format: '{color_arg}'. Use one of:")
-            print("- Predefined color name (Red, Green, Blue, etc.)")
-            print("- Color temperature 'Nk' (e.g., '3500k')")
-            print("- HSBK values 'hue,saturation,brightness,kelvin' (0-360°, 0-100%, 0-100%, 1500-9000K)")
-            print("- Theme names: sunset, candlelight, fireplace, reading, etc.")
-            print("- Run without argument for interactive selection")
-            sys.exit(1)
-    duration_ms = int(duration * 1000)  # Convert seconds to milliseconds
-    try:
-        for light in lights:
-            light.set_color(color_value, duration=duration_ms)
-            pass  # Silently set color
-        save_last_used_lights(lights)
-    except:
-        print("Failed to set color.")
+    fn load_last_used(&self) -> Result<Vec<CachedLight>> {
+        let data = std::fs::read_to_string(&self.last_used_file)
+            .context("Failed to read last used file")?;
+        let last_used: Vec<CachedLight> = serde_json::from_str(&data)
+            .context("Failed to parse last used file")?;
+        Ok(last_used)
+    }
 
 
-@cli.command(name='brightness', short_help='Set brightness.')
-@add_target_options
-@add_duration_option
-@click.argument('level', type=click.IntRange(0, 100))
-@click.pass_context
-def brightness(ctx, all_lights, group, name, duration, level):
-    all_lights = all_lights or ctx.obj.get('all_lights')
-    group = group or ctx.obj.get('group')
-    name = name or ctx.obj.get('name')
-    lifx, lights = get_lights(all_lights, group, name)
-    duration_ms = int(duration * 1000)  # Convert seconds to milliseconds
-    try:
-        for light in lights:
-            current_color = light.get_color()
-            if current_color:
-                new_brightness = int(level / 100 * 65535)
-                new_color = [current_color[0], current_color[1], new_brightness, current_color[3]]
-                light.set_color(new_color, duration=duration_ms)
-                pass  # Silently set brightness
-            else:
-                print(f"Cannot set brightness for '{light.get_label()}' as color information is unavailable.")
-        save_last_used_lights(lights)
-    except:
-        print("Failed to set brightness.")
+    fn get_remembered_brightness(&self, target: u64) -> Option<u16> {
+        if !self.brightness_memory_file.exists() {
+            return None;
+        }
 
+        let data = std::fs::read_to_string(&self.brightness_memory_file).ok()?;
+        let memory: HashMap<u64, u16> = serde_json::from_str(&data).ok()?;
+        memory.get(&target).copied()
+    }
 
-@cli.command(name='brighter', short_help='Increase brightness.')
-@add_target_options
-@add_duration_option
-@click.argument('amount', type=int, default=10)
-@click.pass_context
-def brighter(ctx, all_lights, group, name, duration, amount):
-    all_lights = all_lights or ctx.obj.get('all_lights')
-    group = group or ctx.obj.get('group')
-    name = name or ctx.obj.get('name')
-    lifx, lights = get_lights(all_lights, group, name)
-    duration_ms = int(duration * 1000)
-    try:
-        for light in lights:
-            current_color = light.get_color()
-            if current_color:
-                current_brightness = current_color[2] / 65535 * 100
-                new_brightness_pct = min(100, current_brightness + amount)
-                new_brightness = int(new_brightness_pct / 100 * 65535)
-                new_color = [current_color[0], current_color[1], new_brightness, current_color[3]]
-                light.set_color(new_color, duration=duration_ms)
-                print(f"{light.get_label()}: {current_brightness:.0f}% → {new_brightness_pct:.0f}%")
-            else:
-                print(f"Cannot adjust brightness for '{light.get_label()}' as color information is unavailable.")
-        save_last_used_lights(lights)
-    except:
-        print("Failed to adjust brightness.")
+    async fn get_target_lights(&self, cli: &Cli, discovered: &[CachedLight]) -> Result<Vec<CachedLight>> {
+        let mut target_lights = Vec::new();
 
-@cli.command(name='dimmer', short_help='Decrease brightness.')
-@add_target_options
-@add_duration_option
-@click.argument('amount', type=int, default=10)
-@click.pass_context
-def dimmer(ctx, all_lights, group, name, duration, amount):
-    all_lights = all_lights or ctx.obj.get('all_lights')
-    group = group or ctx.obj.get('group')
-    name = name or ctx.obj.get('name')
-    lifx, lights = get_lights(all_lights, group, name)
-    duration_ms = int(duration * 1000)
-    try:
-        for light in lights:
-            current_color = light.get_color()
-            if current_color:
-                current_brightness = current_color[2] / 65535 * 100
-                new_brightness_pct = max(0, current_brightness - amount)
-                new_brightness = int(new_brightness_pct / 100 * 65535)
-                new_color = [current_color[0], current_color[1], new_brightness, current_color[3]]
-                light.set_color(new_color, duration=duration_ms)
-                print(f"{light.get_label()}: {current_brightness:.0f}% → {new_brightness_pct:.0f}%")
-            else:
-                print(f"Cannot adjust brightness for '{light.get_label()}' as color information is unavailable.")
-        save_last_used_lights(lights)
-    except:
-        print("Failed to adjust brightness.")
+        if cli.all_lights {
+            target_lights = discovered.to_vec();
+        } else if !cli.names.is_empty() {
+            for name in &cli.names {
+                if let Some(light) = discovered.iter().find(|l| l.label == *name) {
+                    target_lights.push(light.clone());
+                } else {
+                    eprintln!("Warning: No light found with name '{}'", name);
+                }
+            }
+            if target_lights.is_empty() {
+                return Err(anyhow!("No matching lights found for specified names"));
+            }
+        } else if let Some(_group) = &cli.group {
+            // Group functionality would need additional protocol support
+            return Err(anyhow!("Group functionality not yet implemented"));
+        } else {
+            // Try to use last used lights
+            if let Ok(last_used) = self.load_last_used() {
+                target_lights = last_used;
+            } else {
+                return Err(anyhow!("No target specified and no last used lights found. Use --all, --name, or --group"));
+            }
+        }
 
-@cli.command(name='warmer', short_help='Make warmer.')
-@add_target_options
-@add_duration_option
-@click.argument('amount', type=int, default=100)
-@click.pass_context
-def warmer(ctx, all_lights, group, name, duration, amount):
-    all_lights = all_lights or ctx.obj.get('all_lights')
-    group = group or ctx.obj.get('group')
-    name = name or ctx.obj.get('name')
-    lifx, lights = get_lights(all_lights, group, name)
-    duration_ms = int(duration * 1000)
-    try:
-        for light in lights:
-            current_color = light.get_color()
-            if current_color:
-                virtual_kelvin = get_virtual_kelvin(current_color)
-                new_virtual_kelvin = max(1000, virtual_kelvin - amount)
+        // Enrich the target lights with current information (including proper names)
+        for light in &mut target_lights {
+            let _ = self.get_light_info(light).await;
+        }
 
-                temp_display = set_virtual_kelvin(light, new_virtual_kelvin, current_color, duration_ms)
-                print(f"{light.get_label()}: {temp_display}")
-            else:
-                print(f"Cannot adjust temperature for '{light.get_label()}' as color information is unavailable.")
-        save_last_used_lights(lights)
-    except:
-        print("Failed to adjust temperature.")
+        Ok(target_lights)
+    }
 
-@cli.command(name='cooler', short_help='Make cooler.')
-@add_target_options
-@add_duration_option
-@click.argument('amount', type=int, default=100)
-@click.pass_context
-def cooler(ctx, all_lights, group, name, duration, amount):
-    all_lights = all_lights or ctx.obj.get('all_lights')
-    group = group or ctx.obj.get('group')
-    name = name or ctx.obj.get('name')
-    lifx, lights = get_lights(all_lights, group, name)
-    duration_ms = int(duration * 1000)
-    try:
-        for light in lights:
-            current_color = light.get_color()
-            if current_color:
-                virtual_kelvin = get_virtual_kelvin(current_color)
-                new_virtual_kelvin = min(9000, virtual_kelvin + amount)
+    async fn set_power(&self, lights: &[CachedLight], power_on: bool, duration_ms: u32) -> Result<()> {
+        if power_on {
+            // Restore remembered brightness for all lights
+            for light in lights {
+                let device = LifxDevice::new(light.target, light.ip_addr)?;
+                let brightness = self.get_remembered_brightness(light.target).unwrap_or(65535);
 
-                temp_display = set_virtual_kelvin(light, new_virtual_kelvin, current_color, duration_ms)
-                print(f"{light.get_label()}: {temp_display}")
-            else:
-                print(f"Cannot adjust temperature for '{light.get_label()}' as color information is unavailable.")
-        save_last_used_lights(lights)
-    except:
-        print("Failed to adjust temperature.")
+                let current_color = self.get_light_color(&device).await.unwrap_or(HSBK {
+                    hue: 0,
+                    saturation: 0,
+                    brightness: 65535,
+                    kelvin: 3500,
+                });
 
-def get_lights(all_lights, group, name):
-    cache_file = get_cache_file_path()
-    lifx = LifxLAN()
+                let restored_color = HSBK {
+                    hue: current_color.hue,
+                    saturation: current_color.saturation,
+                    brightness,
+                    kelvin: current_color.kelvin,
+                };
 
-    # Auto-scan if no cache exists
-    if not cache_file.exists():
-        lights = lifx.get_lights()
-        save_cache(cache_file, lights)
-    else:
-        cached_lights = load_cache(cache_file)
-        if cached_lights:
-            lights = []
-            for light_data in cached_lights:
-                try:
-                    light = Light(light_data['mac_addr'], light_data['ip_addr'])
-                    lights.append(light)
-                except:
-                    pass
-            if not lights:
-                lights = lifx.get_lights()
-                save_cache(cache_file, lights)
-        else:
-            lights = lifx.get_lights()
-            save_cache(cache_file, lights)
-    target_lights = []
-    if all_lights:
-        target_lights = lights
-    elif group:
-        # Since lifxlan doesn't provide get_devices_by_group(), we need to filter lights manually
-        group_lights = []
-        for light in lights:
-            try:
-                if light.get_group_label() == group:
-                    group_lights.append(light)
-            except:
-                pass
-        if not group_lights:
-            print(f"No group found with name '{group}'.")
-            sys.exit(1)
-        target_lights = group_lights
-    elif name:
-        for n in name:
-            matched = [light for light in lights if light.get_label() == n]
-            if not matched:
-                print(f"Warning: No light found with name '{n}'.")
-            else:
-                target_lights.extend(matched)
-        if not target_lights:
-            print("Error: No matching lights found for the specified name(s).")
-            sys.exit(1)
-    else:
-        # Try to use last used lights as default
-        last_used = load_last_used_lights()
-        if last_used:
-            target_lights = last_used
-            pass  # Silently use last used lights
-        else:
-            print("Error: No target specified and no last used lights found.")
-            print("Use --all, --group, or --name to specify target lights.")
-            sys.exit(1)
-    return lifx, target_lights
+                let message = Message::LightSetColor {
+                    reserved: 0,
+                    color: restored_color,
+                    duration: duration_ms,
+                };
+                device.send_message(message)
+                    .with_context(|| format!("Failed to turn on {}", light.label))?;
 
-if __name__ == "__main__":
-    cli()
+                println!("{}: on", light.label);
+            }
+        } else {
+            // Save brightness memory for all lights at once then turn off
+            let mut memory: HashMap<u64, u16> = if self.brightness_memory_file.exists() {
+                let data = std::fs::read_to_string(&self.brightness_memory_file)
+                    .context("Failed to read brightness memory file")?;
+                serde_json::from_str(&data).unwrap_or_default()
+            } else {
+                HashMap::new()
+            };
+
+            for light in lights {
+                let device = LifxDevice::new(light.target, light.ip_addr)?;
+
+                let current_color = self.get_light_color(&device).await.unwrap_or(HSBK {
+                    hue: 0,
+                    saturation: 0,
+                    brightness: 65535,
+                    kelvin: 3500,
+                });
+
+                // Save brightness if not already 0
+                if current_color.brightness > 0 {
+                    memory.insert(light.target, current_color.brightness);
+                }
+
+                let off_color = HSBK {
+                    hue: current_color.hue,
+                    saturation: current_color.saturation,
+                    brightness: 0,
+                    kelvin: current_color.kelvin,
+                };
+
+                let message = Message::LightSetColor {
+                    reserved: 0,
+                    color: off_color,
+                    duration: duration_ms,
+                };
+                device.send_message(message)
+                    .with_context(|| format!("Failed to turn off {}", light.label))?;
+
+                println!("{}: off", light.label);
+            }
+
+            // Save memory file once
+            let data = serde_json::to_string_pretty(&memory)
+                .context("Failed to serialize brightness memory")?;
+            std::fs::write(&self.brightness_memory_file, data)
+                .context("Failed to write brightness memory file")?;
+        }
+        Ok(())
+    }
+
+    async fn set_color(&self, lights: &[CachedLight], color_spec: &str, duration_ms: u32) -> Result<()> {
+        let hsbk = self.parse_color_spec(color_spec)?;
+
+        for light in lights {
+            let device = LifxDevice::new(light.target, light.ip_addr)?;
+            let message = Message::LightSetColor {
+                reserved: 0,
+                color: hsbk,
+                duration: duration_ms,
+            };
+
+            device.send_message(message)
+                .with_context(|| format!("Failed to set color for {}", light.label))?;
+        }
+        Ok(())
+    }
+
+    async fn set_brightness(&self, lights: &[CachedLight], level: u8, duration_ms: u32) -> Result<()> {
+        for light in lights {
+            let device = LifxDevice::new(light.target, light.ip_addr)?;
+
+            // Get current color to preserve hue, saturation, kelvin
+            let current_color = self.get_light_color(&device).await.unwrap_or(HSBK {
+                hue: 0,
+                saturation: 0,
+                brightness: 65535,
+                kelvin: 3500,
+            });
+
+            let new_brightness = (level as f32 / 100.0 * 65535.0) as u16;
+            let new_color = HSBK {
+                hue: current_color.hue,
+                saturation: current_color.saturation,
+                brightness: new_brightness,
+                kelvin: current_color.kelvin,
+            };
+
+            let message = Message::LightSetColor {
+                reserved: 0,
+                color: new_color,
+                duration: duration_ms,
+            };
+
+            device.send_message(message)
+                .with_context(|| format!("Failed to set brightness for {}", light.label))?;
+        }
+        Ok(())
+    }
+
+    async fn adjust_brightness(&self, lights: &[CachedLight], amount: i16, duration_ms: u32) -> Result<()> {
+        for light in lights {
+            let device = LifxDevice::new(light.target, light.ip_addr)?;
+
+            // Get current color
+            let current_color = self.get_light_color(&device).await.unwrap_or(HSBK {
+                hue: 0,
+                saturation: 0,
+                brightness: 32768, // 50% default
+                kelvin: 3500,
+            });
+
+            let current_brightness_pct = current_color.brightness as f32 / 65535.0 * 100.0;
+            let new_brightness_pct = (current_brightness_pct + amount as f32).clamp(0.0, 100.0);
+            let new_brightness = (new_brightness_pct / 100.0 * 65535.0) as u16;
+
+            let new_color = HSBK {
+                hue: current_color.hue,
+                saturation: current_color.saturation,
+                brightness: new_brightness,
+                kelvin: current_color.kelvin,
+            };
+
+            let message = Message::LightSetColor {
+                reserved: 0,
+                color: new_color,
+                duration: duration_ms,
+            };
+
+            device.send_message(message)
+                .with_context(|| format!("Failed to adjust brightness for {}", light.label))?;
+
+            println!("{}: {:.0}% → {:.0}%", light.label, current_brightness_pct, new_brightness_pct);
+        }
+        Ok(())
+    }
+
+    async fn adjust_temperature(&self, lights: &[CachedLight], amount: i32, duration_ms: u32) -> Result<()> {
+        for light in lights {
+            let device = LifxDevice::new(light.target, light.ip_addr)?;
+
+            // Get current color
+            let current_color = self.get_light_color(&device).await.unwrap_or(HSBK {
+                hue: 0,
+                saturation: 0,
+                brightness: 65535,
+                kelvin: 3500,
+            });
+
+            let current_kelvin = current_color.kelvin as i32;
+            let new_kelvin = (current_kelvin + amount).clamp(1500, 9000) as u16;
+
+            let new_color = HSBK {
+                hue: current_color.hue,
+                saturation: current_color.saturation,
+                brightness: current_color.brightness,
+                kelvin: new_kelvin,
+            };
+
+            let message = Message::LightSetColor {
+                reserved: 0,
+                color: new_color,
+                duration: duration_ms,
+            };
+
+            device.send_message(message)
+                .with_context(|| format!("Failed to adjust temperature for {}", light.label))?;
+
+            println!("{}: {}K → {}K", light.label, current_kelvin, new_kelvin);
+        }
+        Ok(())
+    }
+
+    async fn get_light_color(&self, device: &LifxDevice) -> Result<HSBK> {
+        let response = device.query_message(Message::LightGet)?;
+
+        if let Message::LightState { color, .. } = response {
+            Ok(color)
+        } else {
+            Err(anyhow!("Unexpected response message type"))
+        }
+    }
+
+    fn parse_color_spec(&self, spec: &str) -> Result<HSBK> {
+        // Handle kelvin temperature (e.g., "3500k")
+        if spec.ends_with('k') || spec.ends_with('K') {
+            let kelvin_str = &spec[..spec.len()-1];
+            let kelvin: u16 = kelvin_str.parse()
+                .context("Invalid kelvin value")?;
+            return Ok(HSBK {
+                hue: 0,
+                saturation: 0,
+                brightness: 65535,
+                kelvin,
+            });
+        }
+
+        // Handle predefined colors
+        for (name, hsbk_str) in PREDEFINED_COLORS {
+            if spec.eq_ignore_ascii_case(name) {
+                return self.parse_hsbk_string(hsbk_str);
+            }
+        }
+
+        // Handle themes
+        for (name, hsbk_str) in LIFX_THEMES {
+            if spec.eq_ignore_ascii_case(name) {
+                return self.parse_hsbk_string(hsbk_str);
+            }
+        }
+
+        // Handle HSBK string (e.g., "240,100,100,3500")
+        self.parse_hsbk_string(spec)
+    }
+
+    fn parse_hsbk_string(&self, hsbk_str: &str) -> Result<HSBK> {
+        let parts: Vec<&str> = hsbk_str.split(',').collect();
+        if parts.len() != 4 {
+            return Err(anyhow!("HSBK format should be 'hue,saturation,brightness,kelvin'"));
+        }
+
+        let h: f32 = parts[0].parse().context("Invalid hue")?;
+        let s: f32 = parts[1].parse().context("Invalid saturation")?;
+        let b: f32 = parts[2].parse().context("Invalid brightness")?;
+        let k: u16 = parts[3].parse().context("Invalid kelvin")?;
+
+        // Validate ranges
+        if !(0.0..=360.0).contains(&h) {
+            return Err(anyhow!("Hue must be 0-360°"));
+        }
+        if !(0.0..=100.0).contains(&s) {
+            return Err(anyhow!("Saturation must be 0-100%"));
+        }
+        if !(0.0..=100.0).contains(&b) {
+            return Err(anyhow!("Brightness must be 0-100%"));
+        }
+        if !(1500..=9000).contains(&k) {
+            return Err(anyhow!("Kelvin must be 1500-9000"));
+        }
+
+        // Convert to LIFX format (0-65535)
+        Ok(HSBK {
+            hue: (h / 360.0 * 65535.0) as u16,
+            saturation: (s / 100.0 * 65535.0) as u16,
+            brightness: (b / 100.0 * 65535.0) as u16,
+            kelvin: k,
+        })
+    }
+
+    async fn interactive_color_selection(&self) -> Result<String> {
+        let mut options = Vec::new();
+
+        // Add predefined colors
+        for (name, hsbk) in PREDEFINED_COLORS {
+            options.push(format!("{} - {}", name, hsbk));
+        }
+
+        // Add themes
+        for (name, hsbk) in LIFX_THEMES {
+            options.push(format!("{} (theme) - {}", name, hsbk));
+        }
+
+        let selection = dialoguer::FuzzySelect::new()
+            .with_prompt("Select a color")
+            .items(&options)
+            .interact_opt()
+            .context("Color selection failed")?;
+
+        if let Some(idx) = selection {
+            let selected = &options[idx];
+            // Extract HSBK values from the selection
+            if let Some(hsbk_part) = selected.split(" - ").last() {
+                return Ok(hsbk_part.to_string());
+            }
+        }
+
+        Err(anyhow!("No color selected"))
+    }
+
+    async fn get_light_info(&self, light: &mut CachedLight) -> Result<()> {
+        let device = LifxDevice::new(light.target, light.ip_addr)?;
+
+        // Get device label
+        if let Ok(Message::StateLabel { label }) = device.query_message(Message::GetLabel) {
+            light.label = label.to_string();
+        }
+
+        // Get device power state
+        if let Ok(Message::LightStatePower { level }) = device.query_message(Message::LightGetPower) {
+            light.power = Some(level);
+        }
+
+        // Get device color state
+        if let Ok(Message::LightState { color, .. }) = device.query_message(Message::LightGet) {
+            light.color = Some(color.into());
+        }
+
+        Ok(())
+    }
+
+    fn format_light_info(&self, light: &CachedLight) -> String {
+        let mut info = format!("{:<20}", light.label);
+
+        if let Some(power) = light.power {
+            let power_str = if power > 0 { "On " } else { "Off" };
+            info.push_str(&format!(" {:<3}", power_str));
+        } else {
+            info.push_str(" ?  ");
+        }
+
+        if let Some(color) = &light.color {
+            let h = color.hue as f32 / 65535.0 * 360.0;
+            let s = color.saturation as f32 / 65535.0 * 100.0;
+            let _b = color.brightness as f32 / 65535.0 * 100.0;
+
+            if s < 5.0 {
+                info.push_str(&format!(" {}K white", color.kelvin));
+            } else {
+                info.push_str(&format!(" {:.0}°,{:.0}%,{}K", h, s, color.kelvin));
+            }
+        }
+
+        info
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cli = Cli::parse();
+    let controller = LifxController::new()?;
+
+    // Handle symlink shortcuts for on/off
+    if let Some(program_name) = std::env::args().next() {
+        let name = std::path::Path::new(&program_name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+
+        if name == "on" || name == "off" {
+            let discovered = controller.discover_lights(true).await?;
+            let target_lights = controller.get_target_lights(&cli, &discovered).await?;
+            let duration_ms = (cli.duration * 1000.0) as u32;
+
+            controller.set_power(&target_lights, name == "on", duration_ms).await?;
+            controller.save_last_used(&target_lights)?;
+            return Ok(());
+        }
+    }
+
+    match cli.command {
+        Some(Commands::List { rescan }) => {
+            let mut discovered = controller.discover_lights(!rescan).await?;
+
+            if discovered.is_empty() {
+                println!("No LIFX lights found on the network.");
+                return Ok(());
+            }
+
+            // Enrich light information
+            for light in &mut discovered {
+                let _ = controller.get_light_info(light).await;
+            }
+
+            // Save enriched cache
+            controller.save_cache(&discovered)?;
+
+            for light in &discovered {
+                println!("{}", controller.format_light_info(light));
+            }
+        }
+
+        Some(Commands::On) => {
+            let discovered = controller.discover_lights(true).await?;
+            let target_lights = controller.get_target_lights(&cli, &discovered).await?;
+            let duration_ms = (cli.duration * 1000.0) as u32;
+
+            controller.set_power(&target_lights, true, duration_ms).await?;
+            controller.save_last_used(&target_lights)?;
+        }
+
+        Some(Commands::Off) => {
+            let discovered = controller.discover_lights(true).await?;
+            let target_lights = controller.get_target_lights(&cli, &discovered).await?;
+            let duration_ms = (cli.duration * 1000.0) as u32;
+
+            controller.set_power(&target_lights, false, duration_ms).await?;
+            controller.save_last_used(&target_lights)?;
+        }
+
+        Some(Commands::Color { ref color }) => {
+            let discovered = controller.discover_lights(true).await?;
+            let target_lights = controller.get_target_lights(&cli, &discovered).await?;
+            let duration_ms = (cli.duration * 1000.0) as u32;
+
+            let color_spec = if let Some(color) = color {
+                color.clone()
+            } else {
+                controller.interactive_color_selection().await?
+            };
+
+            controller.set_color(&target_lights, &color_spec, duration_ms).await?;
+            controller.save_last_used(&target_lights)?;
+        }
+
+        Some(Commands::Brightness { level }) => {
+            let discovered = controller.discover_lights(true).await?;
+            let target_lights = controller.get_target_lights(&cli, &discovered).await?;
+            let duration_ms = (cli.duration * 1000.0) as u32;
+
+            controller.set_brightness(&target_lights, level, duration_ms).await?;
+            controller.save_last_used(&target_lights)?;
+        }
+
+        Some(Commands::Brighter { amount }) => {
+            let discovered = controller.discover_lights(true).await?;
+            let target_lights = controller.get_target_lights(&cli, &discovered).await?;
+            let duration_ms = (cli.duration * 1000.0) as u32;
+
+            controller.adjust_brightness(&target_lights, amount as i16, duration_ms).await?;
+            controller.save_last_used(&target_lights)?;
+        }
+
+        Some(Commands::Dimmer { amount }) => {
+            let discovered = controller.discover_lights(true).await?;
+            let target_lights = controller.get_target_lights(&cli, &discovered).await?;
+            let duration_ms = (cli.duration * 1000.0) as u32;
+
+            controller.adjust_brightness(&target_lights, -(amount as i16), duration_ms).await?;
+            controller.save_last_used(&target_lights)?;
+        }
+
+        Some(Commands::Warmer { amount }) => {
+            let discovered = controller.discover_lights(true).await?;
+            let target_lights = controller.get_target_lights(&cli, &discovered).await?;
+            let duration_ms = (cli.duration * 1000.0) as u32;
+
+            controller.adjust_temperature(&target_lights, -(amount as i32), duration_ms).await?;
+            controller.save_last_used(&target_lights)?;
+        }
+
+        Some(Commands::Cooler { amount }) => {
+            let discovered = controller.discover_lights(true).await?;
+            let target_lights = controller.get_target_lights(&cli, &discovered).await?;
+            let duration_ms = (cli.duration * 1000.0) as u32;
+
+            controller.adjust_temperature(&target_lights, amount as i32, duration_ms).await?;
+            controller.save_last_used(&target_lights)?;
+        }
+
+        Some(Commands::ClearCache) => {
+            let mut removed = Vec::new();
+
+            if controller.cache_file.exists() {
+                std::fs::remove_file(&controller.cache_file)?;
+                removed.push("device cache");
+            }
+
+            if controller.last_used_file.exists() {
+                std::fs::remove_file(&controller.last_used_file)?;
+                removed.push("last used lights");
+            }
+
+            if removed.is_empty() {
+                println!("No cache files found to clear");
+            } else {
+                println!("Cleared: {}", removed.join(", "));
+            }
+        }
+
+        _ => {
+            if cli.all_lights || !cli.names.is_empty() || cli.group.is_some() {
+                // If targeting options are provided but no command, show help
+                eprintln!("No command specified. Use --help for available commands.");
+                std::process::exit(1);
+            } else {
+                // Default behavior - list lights
+                let discovered = controller.discover_lights(true).await?;
+                for light in &discovered {
+                    println!("{}", controller.format_light_info(light));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}

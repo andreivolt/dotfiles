@@ -1,249 +1,269 @@
-#!/usr/bin/env -S uv run --script --quiet
-"""Manage Tailscale exit nodes with interactive selection using fzf."""
-# /// script
-# dependencies = [
-#   "sh",
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! clap = { version = "4.0", features = ["derive"] }
+//! tokio = { version = "1.0", features = ["full"] }
+//! anyhow = "1.0"
+//! rand = "0.8"
+//! tabled = "0.15"
+//! serde = { version = "1.0", features = ["derive"] }
+//! serde_json = "1.0"
+//! reqwest = { version = "0.11", features = ["json"] }
+//! directories = "5.0"
+//! ```
+
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
+use directories::ProjectDirs;
+use rand::seq::SliceRandom;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::process::Stdio;
+use tabled::{settings::{Style, Disable, object::Rows}, Table, Tabled};
+use tokio::fs;
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
+
+const TAILSCALE_PATH: &str = "/Applications/Tailscale.localized/Tailscale.app/Contents/MacOS/Tailscale";
+
+#[derive(Parser)]
+#[command(name = "tailscale-exit-node")]
+#[command(about = "Manage Tailscale exit nodes with interactive selection")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Set exit node (by hostname or country)
+    Set { target: Option<String> },
+    /// Clear/disable exit node
+    Clear,
+    /// List available exit nodes
+    List { filter: Option<String> },
+    /// Select a random exit node
+    Random { filter: Option<String> },
+}
+
+#[derive(Debug, Clone, Tabled, Serialize, Deserialize)]
+struct ExitNode {
+    hostname: String,
+    country: String,
+    city: String,
+}
 
 
-import argparse
-import random
-from sh import Command, fzf, ErrorReturnCode
-import sys
-import os
-import re
-from typing import List, Optional, Dict
+#[derive(Deserialize)]
+struct MullvadRelay {
+    hostname: String,
+    country_name: String,
+    city_name: String,
+    active: bool,
+    #[serde(rename = "type")]
+    relay_type: String,
+}
 
-# Use the full Tailscale path for macOS
-TAILSCALE = "/Applications/Tailscale.localized/Tailscale.app/Contents/MacOS/Tailscale"
-tailscale = Command(TAILSCALE)
+fn get_cache_path() -> Result<PathBuf> {
+    let proj_dirs = ProjectDirs::from("", "", "tailscale-exit-node")
+        .context("Failed to get project directories")?;
+    let cache_dir = proj_dirs.cache_dir();
+    Ok(cache_dir.join("nodes.json"))
+}
 
+async fn get_mullvad_nodes() -> Result<Vec<ExitNode>> {
+    // Try to load from cache first
+    let cache_path = get_cache_path()?;
+    if cache_path.exists() {
+        if let Ok(content) = fs::read_to_string(&cache_path).await {
+            if let Ok(nodes) = serde_json::from_str::<Vec<ExitNode>>(&content) {
+                return Ok(nodes);
+            }
+        }
+    }
 
+    // Fetch from API if cache doesn't exist or is invalid
+    let client = reqwest::Client::new();
+    let relays: Vec<MullvadRelay> = client
+        .get("https://api.mullvad.net/www/relays/all/")
+        .send()
+        .await?
+        .json()
+        .await?;
 
-def list_exit_nodes(filter_text: Optional[str] = None) -> str:
-    """List available exit nodes, optionally filtered."""
-    try:
-        if filter_text:
-            return str(tailscale("exit-node", "list", "--filter", filter_text))
-        else:
-            return str(tailscale("exit-node", "list"))
-    except ErrorReturnCode as e:
-        print(f"Error: {e.stderr.decode()}", file=sys.stderr)
-        sys.exit(1)
+    let mut nodes: Vec<ExitNode> = relays
+        .into_iter()
+        .filter(|r| r.active && r.relay_type == "wireguard")
+        .map(|r| ExitNode {
+            hostname: format!("{}.mullvad.ts.net", r.hostname),
+            country: r.country_name,
+            city: r.city_name,
+        })
+        .collect();
 
-def set_exit_node(node_id: str) -> None:
-    """Set the exit node to the specified node ID."""
-    try:
-        tailscale("set", "--exit-node", node_id)
-    except ErrorReturnCode as e:
-        print(f"Error: {e.stderr.decode()}", file=sys.stderr)
-        sys.exit(1)
+    nodes.sort_by(|a, b| a.country.cmp(&b.country).then_with(|| a.city.cmp(&b.city)));
 
-def clear_exit_node() -> None:
-    """Clear the exit node setting."""
-    set_exit_node("")
+    if let Some(parent) = cache_path.parent() {
+        let _ = fs::create_dir_all(parent).await;
+    }
+    let _ = fs::write(&cache_path, serde_json::to_string_pretty(&nodes)?).await;
 
-def parse_node_output(output: str) -> List[Dict]:
-    """Parse the output of the list command and return structured node data."""
-    # Filter out headers and help text
-    lines = output.strip().split('\n')
-    node_lines = [
-        line for line in lines
-        if not line.strip().startswith('#') and
-        not line.strip().startswith('To ') and
-        not ('IP' in line and 'HOSTNAME' in line and 'COUNTRY' in line)
-    ]
+    Ok(nodes)
+}
 
-    nodes_info = []
-    for line in node_lines:
-        # Skip empty lines
-        if not line.strip():
-            continue
+fn filter_by_country(nodes: &[ExitNode], country: &str) -> Vec<ExitNode> {
+    let country_lower = country.to_lowercase();
+    nodes.iter()
+        .filter(|node| node.country.to_lowercase().contains(&country_lower))
+        .cloned()
+        .collect()
+}
 
-        parts = [p for p in line.strip().split() if p]
-        if len(parts) >= 3:  # Need at least IP, hostname, and country
-            try:
-                # Skip IP (parts[0]) and get hostname
-                hostname = parts[1]
+async fn set_exit_node(hostname: &str) -> Result<()> {
+    let output = Command::new(TAILSCALE_PATH)
+        .args(["set", "--exit-node", hostname])
+        .output()
+        .await
+        .context("Failed to set exit node")?;
 
-                # Get the remainder of the line after the hostname
-                remainder_pos = line.find(hostname) + len(hostname)
-                remainder = line[remainder_pos:].strip()
+    if !output.status.success() {
+        anyhow::bail!("Failed to set exit node: {}", String::from_utf8_lossy(&output.stderr));
+    }
 
-                # Remove the final dash (all lines have it)
-                remainder = remainder[:-2].strip()
+    Ok(())
+}
 
-                # Check for various formats:
+async fn interactive_select() -> Result<()> {
+    let nodes = get_mullvad_nodes().await?;
 
-                # 1. Format with comma in remainder: "USA,Washington DC" or "UK,London"
-                if ',' in remainder and len(remainder.split(',')[0].split()) <= 1:
-                    split_on_comma = remainder.split(',', 1)
-                    country = split_on_comma[0].strip()
-                    city = split_on_comma[1].strip()
+    if nodes.is_empty() {
+        println!("No exit nodes found");
+        return Ok(());
+    }
 
-                    # If city has extra info separated by double spaces, keep only the city part
-                    if '  ' in city:
-                        city = city.split('  ')[0].strip()
+    // Group nodes by country
+    let mut countries_map: HashMap<String, Vec<ExitNode>> = HashMap::new();
+    for node in nodes {
+        countries_map.entry(node.country.clone()).or_insert_with(Vec::new).push(node);
+    }
 
-                # 2. Format: "USA  Chicago,IL" (country, then spaces, then city with possible state code)
-                elif '  ' in remainder:
-                    # Split on double spaces to get country and city parts
-                    country_city = remainder.split('  ', 1)
-                    country = country_city[0].strip()
-                    city = country_city[1].strip()
+    // Get sorted list of unique countries
+    let mut countries: Vec<String> = countries_map.keys().cloned().collect();
+    countries.sort();
 
-                    # If there are more spaces after city info, trim them
-                    if '  ' in city:
-                        city = city.split('  ')[0].strip()
+    // Show countries in fzf
+    let country_list = countries.join("\n");
 
-                # 3. Two-word country formats: "Czech Republic  Prague", "Hong Kong  Central"
-                elif len(parts) >= 4 and (
-                    (parts[2] == "Hong" and parts[3] == "Kong") or
-                    (parts[2] == "Czech" and parts[3] == "Republic") or
-                    (parts[2] == "United" and parts[3] == "States")
-                ):
-                    # Extract the multi-word country name
-                    if parts[2] == "Hong" and parts[3] == "Kong":
-                        country = "Hong Kong"
-                        country_end_pos = line.find(country) + len(country)
-                    elif parts[2] == "Czech" and parts[3] == "Republic":
-                        country = "Czech Republic"
-                        country_end_pos = line.find(country) + len(country)
-                    elif parts[2] == "United" and parts[3] == "States":
-                        country = "United States"
-                        country_end_pos = line.find(country) + len(country)
+    let mut fzf = Command::new("fzf")
+        .arg("--prompt=Select Country> ")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .context("Failed to start fzf")?;
 
-                    city_part = line[country_end_pos:].strip()
+    let mut stdin = fzf.stdin.take().unwrap();
+    stdin.write_all(country_list.as_bytes()).await?;
+    stdin.shutdown().await?;
 
-                    # Clean up city part
-                    if '  ' in city_part:
-                        city = city_part.split('  ')[0].strip()
-                    else:
-                        city = city_part
+    let output = fzf.wait_with_output().await?;
 
-                # No fallback - ensure we have one of the known formats
-                else:
-                    # If we don't match any pattern, just use the parts directly
-                    country = parts[2] if len(parts) > 2 else "Unknown"
-                    city = remainder.replace(country, '', 1).strip()
+    if output.status.success() {
+        let selected_country = String::from_utf8(output.stdout)?.trim().to_string();
+        if !selected_country.is_empty() {
+            // Pick a random node from the selected country
+            if let Some(country_nodes) = countries_map.get(&selected_country) {
+                let mut rng = rand::thread_rng();
+                let selected = country_nodes.choose(&mut rng).unwrap();
 
-                    # Clean up city part
-                    if '  ' in city:
-                        city = city.split('  ')[0].strip()
+                set_exit_node(&selected.hostname).await?;
+                println!("Exit node set to: {}", selected.hostname);
+            }
+        } else {
+            println!("No country selected");
+        }
+    }
 
-                # Create a display format with aligned columns
-                nodes_info.append({
-                    'hostname': hostname,
-                    'country': country,
-                    'city': city,
-                    'display': f"{hostname.ljust(40)} {country.ljust(15)} {city}"
-                })
-            except Exception as e:
-                # If we hit parsing issues, just add the line as-is
-                print(f"Warning: Error parsing line: {line} - {str(e)}", file=sys.stderr)
+    Ok(())
+}
 
-    # Sort by country, then by city
-    return sorted(nodes_info, key=lambda node: (node['country'], node['city']))
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cli = Cli::parse();
 
-def interactive_select(filter_text: Optional[str] = None) -> None:
-    """Interactively select an exit node using fzf."""
-    nodes = list_exit_nodes(filter_text)
-    nodes_info = parse_node_output(nodes)
+    match cli.command {
+        None => interactive_select().await?,
 
-    if not nodes_info:
-        print("No exit nodes found" + (f" matching filter: {filter_text}" if filter_text else ""))
-        sys.exit(1)
+        Some(Commands::Set { target: None }) => {
+            interactive_select().await?;
+        }
 
-    # Create formatted output for fzf
-    formatted_output = '\n'.join(node['display'] for node in nodes_info)
+        Some(Commands::Set { target: Some(target) }) => {
+            let nodes = get_mullvad_nodes().await?;
 
-    # Run fzf for interactive selection
-    try:
-        selection = fzf("--prompt=Select Tailscale Exit Node> ", _in=formatted_output).strip()
+            // Try exact hostname match first
+            if let Some(node) = nodes.iter().find(|n| n.hostname == target) {
+                set_exit_node(&node.hostname).await?;
+                println!("Exit node set to: {}", node.hostname);
+            } else {
+                // Try country-based selection
+                let country_nodes = filter_by_country(&nodes, &target);
 
-        if selection.strip():
-            # Extract hostname (first word)
-            hostname = selection.strip().split()[0]
+                if !country_nodes.is_empty() {
+                    let mut rng = rand::thread_rng();
+                    let selected = country_nodes.choose(&mut rng).unwrap();
 
-            set_exit_node(hostname)
-            print(f"Exit node set to: {hostname}")
-        else:
-            print("No exit node selected")
-    except FileNotFoundError:
-        print("Error: fzf command not found. Please install fzf first.")
-        sys.exit(1)
+                    set_exit_node(&selected.hostname).await?;
+                    println!("Exit node set to: {}", selected.hostname);
+                } else {
+                    println!("No exit nodes found matching hostname or country: {}", target);
+                    std::process::exit(1);
+                }
+            }
+        }
 
-def random_exit_node(filter_text: Optional[str] = None) -> None:
-    """Select a random exit node."""
-    nodes = list_exit_nodes(filter_text)
-    nodes_info = parse_node_output(nodes)
+        Some(Commands::Clear) => {
+            set_exit_node("").await?;
+            println!("Exit node cleared");
+        }
 
-    if not nodes_info:
-        print("No exit nodes found" + (f" matching filter: {filter_text}" if filter_text else ""))
-        sys.exit(1)
+        Some(Commands::List { filter }) => {
+            let nodes = get_mullvad_nodes().await?;
+            let filtered_nodes = if let Some(ref f) = filter {
+                filter_by_country(&nodes, f)
+            } else {
+                nodes
+            };
 
-    # Pick a random node
-    random_node = random.choice(nodes_info)
-    hostname = random_node['hostname']
-    country = random_node['country']
-    city = random_node['city']
+            let table = Table::new(&filtered_nodes)
+                .with(Style::blank())
+                .with(Disable::row(Rows::first()))
+                .to_string();
 
-    set_exit_node(hostname)
-    print(f"Randomly selected exit node: {hostname} ({country}, {city})")
+            print!("{}", table);
+        }
 
-def list_nodes_formatted(filter_text: Optional[str] = None) -> None:
-    """List exit nodes in formatted output."""
-    nodes = list_exit_nodes(filter_text)
-    nodes_info = parse_node_output(nodes)
+        Some(Commands::Random { filter }) => {
+            let nodes = get_mullvad_nodes().await?;
+            let filtered_nodes = if let Some(ref f) = filter {
+                filter_by_country(&nodes, f)
+            } else {
+                nodes
+            };
 
-    for node in nodes_info:
-        print(node['display'])
+            if filtered_nodes.is_empty() {
+                println!("No exit nodes found{}",
+                         filter.map(|f| format!(" matching filter: {}", f)).unwrap_or_default());
+                return Ok(());
+            }
 
-# Create an argument parser with subcommands
-parser = argparse.ArgumentParser(description="Manage Tailscale exit nodes with interactive selection"
-, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+            let mut rng = rand::thread_rng();
+            let selected = filtered_nodes.choose(&mut rng).unwrap();
 
-# Create subparsers for commands
-subparsers = parser.add_subparsers(dest='command', help='Command to run')
+            set_exit_node(&selected.hostname).await?;
+            println!("Exit node set to: {}", selected.hostname);
+        }
+    }
 
-# set command
-set_parser = subparsers.add_parser('set', help='Set exit node')
-set_parser.add_argument('hostname', nargs='?', help='Hostname of exit node (interactive if omitted)')
-
-# clear command
-clear_parser = subparsers.add_parser('clear', help='Clear/disable exit node')
-
-# list command
-list_parser = subparsers.add_parser('list', help='List available exit nodes')
-list_parser.add_argument('filter', nargs='?', help='Filter string')
-
-# random command
-random_parser = subparsers.add_parser('random', help='Select a random exit node')
-random_parser.add_argument('filter', nargs='?', help='Filter string')
-
-args = parser.parse_args()
-
-# Default to 'set' if no command is provided
-if not args.command:
-    interactive_select()
-    sys.exit(0)
-
-# Handle commands
-
-if args.command == 'set':
-    if args.hostname:
-        set_exit_node(args.hostname)
-        print(f"Exit node set to: {args.hostname}")
-    else:
-        interactive_select()
-
-elif args.command == 'clear':
-    clear_exit_node()
-    print("Exit node cleared")
-
-elif args.command == 'list':
-    list_nodes_formatted(args.filter)
-
-elif args.command == 'random':
-    random_exit_node(args.filter)
+    Ok(())
+}
