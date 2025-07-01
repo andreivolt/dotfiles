@@ -23,7 +23,7 @@ import mimetypes
 from typing import List
 
 from deepgram import (
-    DeepgramClient, 
+    DeepgramClient,
     DeepgramClientOptions,
     LiveTranscriptionEvents,
     LiveOptions,
@@ -339,7 +339,7 @@ async def live_transcribe(**kwargs):
         if not api_key:
             print("Error: DEEPGRAM_API_KEY environment variable not set")
             return
-            
+
         config = DeepgramClientOptions(options={"keepalive": "true"})
         deepgram = DeepgramClient(api_key, config)
 
@@ -372,12 +372,12 @@ async def live_transcribe(**kwargs):
         lang_code = kwargs.get('language', 'en')
         if lang_code == 'en':
             lang_code = 'en-US'
-        
+
         # For live streaming, default to nova-2 if nova-3 is selected
         live_model = kwargs.get('model', 'nova-2')
         if live_model == 'nova-3':
             live_model = 'nova-2'
-            
+
         options = LiveOptions(
             model=live_model,
             language=lang_code,
@@ -397,7 +397,7 @@ async def live_transcribe(**kwargs):
         }
 
         print("Starting live transcription... Press Ctrl+C to stop.")
-        
+
         if await dg_connection.start(options, addons=addons) is False:
             print("Failed to connect to Deepgram")
             return

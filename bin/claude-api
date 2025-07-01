@@ -8,16 +8,17 @@
 #   "joblib",
 #   "parsedatetime",
 #   "tabulate",
-#   "platformdirs"
+#   "platformdirs",
+#   "click"
 # ]
 # ///
 
-import argparse
 import os
 import sys
 import tempfile
 import json
 import webbrowser
+import click
 from os import path as ospath
 from json import dumps, loads
 from uuid import uuid4
@@ -26,6 +27,8 @@ from mimetypes import guess_type
 from zlib import decompress as zlib_decompress
 from zlib import MAX_WBITS
 from tzlocal import get_localzone
+from typing import List, Dict
+from builtins import list as builtin_list
 from curl_cffi.requests import get as http_get
 from curl_cffi.requests import post as http_post
 from curl_cffi.requests import delete as http_delete
@@ -63,7 +66,7 @@ DEFAULT_TOOLS = [
 # Default personalized styles
 DEFAULT_STYLES = [{
     "type": "default",
-    "key": "Default", 
+    "key": "Default",
     "name": "Normal",
     "nameKey": "normal_style_name",
     "prompt": "Normal",
@@ -81,7 +84,7 @@ def handle_api_error(response, context: str = "API request"):
     """Centralized API error handling"""
     if response.status_code == 200:
         return
-    
+
     error_msg = f"{context} failed with status {response.status_code}"
     try:
         error_data = response.json()
@@ -89,7 +92,7 @@ def handle_api_error(response, context: str = "API request"):
             error_msg += f": {error_data['error'].get('message', 'Unknown error')}"
     except:
         error_msg += f": {response.text}"
-    
+
     raise ClaudeAPIError(error_msg)
 
 def safe_date_parse(date_str: str, context: str = "date") -> datetime | None:
@@ -313,7 +316,7 @@ class ClaudeAPIClient:
         print(f"[{response.status_code}] Unable to upload file -> {file_path}\n{response.text}")
         return None
 
-    def _validate_attachments(self, attachment_paths: list[str]):
+    def _validate_attachments(self, attachment_paths: List[str]):
         """Validate attachment file paths and sizes"""
         if not attachment_paths:
             return
@@ -457,7 +460,7 @@ class ClaudeAPIClient:
         # Note: Cache invalidation is handled by caller to allow batch operations
         return success
 
-    def remove_conversations_from_cache(self, chat_ids: list[str]):
+    def remove_conversations_from_cache(self, chat_ids: List[str]):
         """Remove conversations from cache by invalidating it"""
         if chat_ids:
             # Simple and reliable: just clear the cache
@@ -470,12 +473,12 @@ class ClaudeAPIClient:
             self._cached_fetch_conversations.clear(self.organization_id)
 
 
-    def get_all_conversations(self, use_cache: bool = True) -> list[dict]:
+    def get_all_conversations(self, use_cache: bool = True) -> List[Dict]:
         """Get all chat conversations with metadata"""
         # Use caching to avoid slow API calls
         if self._cached_fetch_conversations is None:
             @self.memory.cache
-            def _fetch_conversations(org_id: str) -> list[dict]:
+            def _fetch_conversations(org_id: str) -> List[Dict]:
                 url = f"{BASE_URL}/api/organizations/{org_id}/chat_conversations"
                 headers = self.get_headers("navigation")
 
@@ -488,7 +491,7 @@ class ClaudeAPIClient:
                         # Paginated response
                         conversations_data = data["data"]
                         # TODO: Handle pagination if needed (check for 'next_page' or similar)
-                    elif isinstance(data, list):
+                    elif isinstance(data, builtin_list):
                         # Direct array response
                         conversations_data = data
                     else:
@@ -528,8 +531,34 @@ class ClaudeAPIClient:
         response = http_get(url, headers=headers, timeout=self.timeout, impersonate="chrome110")
         return response.json()
 
+    def _get_last_message_uuid(self, chat_id: str) -> str:
+        """Get the UUID of the last message in a conversation for proper continuation"""
+        try:
+            # Use a shorter timeout for this call to avoid hanging
+            url = f"{BASE_URL}/api/organizations/{self.organization_id}/chat_conversations/{chat_id}"
+            headers = self.get_headers("navigation")
 
-    def _build_message_payload(self, chat_id: str, prompt: str, attachment_paths: list[str] = None) -> tuple[str, str, dict]:
+            # Make the request with a short timeout to prevent hanging
+            response = http_get(url, headers=headers, timeout=10, impersonate="chrome110")
+
+            if response.status_code == 200:
+                chat_data = response.json()
+
+                if "chat_messages" in chat_data and chat_data["chat_messages"]:
+                    # Get the last message (should be from assistant)
+                    last_message = chat_data["chat_messages"][-1]
+                    if "uuid" in last_message:
+                        return last_message["uuid"]
+        except Exception:
+            # If we can't get the last message, fall back to zero UUID
+            # This is expected for new conversations or network issues
+            pass
+
+        # Fallback to zero UUID for new conversations
+        return "00000000-0000-4000-8000-000000000000"
+
+
+    def _build_message_payload(self, chat_id: str, prompt: str, attachment_paths: List[str] = None) -> tuple[str, str, dict]:
         """Build the URL, payload, and headers for a message request"""
         self._validate_attachments(attachment_paths)
 
@@ -548,9 +577,13 @@ class ClaudeAPIClient:
         # Build request
         url = f"{BASE_URL}/api/organizations/{self.organization_id}/chat_conversations/{chat_id}/completion"
 
+        # Always use the correct parent UUID - this enables proper conversation continuation
+        # for ALL scenarios (not just --continue flag)
+        parent_uuid = self._get_last_message_uuid(chat_id)
+
         payload = {
             "prompt": prompt,
-            "parent_message_uuid": "00000000-0000-4000-8000-000000000000",
+            "parent_message_uuid": parent_uuid,
             "timezone": self.timezone,
             "personalized_styles": DEFAULT_STYLES,
             "locale": "en-US",
@@ -575,7 +608,7 @@ class ClaudeAPIClient:
 
         return url, payload_json, headers
 
-    def send_message(self, chat_id: str, prompt: str, attachment_paths: list[str] = None, stream: bool = False):
+    def send_message(self, chat_id: str, prompt: str, attachment_paths: List[str] = None, stream: bool = False):
         """Send a message to a chat conversation, optionally streaming"""
         url, payload_json, headers = self._build_message_payload(chat_id, prompt, attachment_paths)
 
@@ -687,186 +720,176 @@ class ClaudeAPIClient:
 # CLI Interface
 # ============================================================================
 
-def main():
-    # Check if first argument is a known subcommand
-    subcommands = ['list', 'delete', 'show', 'chat']
+@click.group(invoke_without_command=True)
+@click.pass_context
+def cli(ctx):
+    """Claude API client"""
+    if ctx.invoked_subcommand is None:
+        # Default to chat command for backward compatibility
+        ctx.invoke(chat, prompt='')
 
-    if len(sys.argv) > 1 and sys.argv[1] in subcommands:
-        # Parse as subcommand
-        parser = argparse.ArgumentParser(description='Claude API client',
-                                       formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+@cli.command()
+@click.option('--clear-cache', is_flag=True, help='Clear cache before fetching')
+@click.option('-n', '--count', default=10, help='Number of conversations to show')
+@click.option('--dates', is_flag=True, help='Show created and updated dates')
+@click.option('--since', help='Show conversations since date (e.g., "2 days ago", "2024-01-01")')
+@click.option('--until', help='Show conversations until date (e.g., "yesterday", "2024-12-31")')
+@click.option('--after', help='Show conversations after date (alias for --since)')
+@click.option('--before', help='Show conversations before date (alias for --until)')
+def list(clear_cache, count, dates, since, until, after, before):
+    """List conversations"""
+    list_conversations(clear_cache, count, dates, since, until, after, before)
 
-        subparsers = parser.add_subparsers(dest='command', help='Available commands')
+@cli.command()
+@click.argument('chat_ids', nargs=-1, required=True)
+def delete(chat_ids):
+    """Delete conversations"""
+    delete_conversations(builtin_list(chat_ids))
 
-        # List subcommand
-        list_parser = subparsers.add_parser('list', help='List conversations')
-        list_parser.add_argument('--clear-cache', action='store_true', help='Clear cache before fetching')
-        list_parser.add_argument('-n', '--count', type=int, default=10, help='Number of conversations to show (default: 10)')
-        list_parser.add_argument('--dates', action='store_true', help='Show created and updated dates')
-        list_parser.add_argument('--since', help='Show conversations since date (e.g., --since="2 days ago", --since="2024-01-01")')
-        list_parser.add_argument('--until', help='Show conversations until date (e.g., --until="yesterday", --until="2024-12-31")')
-        list_parser.add_argument('--after', help='Show conversations after date (alias for --since)')
-        list_parser.add_argument('--before', help='Show conversations before date (alias for --until)')
+@cli.command()
+@click.argument('chat_id')
+def show(chat_id):
+    """Show conversation in human-readable format"""
+    show_conversation_cmd(chat_id)
 
-        # Delete subcommand
-        delete_parser = subparsers.add_parser('delete', help='Delete conversations')
-        delete_parser.add_argument('chat_ids', nargs='+', help='Chat IDs to delete')
+@cli.command()
+@click.argument('prompt', required=False, default='')
+@click.option('--attach', multiple=True, help='File paths for attachments')
+@click.option('--model', type=click.Choice(['opus', 'sonnet']), default='opus',
+              help='Claude model to use')
+@click.option('--id', 'chat_id', help='Chat ID to use')
+@click.option('-c', '--continue', 'continue_last', is_flag=True, help='Continue last conversation')
+@click.option('--reasoning', is_flag=True, help='Enable reasoning mode')
+@click.option('--discard', is_flag=True, help='Discard chat after completion')
+@click.option('-o', '--open-browser', is_flag=True, help='Open browser with chat')
+@click.option('--stream', is_flag=True, help='Stream response in real-time')
+def chat(prompt, attach, model, chat_id, continue_last, reasoning, discard, open_browser, stream):
+    """Send message to chat"""
+    chat_conversation(prompt, builtin_list(attach), model, chat_id, continue_last, reasoning, discard, open_browser, stream)
 
-        # Show subcommand
-        show_parser = subparsers.add_parser('show', help='Show conversation in human-readable format')
-        show_parser.add_argument('chat_id', help='Chat ID to show')
+def list_conversations(clear_cache, count, dates, since, until, after, before):
+    """Implementation for list command"""
+    from datetime import datetime
 
-        # Chat subcommand (explicit)
-        chat_parser = subparsers.add_parser('chat', help='Send message to chat')
-        chat_parser.add_argument('prompt', nargs='?', default='', help='Chat prompt')
-        chat_parser.add_argument('--attach', nargs='*', default=[], help='File paths for attachments')
-        chat_parser.add_argument('--model', choices=list(MODEL_ALIASES.keys()),
-                                default='opus', help='Claude model to use (default: opus)')
-        chat_parser.add_argument('--id', help='Chat ID to use')
-        chat_parser.add_argument('-c', '--continue', action='store_true', help='Continue last conversation')
-        chat_parser.add_argument('--reasoning', action='store_true', help='Enable reasoning mode')
-        chat_parser.add_argument('--discard', action='store_true', help='Discard chat after completion')
-        chat_parser.add_argument('-o', '--open-browser', action='store_true', help='Open browser with chat')
-        chat_parser.add_argument('--stream', action='store_true', help='Stream response in real-time')
+    # Get session and client
+    session = get_claude_session()
+    client = ClaudeAPIClient(session, timeout=DEFAULT_TIMEOUT)
 
-        args, unknown_args = parser.parse_known_args()
-    else:
-        # Parse as root level chat (backward compatibility)
-        parser = argparse.ArgumentParser(description='Claude API client',
-                                       formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    conversations = client.get_all_conversations(use_cache=not clear_cache)
 
-        parser.add_argument('prompt', nargs='?', default='', help='Chat prompt')
-        parser.add_argument('--attach', nargs='*', default=[], help='File paths for attachments')
-        parser.add_argument('--model', choices=list(MODEL_ALIASES.keys()),
-                            default='opus', help='Claude model to use (default: opus)')
-        parser.add_argument('--id', help='Chat ID to use')
-        parser.add_argument('-c', '--continue', action='store_true', help='Continue last conversation')
-        parser.add_argument('--reasoning', action='store_true', help='Enable reasoning mode')
-        parser.add_argument('--discard', action='store_true', help='Discard chat after completion')
-        parser.add_argument('-o', '--open-browser', action='store_true', help='Open browser with chat')
-        parser.add_argument('--stream', action='store_true', help='Stream response in real-time')
+    # Apply date filters first (before limiting count)
+    try:
+        conversations = filter_conversations_by_date(
+            conversations,
+            since=since,
+            until=until,
+            after=after,
+            before=before
+        )
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
 
-        args, unknown_args = parser.parse_known_args()
-        args.command = 'chat'
+    # Sort by updated_at descending and limit
+    conversations = sorted(conversations, key=lambda x: x.get("updated_at", ""), reverse=True)[:count]
 
-    # Handle piped input and prompt only for chat commands
+    if conversations:
+        # Helper function to format dates (defined once, outside loop)
+        def format_date(date_str):
+            dt = safe_date_parse(date_str, "conversation date")
+            if dt:
+                local_dt = dt.astimezone()
+                return local_dt.strftime('%Y-%m-%dT%H:%M')
+            return date_str or ""
+
+        # Check if we should show summaries (only if there are non-empty ones)
+        has_summaries = any(conv.get("summary", "") for conv in conversations)
+
+        if dates:
+            # Full format with dates
+            if has_summaries:
+                table_data = [
+                    [conv.get("summary", ""), conv.get("name") or "(Untitled)",
+                     "★" if conv.get("is_starred") else " ", format_date(conv.get("created_at")),
+                     format_date(conv.get("updated_at")), conv["uuid"]]
+                    for conv in conversations
+                ]
+            else:
+                table_data = [
+                    [conv.get("name") or "(Untitled)", "★" if conv.get("is_starred") else " ",
+                     format_date(conv.get("created_at")), format_date(conv.get("updated_at")), conv["uuid"]]
+                    for conv in conversations
+                ]
+        else:
+            # Simple format: just name and uuid
+            table_data = [
+                [conv.get("name") or "(Untitled)", "★" if conv.get("is_starred") else " ", conv["uuid"]]
+                for conv in conversations
+            ]
+
+        click.echo(tabulate(table_data, tablefmt="plain"))
+
+def delete_conversations(chat_ids):
+    """Implementation for delete command"""
+    session = get_claude_session()
+    client = ClaudeAPIClient(session, timeout=DEFAULT_TIMEOUT)
+
+    deleted_chat_ids = []
+    for chat_id in chat_ids:
+        success = client.delete_chat(chat_id)
+        if success:
+            deleted_chat_ids.append(chat_id)
+        click.echo(f"Chat {chat_id} {'deleted' if success else 'deletion failed'}")
+
+    # Remove only the deleted conversations from cache
+    if deleted_chat_ids:
+        client.remove_conversations_from_cache(deleted_chat_ids)
+
+def show_conversation_cmd(chat_id):
+    """Implementation for show command"""
+    session = get_claude_session()
+    client = ClaudeAPIClient(session, timeout=DEFAULT_TIMEOUT)
+    show_conversation(client, chat_id)
+
+def chat_conversation(prompt, attach, model, chat_id, continue_last, reasoning, discard, open_browser, stream):
+    """Implementation for chat command"""
     temp_files = []
-    combined_prompt = ""
 
     try:
-        if args.command == 'chat':
-            if not sys.stdin.isatty():
-                piped_input = sys.stdin.read().strip()
-                if piped_input:  # Only create temp file if there's actual content
-                    tmp_file_path = create_temp_attachment(piped_input)
-                    temp_files.append(tmp_file_path)
-                    if hasattr(args, 'attach'):
-                        args.attach.append(tmp_file_path)
-                combined_prompt = getattr(args, 'prompt', '').strip()
-            else:
-                combined_prompt = ' '.join([getattr(args, 'prompt', '')] + unknown_args)
+        # Handle piped input
+        if not sys.stdin.isatty():
+            piped_input = sys.stdin.read().strip()
+            if piped_input:
+                tmp_file_path = create_temp_attachment(piped_input)
+                temp_files.append(tmp_file_path)
+                attach = builtin_list(attach) + [tmp_file_path]
 
-        # Map model aliases to full names (only for chat commands)
-        model_name = None
-        if hasattr(args, 'model') and args.model:
-            model_name = MODEL_ALIASES.get(args.model, args.model)
+        # Map model aliases to full names
+        model_name = MODEL_ALIASES.get(model, model) if model else None
 
-        # Get session from browser cookies
+        # Get session and client
         session = get_claude_session()
         client = ClaudeAPIClient(session, model_name=model_name, timeout=DEFAULT_TIMEOUT)
 
-        # Handle different commands
-        if args.command == 'list':
-            from datetime import datetime
-            conversations = client.get_all_conversations(use_cache=not args.clear_cache)
-
-            # Apply date filters first (before limiting count)
-            try:
-                conversations = filter_conversations_by_date(
-                    conversations,
-                    since=args.since,
-                    until=args.until,
-                    after=args.after,
-                    before=args.before
-                )
-            except ValueError as e:
-                print(f"Error: {e}", file=sys.stderr)
+        # Handle continue flag
+        if continue_last:
+            state_dir = user_state_dir('claude')
+            last_chat_file = os.path.join(state_dir, 'last_conversation_id')
+            if os.path.exists(last_chat_file):
+                with open(last_chat_file, 'r') as f:
+                    chat_id = f.read().strip()
+            else:
+                click.echo("No previous conversation found.", err=True)
                 sys.exit(1)
 
-            # Sort by updated_at descending and limit
-            conversations = sorted(conversations, key=lambda x: x.get("updated_at", ""), reverse=True)[:args.count]
-
-            if conversations:
-                # Helper function to format dates (defined once, outside loop)
-                def format_date(date_str):
-                    dt = safe_date_parse(date_str, "conversation date")
-                    if dt:
-                        local_dt = dt.astimezone()
-                        return local_dt.strftime('%Y-%m-%dT%H:%M')
-                    return date_str or ""
-
-                # Check if we should show summaries (only if there are non-empty ones)
-                has_summaries = any(conv.get("summary", "") for conv in conversations)
-
-                if args.dates:
-                    # Full format with dates
-                    if has_summaries:
-                        table_data = [
-                            [conv.get("summary", ""), conv.get("name") or "(Untitled)",
-                             "★" if conv.get("is_starred") else " ", format_date(conv.get("created_at")),
-                             format_date(conv.get("updated_at")), conv["uuid"]]
-                            for conv in conversations
-                        ]
-                    else:
-                        table_data = [
-                            [conv.get("name") or "(Untitled)", "★" if conv.get("is_starred") else " ",
-                             format_date(conv.get("created_at")), format_date(conv.get("updated_at")), conv["uuid"]]
-                            for conv in conversations
-                        ]
-                else:
-                    # Simple format: just name and uuid
-                    table_data = [
-                        [conv.get("name") or "(Untitled)", "★" if conv.get("is_starred") else " ", conv["uuid"]]
-                        for conv in conversations
-                    ]
-
-                print(tabulate(table_data, tablefmt="plain"))
-
-        elif args.command == 'delete':
-            deleted_chat_ids = []
-            for chat_id in args.chat_ids:
-                success = client.delete_chat(chat_id)
-                if success:
-                    deleted_chat_ids.append(chat_id)
-                print(f"Chat {chat_id} {'deleted' if success else 'deletion failed'}")
-
-            # Remove only the deleted conversations from cache
-            if deleted_chat_ids:
-                client.remove_conversations_from_cache(deleted_chat_ids)
-
-        elif args.command == 'show':
-            show_conversation(client, args.chat_id)
-
-        elif args.command == 'chat':
-            # Handle continue flag
-            if getattr(args, 'continue', False):
-                state_dir = user_state_dir('claude')
-                last_chat_file = os.path.join(state_dir, 'last_conversation_id')
-                if os.path.exists(last_chat_file):
-                    with open(last_chat_file, 'r') as f:
-                        args.id = f.read().strip()
-                else:
-                    print("No previous conversation found.")
-                    sys.exit(1)
-
-            # Send message
-            chat_id = handle_chat_conversation(client, args, combined_prompt)
+        # Send message
+        final_chat_id = send_chat_message(client, prompt, builtin_list(attach), chat_id, reasoning, discard, open_browser, stream)
 
     except (ClaudeAPIError, MessageRateLimitError, OverloadError) as e:
-        print(f"Claude API error: {e}", file=sys.stderr)
+        click.echo(f"Claude API error: {e}", err=True)
         sys.exit(1)
     except Exception as e:
-        print(f"Unexpected error: {e}", file=sys.stderr)
+        click.echo(f"Unexpected error: {e}", err=True)
         sys.exit(1)
     finally:
         # Clean up temporary files
@@ -875,6 +898,82 @@ def main():
                 os.unlink(temp_file)
             except OSError:
                 pass
+
+def send_chat_message(client, prompt, attach, chat_id, reasoning, discard, open_browser, stream):
+    """Send a chat message with the given parameters"""
+    state_dir = user_state_dir('claude')
+    last_chat_file = os.path.join(state_dir, 'last_conversation_id')
+    os.makedirs(state_dir, exist_ok=True)
+
+    # Create chat if no ID provided
+    if not chat_id:
+        chat_id = client.create_chat()
+        if not chat_id:
+            click.echo("Failed to create chat (message limit hit?)", err=True)
+            sys.exit(1)
+
+        # Update conversation settings if reasoning mode is requested
+        if reasoning:
+            if not client.update_conversation_settings(chat_id, reasoning_mode=True):
+                click.echo("Warning: Failed to enable reasoning mode", err=True)
+
+    # Send message
+    try:
+        if stream:
+            # Stream mode
+            has_output = False
+            for chunk in client.send_message(chat_id, prompt, attach, stream=True):
+                click.echo(chunk, nl=False)
+                has_output = True
+
+            if has_output:
+                click.echo()  # Ensure newline after streaming
+
+                # Save last conversation ID
+                with open(last_chat_file, 'w') as f:
+                    f.write(chat_id)
+
+                # Handle post-message options
+                if discard:
+                    if client.delete_chat(chat_id):
+                        client.remove_conversations_from_cache([chat_id])
+
+                if open_browser:
+                    webbrowser.open(f'https://claude.ai/chat/{chat_id}')
+            else:
+                click.echo("No response received from streaming", err=True)
+        else:
+            # Non-stream mode
+            response = client.send_message(chat_id, prompt, attach)
+
+            if response.answer:
+                click.echo(response.answer)
+
+                # Save last conversation ID
+                with open(last_chat_file, 'w') as f:
+                    f.write(chat_id)
+
+                # Handle post-message options
+                if discard:
+                    if client.delete_chat(chat_id):
+                        client.remove_conversations_from_cache([chat_id])
+
+                if open_browser:
+                    webbrowser.open(f'https://claude.ai/chat/{chat_id}')
+            else:
+                click.echo(f"Error {response.status_code}: {response.raw_answer}", err=True)
+
+    except MessageRateLimitError as e:
+        click.echo(f"Message limit hit, resets at {e.reset_date}", err=True)
+        sys.exit(1)
+
+    return chat_id
+
+def main():
+    # Handle backward compatibility by inserting 'chat' for non-subcommands
+    if len(sys.argv) > 1 and sys.argv[1] not in ['list', 'delete', 'show', 'chat'] and not sys.argv[1] in ['--help', '-h']:
+        sys.argv.insert(1, 'chat')
+    cli()
 
 
 def parse_relative_date(date_str: str) -> datetime:
@@ -891,8 +990,8 @@ def parse_relative_date(date_str: str) -> datetime:
     return datetime(*time_struct[:6])
 
 
-def filter_conversations_by_date(conversations: list, since: str = None, until: str = None,
-                                after: str = None, before: str = None) -> list:
+def filter_conversations_by_date(conversations: List[Dict], since: str = None, until: str = None,
+                                after: str = None, before: str = None) -> List[Dict]:
     """Filter conversations by date range using git-style date parsing"""
     # Handle aliases
     since = since or after

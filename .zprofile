@@ -3,6 +3,7 @@ export CURL_CA_BUNDLE=~/.local/ca-certificates/combined-ca-bundle.pem
 export DELTA_PAGER='less -R'
 export DENO_NO_UPDATE_CHECK=1
 export EDITOR=nvim
+export ENABLE_BACKGROUND_TASKS=1 # Claude Code
 export GPG_TTY="$(tty)"
 export LESS='--RAW-CONTROL-CHARS --LONG-PROMPT --ignore-case --no-init --quit-if-one-screen'
 export MANPAGER='nvim +Man!'
@@ -33,3 +34,6 @@ path=(
 [[ "$OSTYPE" == darwin* ]] && source ~/.zsh.d/homebrew.sh
 
 source ~/.config/env
+
+ln -sfn ~/Library/CloudStorage/GoogleDrive-andrei.volt@gmail.com/My\ Drive ~/drive
+rm -f ~/"Google Drive"

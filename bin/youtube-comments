@@ -91,14 +91,14 @@ def format_time_with_relative(iso_timestamp: str) -> tuple[str, str]:
     try:
         # Parse the ISO timestamp
         dt = datetime.fromisoformat(iso_timestamp.replace('Z', '+00:00'))
-        
+
         # Format as full datetime (similar to HN's format)
         full_time = dt.strftime('%Y-%m-%d %H:%M:%S UTC')
-        
+
         # Calculate relative time
         now = datetime.now(timezone.utc)
         diff = now - dt.replace(tzinfo=timezone.utc)
-        
+
         if diff.days > 0:
             relative = f"{diff.days} day{'s' if diff.days != 1 else ''} ago"
         elif diff.seconds > 3600:
@@ -109,7 +109,7 @@ def format_time_with_relative(iso_timestamp: str) -> tuple[str, str]:
             relative = f"{minutes} minute{'s' if minutes != 1 else ''} ago"
         else:
             relative = "just now"
-            
+
         return full_time, relative
     except:
         # Fallback to original timestamp
@@ -320,7 +320,13 @@ try:
         # Use tree-render via sh
         import sh
         import json
-        print(sh.Command('tree-render')('--author=author', '--timestamp=time', '--content=text', '--replies=children', _in=json.dumps(tree_comments)), end='')
+        # Pass through the TTY status to tree-render's environment
+        env = os.environ.copy()
+        if not sys.stdout.isatty():
+            env['NO_COLOR'] = '1'
+
+        result = sh.Command('tree-render')('--author=author', '--timestamp=time', '--content=text', '--replies=children', _in=json.dumps(tree_comments), _env=env)
+        print(result, end='')
 
 except Exception as e:
     print(f"Error: {e}", file=sys.stderr)
