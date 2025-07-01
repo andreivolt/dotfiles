@@ -92,3 +92,5 @@
 [maintenance]
 	auto = 1
 	strategy = incremental
+[pull]
+	rebase = true

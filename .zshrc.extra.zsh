@@ -38,6 +38,7 @@ alias cdt='cd $(mktemp -d)'
 alias diff="diff --color"
 alias edir="edir -r"
 alias fd="fd --follow"
+alias http="xh"
 alias find="find -L"
 alias gc='git clone --depth 1'
 alias gron="fastgron"
@@ -168,3 +169,6 @@ zsh-defer source ~/.zsh.d/history-search/history-search.zsh
 zsh-defer source ~/.zsh.d/history-substring-search.zsh
 
 zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
+
+eval "$(xh --generate complete-zsh)"
+compdef http=xh
