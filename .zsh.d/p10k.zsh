@@ -37,6 +37,7 @@
     docker_context          # docker context (when not default)
     # =========================[ Line #2 ]=========================
     newline                 # \n
+    context                 # user@hostname when in SSH/root
     prompt_char             # prompt symbol
     background_jobs         # presence of background jobs
     direnv                  # direnv status (https://direnv.net/)
