@@ -646,6 +646,13 @@
   # Don't show context unless running with privileges or in SSH.
   # Tip: Remove the next line to always show context.
   typeset -g POWERLEVEL9K_CONTEXT_{DEFAULT,SUDO}_{CONTENT,VISUAL_IDENTIFIER}_EXPANSION=
+  
+  # show hostname only when remote
+  function prompt_context() {
+    if [[ -n "$SSH_CLIENT" ]]; then
+      p10k segment -f 180 -t '%n@%m'
+    fi
+  }
 
   # Custom icon.
   # typeset -g POWERLEVEL9K_CONTEXT_VISUAL_IDENTIFIER_EXPANSION='⭐'
