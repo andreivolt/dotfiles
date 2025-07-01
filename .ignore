@@ -1,5 +1,6 @@
 *.git
 .cache
+/.bun/install/cache
 /.bundle/cache
 /.cargo/registry
 /.config/emacs/straight
@@ -10,6 +11,7 @@
 /.nix-profile
 /.npm
 /.vscode
+/Google Drive/.tmp
 /Google Drive/.Trash
 /Library
 /OrbStack
