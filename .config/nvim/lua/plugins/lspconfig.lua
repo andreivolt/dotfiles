@@ -48,8 +48,21 @@ return {
     --   },
     -- }
 
-    require('mason-lspconfig').setup({
-      ensure_installed = {
+    -- Check if running on Termux
+    local is_termux = vim.fn.isdirectory('/data/data/com.termux') == 1
+
+    local config = {
+      handlers = {
+        -- Default handler for all servers
+        function(server_name)
+          require('lspconfig')[server_name].setup({ capabilities = capabilities })
+        end,
+      }
+    }
+
+    -- Only auto-install servers if not on Termux
+    if not is_termux then
+      config.ensure_installed = {
         'bashls',
         'clojure_lsp',
         'lua_ls',
@@ -59,14 +72,10 @@ return {
         'solargraph',
         'ts_ls',
         -- 'gopls',
-      },
-      handlers = {
-        -- Default handler for all servers
-        function(server_name)
-          require('lspconfig')[server_name].setup({ capabilities = capabilities })
-        end,
       }
-    })
+    end
+
+    require('mason-lspconfig').setup(config)
   end,
   event = "VeryLazy"
 }
