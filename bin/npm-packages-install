@@ -8,12 +8,6 @@ packages=(
   "wrangler"
 )
 
-if command -v bun &> /dev/null; then
-  for package in "${packages[@]}"; do
-    bun install -g "$package"
-  done
-else
-  for package in "${packages[@]}"; do
-    npm install -g "$package"
-  done
-fi
+for package in "${packages[@]}"; do
+  npm install -g "$package"
+done
