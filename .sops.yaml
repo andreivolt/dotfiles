@@ -1,0 +1,5 @@
+creation_rules:
+  - age: >-
+      age10q9h5a7eml9s4x9mqd64srw7u6us6zamhajjgp4nemfqe6tc5s0q4vvfs0
+    input_type: binary
+    output_type: binary
