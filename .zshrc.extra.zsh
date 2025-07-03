@@ -171,21 +171,30 @@ zsh-defer source ~/.zsh.d/history-substring-search.zsh
 
 zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
 
-# Tab at beginning of line opens fzf file selector in vi
-function fzf-file-widget-vi() {
+# Tab at beginning of line opens fzf file selector
+function fzf-file-widget-open() {
   if [[ -z "$BUFFER" ]]; then
     local selected=$(rg --files --sort modified --follow -g '!Library' -g '!.git' | tac | fzf)
     if [[ -n "$selected" ]]; then
-      BUFFER="vi '$selected'"
+      # Check if file is text using file command
+      if file -b --mime-type "$selected" | grep -q '^text/'; then
+        BUFFER="nvim '$selected'"
+      else
+        if [[ -n "$TERMUX_VERSION" ]]; then
+          BUFFER="termux-open '$selected'"
+        else
+          BUFFER="open '$selected'"
+        fi
+      fi
       zle accept-line
     fi
   else
     zle expand-or-complete
   fi
 }
-zle -N fzf-file-widget-vi
-bindkey '^I' fzf-file-widget-vi
-bindkey -M vicmd '^I' fzf-file-widget-vi
+zle -N fzf-file-widget-open
+bindkey '^I' fzf-file-widget-open
+bindkey -M vicmd '^I' fzf-file-widget-open
 
 eval "$(xh --generate complete-zsh)"
 compdef http=xh
