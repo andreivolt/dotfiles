@@ -38,5 +38,7 @@ path=(
 
 source ~/.config/env
 
-ln -sfn ~/Library/CloudStorage/GoogleDrive-andrei.volt@gmail.com/My\ Drive ~/drive
-rm -f ~/"Google Drive"
+if [[ -d ~/Library/CloudStorage/GoogleDrive-andrei.volt@gmail.com/My\ Drive ]]; then
+  ln -sfn ~/Library/CloudStorage/GoogleDrive-andrei.volt@gmail.com/My\ Drive ~/drive
+  rm -f ~/"Google Drive"
+fi
