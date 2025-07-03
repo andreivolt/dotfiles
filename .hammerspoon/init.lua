@@ -55,22 +55,4 @@ hs.screen.watcher.new(function()
   hs.timer.doAfter(0.5, handleGhosttyResize)
 end):start()
 
-hs.spaces.watcher.new(function()
-  hs.timer.doAfter(0.5, handleGhosttyResize)
-end):start()
-
 hs.ipc.cliInstall()
-
-if hs.ipc then
-  hs.ipc.handler = function(str)
-    if str == "toggle-terminal" then
-      ghostty.toggleVisibility()
-      return "Toggled terminal visibility"
-    elseif str == "toggle-monitor" then
-      ghostty.toggleMonitor()
-      return "Moved terminal to other monitor"
-    else
-      return "Unknown command: " .. str
-    end
-  end
-end
