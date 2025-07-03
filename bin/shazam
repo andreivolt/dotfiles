@@ -18,7 +18,11 @@ import wave
 import tempfile
 import os
 import threading
+import signal
 from asyncio import Queue
+
+# Global shutdown flag
+shutdown_flag = False
 
 import pyaudio
 import numpy as np
@@ -246,6 +250,10 @@ class AudioCapture:
         frames_needed = int(device_sample_rate / self.chunk_size * current_duration)
 
         for i in range(frames_needed):
+            # Check shutdown flag
+            if shutdown_flag:
+                break
+                
             data = stream.read(self.chunk_size, exception_on_overflow=False)
             frames.append(data)
 
@@ -397,101 +405,109 @@ async def main():
 
     async def continuous_capture():
         """Continuously capture audio chunks and queue them"""
-        try:
-            while True:
-                # Always show animation if not quiet
-                show_anim = not args.quiet
+        while not shutdown_flag:
+            # Always show animation if not quiet
+            show_anim = not args.quiet
 
-                try:
-                    audio_data, sample_rate = await asyncio.wait_for(
-                        asyncio.get_event_loop().run_in_executor(
-                            None, audio_capture.capture_audio, show_anim
-                        ),
-                        timeout=30.0  # 30 second timeout
-                    )
-                except asyncio.TimeoutError:
-                    print(f"\n❌ Timeout: Microphone access seems to be blocked.", file=sys.stderr)
-                    print(f"   Please check System Settings > Privacy & Security > Microphone", file=sys.stderr)
-                    print(f"   and ensure your terminal app has microphone access.\n", file=sys.stderr)
+            try:
+                audio_data, sample_rate = await asyncio.wait_for(
+                    asyncio.get_event_loop().run_in_executor(
+                        None, audio_capture.capture_audio, show_anim
+                    ),
+                    timeout=30.0  # 30 second timeout
+                )
+                # Check if capture was interrupted (empty data or shutdown)
+                if not audio_data or shutdown_flag:
                     return
-                except Exception as e:
-                    print(f"\n❌ Audio capture error: {e}", file=sys.stderr)
-                    return
+            except asyncio.TimeoutError:
+                print(f"\n❌ Timeout: Microphone access seems to be blocked.", file=sys.stderr)
+                print(f"   Please check System Settings > Privacy & Security > Microphone", file=sys.stderr)
+                print(f"   and ensure your terminal app has microphone access.\n", file=sys.stderr)
+                return
+            except Exception as e:
+                print(f"\n❌ Audio capture error: {e}", file=sys.stderr)
+                return
 
-                # Save to temp file
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
-                    audio_capture.save_to_file(audio_data, tmp_file.name, sample_rate)
-                    await audio_queue.put(tmp_file.name)
-        except Exception as e:
-            print(f"Capture error: {e}", file=sys.stderr)
+            # Save to temp file
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+                audio_capture.save_to_file(audio_data, tmp_file.name, sample_rate)
+                await audio_queue.put(tmp_file.name)
 
     async def continuous_recognize():
         """Continuously process audio from queue"""
         nonlocal current_match
         last_match_result = None
 
-        try:
-            while True:
-                # Get audio file from queue
-                audio_file = await audio_queue.get()
+        while not shutdown_flag:
+            try:
+                # Get audio file from queue with timeout to check shutdown flag
+                audio_file = await asyncio.wait_for(audio_queue.get(), timeout=0.5)
+            except asyncio.TimeoutError:
+                continue
 
-                try:
-                    result = await recognize_audio(shazam, audio_file)
+            try:
+                result = await recognize_audio(shazam, audio_file)
 
-                    if result and 'track' in result:
-                        formatted = format_result(result)
+                if result and 'track' in result:
+                    formatted = format_result(result)
 
-                        # Check if this is truly a different track
-                        if not last_match_result or not are_tracks_similar(result, last_match_result):
-                            # Clear visualizer line and print title
-                            print(f"\r{' ' * 80}\r{formatted}", flush=True)
-                            last_match_result = result
-                            # Mark that we've had a successful match for better sampling
-                            audio_capture.has_matched = True
-                            async with match_lock:
-                                current_match = formatted
-
-                            # Exit on first match (default behavior) unless continuous is set
-                            if not args.continuous:
-                                return
-
-                        # Similar match - keep current_match but don't print
-                        else:
-                            async with match_lock:
-                                current_match = formatted
-                    else:
-                        # No match - if we had a match before, it ended
+                    # Check if this is truly a different track
+                    if not last_match_result or not are_tracks_similar(result, last_match_result):
+                        # Clear visualizer line and print title
+                        print(f"\r{' ' * 80}\r{formatted}", flush=True)
+                        last_match_result = result
+                        # Mark that we've had a successful match for better sampling
+                        audio_capture.has_matched = True
                         async with match_lock:
-                            if current_match is not None:
-                                current_match = None
+                            current_match = formatted
 
-                finally:
-                    # Clean up temp file
-                    try:
-                        os.unlink(audio_file)
-                    except:
-                        pass
+                        # Exit on first match (default behavior) unless continuous is set
+                        if not args.continuous:
+                            return
 
-        except Exception as e:
-            print(f"Recognition error: {e}", file=sys.stderr)
-        finally:
-            pass
+                    # Similar match - keep current_match but don't print
+                    else:
+                        async with match_lock:
+                            current_match = formatted
+                else:
+                    # No match - if we had a match before, it ended
+                    async with match_lock:
+                        if current_match is not None:
+                            current_match = None
 
-    try:
-        # Start both tasks concurrently
-        capture_task = asyncio.create_task(continuous_capture())
-        recognize_task = asyncio.create_task(continuous_recognize())
+            finally:
+                # Clean up temp file
+                try:
+                    os.unlink(audio_file)
+                except:
+                    pass
 
-        # Wait for recognition to complete (or run forever if continuous)
-        await recognize_task
+    # Start both tasks concurrently
+    capture_task = asyncio.create_task(continuous_capture())
+    recognize_task = asyncio.create_task(continuous_recognize())
 
-        # Cancel capture when done
+    # Wait for recognition to complete (or run forever if continuous)
+    while not shutdown_flag:
+        if recognize_task.done():
+            break
+        await asyncio.sleep(0.1)
 
+    # Cancel tasks and close audio
+    if capture_task and not capture_task.done():
         capture_task.cancel()
+    if recognize_task and not recognize_task.done():
+        recognize_task.cancel()
+    
+    # Wait a bit for tasks to clean up
+    if capture_task or recognize_task:
+        await asyncio.sleep(0.1)
+    
+    audio_capture.close()
 
-    except KeyboardInterrupt:
-        pass
-    finally:
-        audio_capture.close()
+def signal_handler(signum, frame):
+    global shutdown_flag
+    shutdown_flag = True
 
-asyncio.run(main())
+if __name__ == "__main__":
+    signal.signal(signal.SIGINT, signal_handler)
+    asyncio.run(main())

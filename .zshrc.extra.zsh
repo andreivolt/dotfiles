@@ -35,13 +35,14 @@ alias ll="ls -l --classify=auto --git"
 alias lla="ll -a"
 
 alias cdt='cd $(mktemp -d)'
+alias claude="claude --dangerously-skip-permissions"
 alias diff="diff --color"
 alias edir="edir -r"
 alias fd="fd --follow"
-alias http="xh"
 alias find="find -L"
 alias gc='git clone --depth 1'
 alias gron="fastgron"
+alias http="xh"
 alias path='printf "%s\n" $path'
 alias rg='rg --smart-case --colors match:bg:yellow --colors match:fg:black'
 alias rm="rm --verbose"
@@ -138,8 +139,8 @@ zstyle ':completion:*:*:-subscript-:*' tag-order indexes parameters
 
 # # run rehash on completion so new installed program are found automatically:
 # _force_rehash() {
-# (( CURRENT == 1 )) && rehash
-# return 1
+#   (( CURRENT == 1 )) && rehash
+#   return 1
 # }
 
 # history expansion

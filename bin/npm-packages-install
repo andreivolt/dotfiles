@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+packages=(
+  "@anthropic-ai/claude-code"
+  "@google/gemini-cli"
+  "expo"
+  "vercel"
+  "wrangler"
+)
+
+if command -v bun &> /dev/null; then
+  for package in "${packages[@]}"; do
+    bun install -g "$package"
+  done
+else
+  for package in "${packages[@]}"; do
+    npm install -g "$package"
+  done
+fi
