@@ -24,13 +24,13 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let (action, minutes) = if let Some(arg) = cli.action {
+    let (action, minutes, should_wait) = if let Some(arg) = cli.action {
         if let Ok(mins) = arg.parse::<u32>() {
-            ("activate", Some(mins))
+            ("activate", Some(mins), false)
         } else {
             match arg.as_str() {
-                "on" => ("activate", None),
-                "off" => ("deactivate", None),
+                "on" => ("activate", None, false),
+                "off" => ("deactivate", None, false),
                 _ => {
                     eprintln!("Invalid action: {}. Use 'on', 'off', or a number of minutes.", arg);
                     process::exit(1);
@@ -38,17 +38,38 @@ fn main() -> Result<()> {
             }
         }
     } else {
-        ("activate", None)
+        ("activate", None, true)
     };
 
     let url = format!("keepingyouawake:///{action}{}",
         minutes.map_or(String::new(), |m| format!("?minutes={m}")));
 
+
+    // Check if caffeinate is already running
+    let is_running = cmd!("pgrep", "-f", "caffeinate")
+        .stdout_null()
+        .stderr_null()
+        .run()
+        .is_ok();
+
+    if action == "activate" {
+        if is_running {
+            if !should_wait && minutes.is_none() {
+                // For "awake on", just return if already running
+                return Ok(());
+            } else {
+                // For "awake" (interactive) or "awake <minutes>", deactivate first to replace
+                let _ = cmd!("open", "--background", "keepingyouawake:///deactivate").run();
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+    }
+
     cmd!("open", "--background", &url)
         .run()
         .context("Failed to open KeepingYouAwake URL")?;
 
-    if action == "activate" && minutes.is_none() {
+    if action == "activate" && minutes.is_none() && should_wait {
         println!("☕ Staying awake indefinitely. Press Ctrl+C to stop.");
 
         // Handle both SIGINT (Ctrl+C) and SIGTERM (timeout)
