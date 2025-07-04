@@ -17,7 +17,7 @@ require 'wirb'
 require 'awesome_print'
 require 'looksee'
 require 'pry-doc'
-# Pry.config.editor = proc { |file, line| "vim +#{line} #{file}"} TODO
+Pry.config.editor = proc { |file, line| "nvim +#{line} #{file}"}
 
 Pry.commands.alias_command "c", "continue"
 Pry.commands.alias_command "n", "next"
@@ -25,49 +25,6 @@ Pry.commands.alias_command "q", "exit"
 Pry.commands.alias_command "s", "step"
 Pry.commands.alias_command "w", "whereami"
 
-# enable awesome_print with paging
 Pry.config.print = proc do |output, value|
   Pry::Helpers::BaseHelpers.stagger_output("=> #{value.ai}", output)
 end
-
-alias :r :require
-
-Pry::Prompt.add('custom', '') do |target, nest_level, pry|
-  "#{RUBY_VERSION} (#{target}):#{nest_level} > "
-end
-
-Pry.config.prompt = Pry::Prompt[:custom]
-
-if RUBY_PLATFORM.include? 'darwin'
-  def pbcopy(str)
-    IO.popen('pbcopy', 'r+') { |io|
-      io.puts str.is_a?(String) ? str : str.inspect
-    }
-  end
-end
-
-Pry.config.commands.import(Pry::CommandSet.new do
-  command 'hist2copy', '' do |n|
-    pbcopy pry_instance_pry_.input_array[n ? n.to_i : -1]
-  end
-
-  command 'copy', '' do
-    pbcopy pry_instance.last_result.chomp
-  end
-
-  command "caller_method" do |depth|
-    depth = depth.to_i || 1
-    if /^(.+?):(\d+)(?::in `(.*)')?/ =~ caller(depth + 1).first
-      file = Regexp.last_match[1]
-      line = Regexp.last_match[2].to_i
-      method = Regexp.last_match[3]
-      output.puts [file, line, method]
-    end
-  end
-
-  if ENV["RAILS_ENV"] || defined?(Rails)
-    command "sql", "Send sql over AR." do |query|
-      pp ActiveRecord::Base.connection.select_all(query)
-    end
-  end
-end)
