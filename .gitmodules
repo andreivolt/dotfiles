@@ -22,18 +22,18 @@
 [submodule ".local/share/zsh/plugins/fast-syntax-highlighting"]
 	path = .local/share/zsh/plugins/fast-syntax-highlighting
 	url = https://github.com/zdharma-continuum/fast-syntax-highlighting.git
-[submodule ".config/tmux/plugins/tpm"]
-	path = .config/tmux/plugins/tpm
+[submodule ".local/share/tmux/plugins/tpm"]
+	path = .local/share/tmux/plugins/tpm
 	url = https://github.com/tmux-plugins/tpm.git
-[submodule ".config/tmux/plugins/tmux-sensible"]
-	path = .config/tmux/plugins/tmux-sensible
+[submodule ".local/share/tmux/plugins/tmux-sensible"]
+	path = .local/share/tmux/plugins/tmux-sensible
 	url = https://github.com/tmux-plugins/tmux-sensible.git
-[submodule ".config/tmux/plugins/tmux-resurrect"]
-	path = .config/tmux/plugins/tmux-resurrect
+[submodule ".local/share/tmux/plugins/tmux-resurrect"]
+	path = .local/share/tmux/plugins/tmux-resurrect
 	url = https://github.com/tmux-plugins/tmux-resurrect.git
-[submodule ".config/tmux/plugins/tmux-continuum"]
-	path = .config/tmux/plugins/tmux-continuum
+[submodule ".local/share/tmux/plugins/tmux-continuum"]
+	path = .local/share/tmux/plugins/tmux-continuum
 	url = https://github.com/tmux-plugins/tmux-continuum.git
-[submodule ".config/tmux/plugins/tmux-reset"]
-	path = .config/tmux/plugins/tmux-reset
+[submodule ".local/share/tmux/plugins/tmux-reset"]
+	path = .local/share/tmux/plugins/tmux-reset
 	url = https://github.com/hallazzang/tmux-reset.git
