@@ -46,6 +46,7 @@ alias http="xh"
 alias path='printf "%s\n" $path'
 alias rg='rg --smart-case --colors match:bg:yellow --colors match:fg:black'
 alias rm="rm --verbose"
+alias scrcpy="scrcpy --render-driver opengl"
 alias vi="nvim"
 alias yt-dlp="yt-dlp --cookies-from-browser chrome"
 
