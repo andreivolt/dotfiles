@@ -6,16 +6,12 @@ option_as_alt = "OnlyLeft" # TODO
 
 [font]
 offset.x = -4
-# offset.x = -2
 offset.y = -2
 size = 22
 
 [font.normal]
 family = "BerkeleyMono Nerd Font"
 style = "Regular"
-# family = "M+1Code Nerd Font Mono"
-# family = "IosevkaTerm Nerd Font Mono"
-# style = "Light"
 
 [font.italic]
 family = "BerkeleyMono Nerd Font"
@@ -33,7 +29,6 @@ style = "Bold Italic"
 transparent_background_colors = true
 
 [colors.primary]
-# foreground = "#637077"
 foreground = "#ddd0f4"
 background = "#211c2f"
 
