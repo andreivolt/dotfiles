@@ -1,13 +1,5 @@
 #!/usr/bin/env bash
 
-packages=(
-  "@anthropic-ai/claude-code"
-  "@google/gemini-cli"
-  "expo"
-  "vercel"
-  "wrangler"
-)
-
-for package in "${packages[@]}"; do
+while read -r package; do
   npm install -g "$package"
-done
+done < "${XDG_CONFIG_HOME:-$HOME/.config}/npm-packages.txt"
