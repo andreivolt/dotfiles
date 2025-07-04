@@ -1,21 +1,5 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env bash
 
-[
-  ["llm", [
-    "llm-anthropic",
-    "llm-cmd",
-    "llm-gemini"
-  ]],
-  "jtbl",
-  "x-x",
-  "ttok",
-  "files-to-prompt",
-  "strip-tags"
-].each do |tool_spec|
-  if tool_spec.is_a?(Array)
-    tool, extras = tool_spec
-    system("uv", "tool", "install", tool, "--with", extras.join(","))
-  else
-    system("uv", "tool", "install", tool_spec)
-  end
-end
+while read -r line; do
+  uv tool install $line
+done < "${XDG_CONFIG_HOME:-$HOME/.config}/uv-tools.txt"

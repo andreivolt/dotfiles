@@ -1,62 +1,39 @@
-# font-family-italic = "IosevkaTerm NFM Italic"
-# font-family = "IosevkaTerm NFM"
-# font-family-bold-italic = "IosevkaTerm NFM Bold Italic"
-# font-family-bold = "IosevkaTerm NFM Bold"
-
-# Pragmasevka Nerd Font
 font-family = "Pragmasevka Nerd Font"
 font-family-italic = "Pragmasevka Nerd Font Italic"
 font-family-bold = "Pragmasevka Nerd Font Bold"
 font-family-bold-italic = "Pragmasevka Nerd Font Bold Italic"
-
-# Sauce Code Pro Nerd Font
-# font-family-italic = "SauceCodePro Nerd Font Italic"
-# font-family = "SauceCodePro Nerd Font"
-# font-family-bold = "SauceCodePro Nerd Font Bold"
-# font-family-bold-italic = "SauceCodePro Nerd Font Bold Italic"
-
+font-size = 18
 adjust-cell-height = -4
 adjust-font-baseline = 1
 adjust-cell-width = -10%
 
-# adjust-cell-height = -8
-# adjust-cell-width = -12%
-
-font-size = 18
-
-background-opacity = 0.75
-background-blur-radius = 18
-
 theme = aurora
 foreground = #dddddd
 background = #000000
+background-opacity = 0.75
+background-blur-radius = 18
 
+window-decoration = false
 window-vsync = false
+window-save-state = always
+window-padding-x = 0
+window-padding-y = 0
+window-colorspace = display-p3
 
 macos-non-native-fullscreen = true
 macos-window-shadow = false
-window-decoration = false
-
-mouse-hide-while-typing = true
-
-window-save-state = always
-
-alpha-blending = linear-corrected
-
-confirm-close-surface = false
 
 cursor-style = bar
 cursor-style-blink = true
 
-# macos-titlebar-style = hidden
+mouse-hide-while-typing = true
 
-window-padding-x = 0
-window-padding-y = 0
+confirm-close-surface = false
 
-window-colorspace = display-p3
+alpha-blending = linear-corrected
 
 keybind = cmd+left=csi:\x1b[1;5D
 keybind = cmd+right=csi:\x1b[1;5C
+keybind = shift+enter=text:\n
 
 auto-update = off
-keybind = shift+enter=text:\n
