@@ -90,12 +90,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     pb.set_style(ProgressStyle::default_bar()
         .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}) ({eta})")?
         .progress_chars("#>-"));
-    
+
     pb.set_message("Uploading");
-    
+
     const CHUNK_SIZE: usize = 5 * 1024 * 1024; // 5MB chunks
     const MIN_MULTIPART_SIZE: usize = 5 * 1024 * 1024; // Use multipart for files >= 5MB
-    
+
     if content.len() >= MIN_MULTIPART_SIZE {
         // Use multipart upload for large files
         let multipart_upload = client
@@ -106,10 +106,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .metadata("Content-Type", &content_type)
             .send()
             .await?;
-        
+
         let upload_id = multipart_upload.upload_id().unwrap();
         let mut completed_parts = Vec::new();
-        
+
         for (part_number, chunk) in content.chunks(CHUNK_SIZE).enumerate() {
             let part_num = (part_number + 1) as i32;
             let part_result = client
@@ -121,17 +121,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .body(ByteStream::from(chunk.to_vec()))
                 .send()
                 .await?;
-            
+
             completed_parts.push(
                 aws_sdk_s3::types::CompletedPart::builder()
                     .part_number(part_num)
                     .e_tag(part_result.e_tag().unwrap())
                     .build(),
             );
-            
+
             pb.inc(chunk.len() as u64);
         }
-        
+
         client
             .complete_multipart_upload()
             .bucket(bucket)
@@ -156,10 +156,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .metadata("Content-Type", &content_type)
             .send()
             .await?;
-        
+
         pb.inc(content_length);
     }
-    
+
     pb.finish_with_message("Upload complete");
 
     // Get object metadata to retrieve CID

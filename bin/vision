@@ -102,10 +102,10 @@ else:
     # Default: capture screenshot selection
     import tempfile
     import os
-    
+
     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
         tmp_path = tmp.name
-    
+
     try:
         sh.screenshot('selection', tmp_path, _ok_code=[0])
         if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:

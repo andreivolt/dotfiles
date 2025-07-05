@@ -83,7 +83,7 @@ async fn run_tunnel(args: &Args) -> Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
-    
+
     child.wait().await?;
 
     Ok(())
