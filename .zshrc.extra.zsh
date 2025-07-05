@@ -25,6 +25,7 @@ alias -g G="| rg"
 alias -g H='| head'
 alias -g L="| $PAGER"
 alias -g N="&> /dev/null"
+alias -g NE="2> /dev/null"
 alias -g X='| xargs'
 
 alias eza="eza --icons never"
@@ -176,7 +177,7 @@ zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax
 # Tab at beginning of line opens fzf file selector
 function fzf-file-widget-open() {
   if [[ -z "$BUFFER" ]]; then
-    local selected=$(rg --files --sort modified --follow -g '!Library' -g '!.git' 2>/dev/null | tac | fzf)
+    local selected=$(rg --files --sort modified --follow 2>/dev/null | tac | fzf)
     if [[ -n "$selected" ]]; then
       # Check if file is text using file command
       if file -b --mime-type "$selected" | grep -q '^text/'; then
