@@ -3,3 +3,4 @@
 expo
 vercel
 wrangler
+jsonlint

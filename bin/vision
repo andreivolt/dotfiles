@@ -8,6 +8,7 @@
 #   "pyobjc==10.3",
 #   "sh==2.0.6",
 #   "wurlitzer==3.1",
+#   "pyperclip==1.8.2",
 # ]
 # ///
 
@@ -81,6 +82,8 @@ import argparse
 parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('image_path', nargs='?',
                    help='Path to image file (use - for stdin)')
+parser.add_argument('-c', '--copy', action='store_true',
+                   help='Copy text to clipboard')
 
 args = parser.parse_args()
 
@@ -97,12 +100,28 @@ elif args.image_path:
     results = image_to_text_from_path(img_path)
 else:
     # Default: capture screenshot selection
-
+    import tempfile
+    import os
+    
+    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+        tmp_path = tmp.name
+    
     try:
-        img_data = sh.screenshot('selection', _ok_code=[0])
+        sh.screenshot('selection', tmp_path, _ok_code=[0])
+        if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
+            sys.exit("Screenshot capture failed or was cancelled")
+        results = image_to_text_from_path(tmp_path)
     except sh.ErrorReturnCode:
         sys.exit("Failed to capture screenshot")
-    results = image_to_text_from_data(img_data)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
-for text, confidence in results:
-    print(text)
+output_text = '\n'.join(text for text, confidence in results)
+
+if args.copy:
+    import pyperclip
+    pyperclip.copy(output_text)
+    print("Text copied to clipboard")
+else:
+    print(output_text)
