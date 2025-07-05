@@ -176,7 +176,7 @@ zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax
 # Tab at beginning of line opens fzf file selector
 function fzf-file-widget-open() {
   if [[ -z "$BUFFER" ]]; then
-    local selected=$(rg --files --sort modified --follow -g '!Library' -g '!.git' | tac | fzf)
+    local selected=$(rg --files --sort modified --follow -g '!Library' -g '!.git' 2>/dev/null | tac | fzf)
     if [[ -n "$selected" ]]; then
       # Check if file is text using file command
       if file -b --mime-type "$selected" | grep -q '^text/'; then
