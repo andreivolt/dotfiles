@@ -54,7 +54,7 @@ struct Args {
     screenshot: bool,
 
     /// LLM model to use for OCR (e.g., gpt-4o, claude-3-5-sonnet-20241022)
-    #[arg(short, long, default_value = "gpt-4o")]
+    #[arg(short, long, default_value = "gemini-2.5-flash")]
     model: String,
 }
 
@@ -115,12 +115,11 @@ async fn run_ocr(
     // Read and encode image
     let image_data = fs::read(image_path)?;
     let base64_image = general_purpose::STANDARD.encode(&image_data);
-    let data_url = format!("data:{};base64,{}", mime_type, base64_image);
-
-    // Create chat request with image
+    
+    // Create chat request with image using base64 method
     let parts = vec![
         ContentPart::from_text(prompt),
-        ContentPart::from_image_url(&mime_type, data_url)
+        ContentPart::from_image_base64(&mime_type, base64_image)
     ];
     let content = MessageContent::from_parts(parts);
     let chat_req = ChatRequest::new(vec![
@@ -189,9 +188,25 @@ async fn main() -> Result<()> {
             return Err(anyhow!("No data received from stdin"));
         }
 
-        let temp_file = NamedTempFile::new()?;
+        // Try to detect image type from data
+        let suffix = if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+            ".png"
+        } else if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+            ".jpg"
+        } else if data.starts_with(b"GIF89a") || data.starts_with(b"GIF87a") {
+            ".gif"
+        } else if data.starts_with(b"RIFF") && data.len() > 11 && &data[8..12] == b"WEBP" {
+            ".webp"
+        } else {
+            // Default to PNG as it's most common for screenshots
+            ".png"
+        };
+        
+        let temp_file = NamedTempFile::with_suffix(suffix)?;
         fs::write(temp_file.path(), data)?;
-        temp_file.path().to_path_buf()
+        let temp_path = temp_file.path().to_path_buf();
+        std::mem::forget(temp_file); // Keep file alive
+        temp_path
     };
 
     let result = run_ocr(&image_path, args.layout, args.prompt.as_deref(), &args.model).await?;

@@ -43,27 +43,27 @@ struct Args {
     /// Audio file to broadcast
     #[arg(value_name = "FILE")]
     file: Option<PathBuf>,
-    
+
     /// Chromecast speaker name
     #[arg(short, long)]
     speaker: Option<String>,
-    
+
     /// Record live audio from microphone
     #[arg(long)]
     live: bool,
-    
+
     /// Start web interface
     #[arg(long)]
     web: bool,
-    
+
     /// Port for web interface
     #[arg(long, default_value = "8080")]
     port: u16,
-    
+
     /// List available Chromecast devices
     #[arg(long)]
     list: bool,
-    
+
     /// Force device discovery (ignore cache)
     #[arg(long)]
     force: bool,
@@ -121,13 +121,13 @@ impl AudioRecorder {
         let host = cpal::default_host();
         let device = host.default_input_device()
             .context("No input device available")?;
-        
+
         let config = device.default_input_config()
             .context("Failed to get default input config")?;
-        
+
         let is_recording = Arc::clone(&self.is_recording);
         let output_path = output_path.to_string();
-        
+
         // Create FFmpeg process for MP3 encoding
         let mut ffmpeg = Command::new("ffmpeg")
             .args([
@@ -145,9 +145,9 @@ impl AudioRecorder {
             .stderr(Stdio::null())
             .spawn()
             .context("Failed to start FFmpeg")?;
-        
+
         let mut stdin = ffmpeg.stdin.take().context("Failed to get FFmpeg stdin")?;
-        
+
         let stream = device.build_input_stream(
             &config.into(),
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
@@ -164,14 +164,14 @@ impl AudioRecorder {
             },
             None,
         )?;
-        
+
         stream.play()?;
         *is_recording.lock().await = true;
         self.stream = Some(stream);
-        
+
         Ok(())
     }
-    
+
     async fn stop_recording(&mut self) -> Result<()> {
         if let Some(stream) = self.stream.take() {
             drop(stream);
@@ -193,9 +193,9 @@ impl ChromecastBroadcaster {
         let cache_path = dirs::cache_dir()
             .unwrap_or_else(|| PathBuf::from("/tmp"))
             .join("chromecast_devices.json");
-        
+
         let (websocket_tx, _) = broadcast::channel(100);
-        
+
         Self {
             device_cache: Arc::new(Mutex::new(None)),
             cache_path,
@@ -203,22 +203,22 @@ impl ChromecastBroadcaster {
             websocket_tx,
         }
     }
-    
+
     async fn discover_devices(&self, force: bool) -> Result<Vec<ChromecastDevice>> {
         if !force {
             if let Ok(cache) = self.load_cache().await {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)?
                     .as_secs();
-                
+
                 if now - cache.timestamp < 300 { // 5 minutes
                     return Ok(cache.devices);
                 }
             }
         }
-        
+
         let mut devices = Vec::new();
-        
+
         // Use system discovery tools since rust_cast doesn't have async discovery
         let discovery_result = Command::new("sh")
             .args([
@@ -226,14 +226,14 @@ impl ChromecastBroadcaster {
                 "timeout 3 dns-sd -B _googlecast._tcp 2>&1 || timeout 3 avahi-browse -t -r _googlecast._tcp 2>&1 || echo 'No discovery tools available'",
             ])
             .output();
-        
+
         match discovery_result {
             Ok(output) => {
                 let output_str = String::from_utf8_lossy(&output.stdout);
-                
-                
+
+
                 devices = self.parse_discovery_output(&output_str).await;
-                
+
                 if devices.is_empty() {
                     eprintln!("No Chromecast devices found. Make sure devices are on the same network.");
                 }
@@ -242,7 +242,7 @@ impl ChromecastBroadcaster {
                 eprintln!("Failed to discover devices: {}. Install dns-sd (macOS) or avahi-utils (Linux)", e);
             }
         }
-        
+
         // Cache the discovered devices
         let cache = DeviceCache {
             devices: devices.clone(),
@@ -250,21 +250,21 @@ impl ChromecastBroadcaster {
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs(),
         };
-        
+
         self.save_cache(&cache).await?;
         *self.device_cache.lock().await = Some(cache);
-        
+
         Ok(devices)
     }
-    
+
     fn connect_to_device<'a>(&self, device: &'a ChromecastDevice) -> Result<CastDevice<'a>> {
         let cast_device = CastDevice::connect_without_host_verification(&device.ip, device.port)?;
         Ok(cast_device)
     }
-    
+
     async fn parse_discovery_output(&self, output: &str) -> Vec<ChromecastDevice> {
         let mut devices = Vec::new();
-        
+
         // Parse dns-sd output format
         for line in output.lines() {
             if line.contains("_googlecast._tcp") && line.contains("Add") {
@@ -272,13 +272,13 @@ impl ChromecastBroadcaster {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 7 {
                     let instance_name = parts.last().map_or("", |v| v);
-                    
+
                     // Resolve the friendly name from the TXT record
                     let friendly_name = self.resolve_friendly_name(instance_name).await;
-                    
+
                     // Resolve the actual hostname from dns-sd
                     let hostname = self.resolve_hostname(instance_name).await;
-                    
+
                     devices.push(ChromecastDevice {
                         name: friendly_name,
                         ip: hostname,
@@ -288,20 +288,20 @@ impl ChromecastBroadcaster {
                 }
             }
         }
-        
+
         devices
     }
-    
-    
+
+
     async fn resolve_hostname(&self, instance_name: &str) -> String {
         let resolve_cmd = format!("timeout 1 dns-sd -L '{}' _googlecast._tcp local 2>&1", instance_name);
-        
+
         match Command::new("sh").args(["-c", &resolve_cmd]).output() {
             Ok(output) => {
                 let stderr_str = String::from_utf8_lossy(&output.stderr);
                 let stdout_str = String::from_utf8_lossy(&output.stdout);
                 let combined = format!("{}\n{}", stdout_str, stderr_str);
-                
+
                 // Look for "can be reached at" line
                 for line in combined.lines() {
                     if line.contains("can be reached at") {
@@ -314,7 +314,7 @@ impl ChromecastBroadcaster {
                         }
                     }
                 }
-                
+
                 // Fallback to instance name based hostname
                 format!("{}.local", instance_name.to_lowercase())
             }
@@ -323,15 +323,15 @@ impl ChromecastBroadcaster {
             }
         }
     }
-    
+
     async fn resolve_friendly_name(&self, instance_name: &str) -> String {
         // Use timeout command to limit dns-sd execution time
         let resolve_cmd = format!("timeout 1 dns-sd -L '{}' _googlecast._tcp local 2>&1 | grep fn=", instance_name);
-        
+
         match Command::new("sh").args(["-c", &resolve_cmd]).output() {
             Ok(output) => {
                 let output_str = String::from_utf8_lossy(&output.stdout);
-                
+
                 // Look for fn= field in the TXT record
                 for line in output_str.lines() {
                     if let Some(fn_start) = line.find("fn=") {
@@ -342,12 +342,12 @@ impl ChromecastBroadcaster {
                         } else {
                             fn_part
                         };
-                        
+
                         // Unescape backslash-escaped spaces and other characters
                         return friendly_name.replace("\\ ", " ").replace("\\", "");
                     }
                 }
-                
+
                 // If no fn= found, use instance name as fallback
                 instance_name.to_string()
             }
@@ -357,13 +357,13 @@ impl ChromecastBroadcaster {
             }
         }
     }
-    
+
     async fn load_cache(&self) -> Result<DeviceCache> {
         let content = tokio::fs::read_to_string(&self.cache_path).await?;
         let cache: DeviceCache = serde_json::from_str(&content)?;
         Ok(cache)
     }
-    
+
     async fn save_cache(&self, cache: &DeviceCache) -> Result<()> {
         let content = serde_json::to_string_pretty(cache)?;
         if let Some(parent) = self.cache_path.parent() {
@@ -372,15 +372,15 @@ impl ChromecastBroadcaster {
         tokio::fs::write(&self.cache_path, content).await?;
         Ok(())
     }
-    
+
     async fn find_device(&self, speaker_name: &str) -> Result<ChromecastDevice> {
         let devices = self.discover_devices(false).await?;
-        
+
         devices.into_iter()
             .find(|d| d.name.to_lowercase().contains(&speaker_name.to_lowercase()))
             .context("Device not found")
     }
-    
+
     async fn convert_audio(&self, input_path: &str, output_path: &str) -> Result<()> {
         let output = Command::new("ffmpeg")
             .args([
@@ -393,20 +393,20 @@ impl ChromecastBroadcaster {
             ])
             .output()
             .context("Failed to execute FFmpeg")?;
-        
+
         if !output.status.success() {
             anyhow::bail!("FFmpeg conversion failed: {}", String::from_utf8_lossy(&output.stderr));
         }
-        
+
         Ok(())
     }
-    
+
     async fn cast_audio(&self, device: &ChromecastDevice, audio_url: &str) -> Result<()> {
         println!("Casting {} to {}", audio_url, device.name);
-        
+
         // Connect using hostname instead of IP if needed
         let mut connection_device = device.clone();
-        
+
         // If the hostname doesn't work, try to resolve to IP
         if device.ip.contains(".local") {
             // Try to resolve the mDNS hostname to an IP address
@@ -415,15 +415,15 @@ impl ChromecastBroadcaster {
                 println!("Resolved {} to {}", device.ip, connection_device.ip);
             }
         }
-        
+
         let mut cast_device = self.connect_to_device(&connection_device)?;
-        
+
         println!("Connected to Chromecast: {}", device.name);
-        
+
         // For now, just establish connection and print success
         // The rust_cast API requires more setup for proper media casting
         println!("Established connection to Chromecast device");
-        
+
         // Create media object
         let _media = Media {
             content_id: audio_url.to_string(),
@@ -432,107 +432,107 @@ impl ChromecastBroadcaster {
             metadata: None,
             duration: None,
         };
-        
+
         // TODO: Implement proper rust_cast media loading API
         println!("Media object created for: {}", audio_url);
-        
+
         println!("Successfully started casting to {}", device.name);
-        
+
         Ok(())
     }
-    
+
     async fn resolve_hostname_to_ip(&self, hostname: &str) -> Result<String> {
         use std::net::{ToSocketAddrs, IpAddr};
-        
+
         // Try to resolve the hostname to an IPv4 address
         let socket_addrs: Vec<_> = format!("{}:8009", hostname)
             .to_socket_addrs()?
             .collect();
-        
+
         // Prefer IPv4 addresses
         for addr in &socket_addrs {
             if let IpAddr::V4(ipv4) = addr.ip() {
                 return Ok(ipv4.to_string());
             }
         }
-        
+
         // Fall back to first address if no IPv4 found
         socket_addrs
             .first()
             .map(|addr| addr.ip().to_string())
             .context("No addresses found")
     }
-    
+
     async fn broadcast_file(&self, file_path: &str, speaker_name: &str) -> Result<()> {
         let device = self.find_device(speaker_name).await?;
-        
+
         // Convert file to MP3 if needed
         let temp_file = format!("/tmp/cast_audio_{}.mp3", uuid::Uuid::new_v4());
         self.convert_audio(file_path, &temp_file).await?;
-        
+
         // Start HTTP server to serve the file
         let server_port = 8000u16;
-        let audio_url = format!("http://{}:{}/audio.mp3", 
+        let audio_url = format!("http://{}:{}/audio.mp3",
             local_ip_address::local_ip().unwrap_or_else(|_| "127.0.0.1".parse().unwrap()),
             server_port);
-        
+
         let temp_file_clone = temp_file.clone();
         let server = warp::path("audio.mp3")
             .and(warp::fs::file(temp_file_clone))
             .with(warp::cors().allow_any_origin());
-        
+
         let server_handle = tokio::spawn(async move {
             warp::serve(server)
                 .run(([0, 0, 0, 0], server_port))
                 .await;
         });
-        
+
         sleep(Duration::from_secs(1)).await;
-        
+
         // Cast the audio
         self.cast_audio(&device, &audio_url).await?;
-        
+
         println!("Broadcasting {} to {}", file_path, device.name);
-        
+
         // Keep server running for the duration of the audio
         tokio::time::timeout(Duration::from_secs(300), server_handle).await??;
-        
+
         // Clean up
         let _ = tokio::fs::remove_file(&temp_file).await;
-        
+
         Ok(())
     }
-    
+
     async fn broadcast_live(&self, speaker_name: &str) -> Result<()> {
         let _device = self.find_device(speaker_name).await?;
-        
+
         let temp_file = format!("/tmp/live_cast_{}.mp3", uuid::Uuid::new_v4());
-        
+
         // Start recording
         let mut recorder = self.audio_recorder.lock().await;
         recorder.start_recording(&temp_file).await?;
-        
+
         println!("Recording live audio... Press Ctrl+C to stop.");
-        
+
         // Wait for interrupt signal
         tokio::signal::ctrl_c().await?;
-        
+
         recorder.stop_recording().await?;
         drop(recorder);
-        
+
         // Give FFmpeg time to finalize the file
         sleep(Duration::from_secs(2)).await;
-        
+
         // Broadcast the recorded file
         self.broadcast_file(&temp_file, speaker_name).await?;
-        
+
         Ok(())
     }
-    
-    
+
+
     async fn start_web_interface(&self, port: u16) -> Result<()> {
         let websocket_tx = self.websocket_tx.clone();
-        
+
         let websocket_route = warp::path("ws")
             .and(warp::ws())
             .map(move |ws: warp::ws::Ws| {
@@ -541,19 +541,19 @@ impl ChromecastBroadcaster {
                     handle_websocket_upgrade(websocket, websocket_tx).await;
                 })
             });
-        
+
         let cors = warp::cors()
             .allow_any_origin()
             .allow_headers(vec!["content-type"])
             .allow_methods(vec!["GET", "POST", "OPTIONS"]);
-        
+
         let routes = websocket_route.with(cors);
-        
+
         println!("WebSocket server starting on ws://localhost:{}/ws", port);
         warp::serve(routes)
             .run(([127, 0, 0, 1], port))
             .await;
-        
+
         Ok(())
     }
 }
@@ -564,7 +564,7 @@ async fn handle_websocket_upgrade(
 ) {
     let (mut ws_tx, mut ws_rx) = websocket.split();
     let mut broadcast_rx = websocket_tx.subscribe();
-    
+
     // Handle incoming messages
     let ws_handler = tokio::spawn(async move {
         while let Some(result) = ws_rx.next().await {
@@ -574,7 +574,7 @@ async fn handle_websocket_upgrade(
                         if let Ok(ws_msg) = serde_json::from_str::<WebSocketMessage>(text) {
                             match ws_msg {
                                 WebSocketMessage::DiscoverDevices => {
-                                    let response = WebSocketMessage::DevicesFound { 
+                                    let response = WebSocketMessage::DevicesFound {
                                         devices: vec![] // Simplified for now
                                     };
                                     let _ = websocket_tx.send(response);
@@ -596,7 +596,7 @@ async fn handle_websocket_upgrade(
             }
         }
     });
-    
+
     // Handle outgoing messages
     let broadcast_handler = tokio::spawn(async move {
         while let Ok(msg) = broadcast_rx.recv().await {
@@ -607,7 +607,7 @@ async fn handle_websocket_upgrade(
             }
         }
     });
-    
+
     // Wait for either handler to complete
     tokio::select! {
         _ = ws_handler => {},
@@ -619,7 +619,7 @@ async fn handle_websocket_upgrade(
 async fn main() -> Result<()> {
     let args = Args::parse();
     let broadcaster = ChromecastBroadcaster::new();
-    
+
     if args.list {
         let devices = broadcaster.discover_devices(args.force).await?;
         println!("Available Chromecast devices:");
@@ -628,16 +628,16 @@ async fn main() -> Result<()> {
         }
         return Ok(());
     }
-    
+
     if args.web {
         broadcaster.start_web_interface(args.port).await?;
         return Ok(());
     }
-    
+
     let speaker_name = args.speaker
         .or_else(|| std::env::var("CHROMECAST_SPEAKER").ok())
         .context("Speaker name required. Use -s option or set CHROMECAST_SPEAKER env var")?;
-    
+
     if args.live {
         broadcaster.broadcast_live(&speaker_name).await?;
     } else if let Some(file_path) = args.file {
@@ -645,7 +645,7 @@ async fn main() -> Result<()> {
     } else {
         // Check if stdin has data
         use std::io::IsTerminal;
-        
+
         if io::stdin().is_terminal() {
             eprintln!("Error: No audio file specified. Use one of:");
             eprintln!("  chromecast-broadcast <audio_file> -s <speaker>");
@@ -653,25 +653,25 @@ async fn main() -> Result<()> {
             eprintln!("  echo 'audio data' | chromecast-broadcast -s <speaker>");
             return Ok(());
         }
-        
+
         // Read from stdin
         let mut buffer = Vec::new();
         io::stdin().read_to_end(&mut buffer)?;
-        
+
         if buffer.is_empty() {
             eprintln!("Error: No data received from stdin");
             return Ok(());
         }
-        
+
         // Write stdin data to a temporary file
         let temp_file = format!("/tmp/stdin_cast_{}", uuid::Uuid::new_v4());
         tokio::fs::write(&temp_file, &buffer).await?;
-        
+
         // Broadcast the file (it will be converted to MP3 if needed)
         broadcaster.broadcast_file(&temp_file, &speaker_name).await?;
-        
+
         let _ = tokio::fs::remove_file(&temp_file).await;
     }
-    
+
     Ok(())
 }
