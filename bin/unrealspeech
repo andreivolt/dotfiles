@@ -213,20 +213,20 @@ fn split_text_into_chunks(text: &str, max_length: usize) -> Vec<String> {
 async fn play_audio_data(audio_data: &[u8]) -> Result<()> {
     let (_stream, stream_handle) = OutputStream::try_default()?;
     let sink = Sink::try_new(&stream_handle)?;
-    
+
     let cursor = Cursor::new(audio_data.to_vec());
     let source = Decoder::new(cursor)?;
-    
+
     sink.append(source);
     sink.sleep_until_end();
-    
+
     Ok(())
 }
 
 async fn play_audio_url(url: &str) -> Result<()> {
     let response = reqwest::get(url).await?;
     let audio_data = response.bytes().await?;
-    
+
     play_audio_data(&audio_data).await
 }
 

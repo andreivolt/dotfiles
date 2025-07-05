@@ -90,7 +90,7 @@ fn main() -> Result<()> {
         if let Some(path) = &file_path {
             println!("Screenshot saved to: {}", path.display());
         }
-        
+
         let notify_cmd = if cfg!(target_os = "macos") {
             file_path.as_ref().map(|p| format!(
                 "terminal-notifier -title 'Screenshot' -message 'Screenshot taken' -open 'file://{}' -contentImage '{}'",
@@ -109,6 +109,6 @@ fn main() -> Result<()> {
 }
 
 enum OutputMode {
-    File, 
+    File,
     Stdout,
 }

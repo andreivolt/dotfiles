@@ -253,7 +253,7 @@ class AudioCapture:
             # Check shutdown flag
             if shutdown_flag:
                 break
-                
+
             data = stream.read(self.chunk_size, exception_on_overflow=False)
             frames.append(data)
 
@@ -497,11 +497,11 @@ async def main():
         capture_task.cancel()
     if recognize_task and not recognize_task.done():
         recognize_task.cancel()
-    
+
     # Wait a bit for tasks to clean up
     if capture_task or recognize_task:
         await asyncio.sleep(0.1)
-    
+
     audio_capture.close()
 
 def signal_handler(signum, frame):
