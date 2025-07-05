@@ -4,7 +4,7 @@
 //! clap = { version = "4.5", features = ["derive"] }
 //! anyhow = "1.0"
 //! dirs = "5.0"
-//! plist = "1.7"
+//! rusqlite = "0.32"
 //! ```
 
 use anyhow::{Result, bail, Context};
@@ -14,10 +14,10 @@ use std::{
     io::{Write, IsTerminal},
     process::{Command, Stdio},
 };
-use plist::Value as PlistValue;
+use rusqlite::Connection;
 
 #[derive(Parser)]
-#[command(about = "Browse and manage Jumpcut clipboard history with interactive selection")]
+#[command(about = "Browse and manage Maccy clipboard history with interactive selection")]
 struct Args {
     #[arg(short, long, help = "Copy selected item to clipboard")]
     copy: bool,
@@ -39,35 +39,25 @@ struct Args {
 }
 
 
-fn get_jumpcut_data() -> Result<Vec<String>> {
-    let jumpcut_file = dirs::home_dir()
+fn get_maccy_data() -> Result<Vec<String>> {
+    let maccy_db = dirs::home_dir()
         .context("Could not find home directory")?
-        .join("Library/Application Support/Jumpcut/JCEngine.save");
+        .join("Library/Containers/org.p0deje.Maccy/Data/Library/Application Support/Maccy/Storage.sqlite");
 
-    if !jumpcut_file.exists() {
-        bail!("Jumpcut data file not found");
+    if !maccy_db.exists() {
+        bail!("Maccy database not found");
     }
 
-    let data = std::fs::read(&jumpcut_file)?;
-    let plist = plist::from_bytes(&data)
-        .context("Failed to parse plist file")?;
-
-    let items = match plist {
-        PlistValue::Dictionary(dict) => {
-            dict.get("jcList")
-                .and_then(|v| v.as_array())
-                .context("jcList not found or not an array")?
-                .iter()
-                .filter_map(|item| {
-                    item.as_dictionary()
-                        .and_then(|d| d.get("Contents"))
-                        .and_then(|v| v.as_string())
-                        .map(|s| s.to_string())
-                })
-                .collect()
-        }
-        _ => bail!("Root plist object is not a dictionary"),
-    };
+    let conn = Connection::open(&maccy_db)?;
+    
+    let mut stmt = conn.prepare("SELECT CAST(hic.ZVALUE AS TEXT) FROM ZHISTORYITEM hi JOIN ZHISTORYITEMCONTENT hic ON hi.Z_PK = hic.ZITEM WHERE hic.ZTYPE = 'public.utf8-plain-text' GROUP BY hi.Z_PK ORDER BY hi.ZLASTCOPIEDAT DESC")?;
+    let items: Vec<String> = stmt.query_map([], |row| {
+        let value: String = row.get(0)?;
+        Ok(value)
+    })?
+    .filter_map(|r| r.ok())
+    .filter(|s| !s.is_empty())
+    .collect();
 
     Ok(items)
 }
@@ -123,9 +113,11 @@ fn run_fzf(items: &[String], _copy_mode: bool) -> Result<String> {
     cmd.arg("--preview")
         .arg("echo {} | sed 's/\\\\n/\\n/g; s/\\\\t/\\t/g' | fold -s -w 80")
         .arg("--preview-window")
-        .arg("wrap")
+        .arg("up:wrap")
         .arg("--bind")
         .arg(keybinds.join(","))
+        .arg("--height")
+        .arg("80%")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
 
@@ -177,7 +169,7 @@ fn output_result(selection: &str, copy_mode: bool) -> Result<()> {
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    let items = get_jumpcut_data()?;
+    let items = get_maccy_data()?;
     let filtered_items = filter_items(
         items,
         args.search.as_deref(),
