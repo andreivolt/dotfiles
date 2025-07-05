@@ -4,23 +4,17 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "watchexec -w package.json -w yarn.lock -r 'yarn install && vite'",
-    "dev:simple": "vite",
+    "dev": "vite",
     "build": "tsc -b && vite build",
     "build:html": "node scripts/build-html.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@mdx-js/rollup": "^3.1.0",
     "@vitejs/plugin-react-swc": "^3.10.2",
-    "gray-matter": "^4.0.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
-    "rehype-highlight": "^7.0.2",
-    "rehype-raw": "^7.0.0",
-    "remark-frontmatter": "^5.0.0",
     "remark-gfm": "^4.0.1",
     "rollup": "^4.43.0"
   },
