@@ -9,10 +9,10 @@
 //! aws-sdk-s3 = { version = "1.0", features = ["behavior-version-latest"] }
 //! aws-credential-types = "1.0"
 //! mime_guess = "2.0"
-//! tempfile = "3.0"
 //! anyhow = "1.0"
 //! indicatif = "0.17"
 //! bytes = "1.0"
+//! infer = "0.16"
 //! ```
 
 use anyhow::{Context, Result};
@@ -28,7 +28,6 @@ use std::io::{self, Read};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
-use tempfile::NamedTempFile;
 
 #[derive(Parser)]
 #[command(name = "with-url")]
@@ -213,19 +212,10 @@ async fn generate_presigned_url(client: &Client, bucket: &str, key: &str) -> Res
     Ok(presigned_request.uri().to_string())
 }
 
-fn detect_file_extension(temp_path: &std::path::Path) -> String {
-    // Try to use file command to detect MIME type
-    if let Ok(output) = Command::new("file")
-        .args(&["--brief", "--mime-type"])
-        .arg(temp_path)
-        .output()
-    {
-        let mime_type = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if let Some(subtype) = mime_type.split('/').nth(1) {
-            if subtype != "octet-stream" {
-                return format!(".{}", subtype);
-            }
-        }
+fn detect_file_extension(data: &[u8]) -> String {
+    // Use infer crate to detect file type from magic bytes
+    if let Some(kind) = infer::get(data) {
+        return format!(".{}", kind.extension());
     }
 
     String::new()
@@ -288,16 +278,13 @@ async fn main() -> Result<()> {
             .read_to_end(&mut buffer)
             .context("Failed to read from stdin")?;
 
-        // Create temporary file to detect type
-        let temp_file = NamedTempFile::new().context("Failed to create temporary file")?;
-        std::fs::write(temp_file.path(), &buffer)
-            .context("Failed to write to temporary file")?;
-
-        let extension = detect_file_extension(temp_file.path());
-        let filename = format!("upload_{}{}",
-            temp_file.path().file_name().unwrap().to_str().unwrap(),
-            extension
-        );
+        // Detect file extension from buffer content
+        let extension = detect_file_extension(&buffer);
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let filename = format!("upload_{}{}", timestamp, extension);
 
         (buffer, filename)
     };
