@@ -10,6 +10,12 @@ local function toggleGhosttyVisibility()
 		end
 	else
 		hs.application.launchOrFocus("ghostty")
+		hs.timer.doAfter(0.5, function()
+			local newGhostty = hs.application.get("ghostty")
+			if newGhostty and newGhostty:mainWindow() then
+				newGhostty:mainWindow():maximize()
+			end
+		end)
 	end
 end
 

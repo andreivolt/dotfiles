@@ -1,46 +1,74 @@
-#!/usr/bin/env -S uv run --script --quiet
-"""Audio transcription using Deepgram API."""
-# /// script
-# dependencies = [
-#   "requests>=2.31",
-#   "deepgram-sdk>=3.0.0",
-#   "click>=8.0",
-#   "pyaudio>=0.2.11",
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! clap = { version = "4", features = ["derive"] }
+//! reqwest = { version = "0.11", features = ["json", "stream", "multipart", "native-tls"] }
+//! tokio = { version = "1", features = ["full"] }
+//! serde = { version = "1.0", features = ["derive"] }
+//! serde_json = "1.0"
+//! anyhow = "1.0"
+//! futures = "0.3"
+//! mime_guess = "2.0"
+//! indicatif = "0.17"
+//! tempfile = "3.0"
+//! regex = "1.0"
+//! tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
+//! cpal = "0.15"
+//! crossbeam-channel = "0.5"
+//! base64 = "0.21"
+//! url = "2.0"
+//! ```
 
-import click
-import asyncio
-import os
-import sys
-import json
-import requests
-import subprocess
-import tempfile
-from pathlib import Path
-from urllib.parse import urlencode
-import mimetypes
-from typing import List
+use anyhow::{Context, Result};
+use clap::Parser;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::SampleRate;
+use crossbeam_channel::{unbounded, Sender};
+use futures::{SinkExt, StreamExt};
+use indicatif::{ProgressBar, ProgressStyle};
+use mime_guess::from_path;
+use reqwest::multipart;
+use serde::{Deserialize, Serialize};
+use std::env;
+use std::fs;
+use std::io::{self, Write};
+use std::path::Path;
+use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+use tempfile::NamedTempFile;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-from deepgram import (
-    DeepgramClient,
-    DeepgramClientOptions,
-    LiveTranscriptionEvents,
-    LiveOptions,
-    Microphone,
-    PrerecordedOptions
-)
+// Audio configuration for live transcription
+const SAMPLE_RATE: u32 = 16000;
+const CHANNELS: u16 = 1;
 
-# Model choices
-NOVA_MODELS = ["nova-2", "nova-2-meeting", "nova-2-phonecall", "nova-2-voicemail", "nova-2-finance", "nova-2-conversationalai", "nova-2-video", "nova-2-medical", "nova-2-drivethru", "nova-2-automotive", "nova-3"]
-WHISPER_MODELS = ["whisper-tiny", "whisper-base", "whisper-small", "whisper-medium", "whisper-large"]
-ALL_MODELS = NOVA_MODELS + WHISPER_MODELS
+// Model choices - matching Python version
+const NOVA_MODELS: &[&str] = &[
+    "nova-2", "nova-2-meeting", "nova-2-phonecall", "nova-2-voicemail", 
+    "nova-2-finance", "nova-2-conversationalai", "nova-2-video", 
+    "nova-2-medical", "nova-2-drivethru", "nova-2-automotive", "nova-3"
+];
 
-# Redaction categories - basic and extended
-REDACT_CHOICES = [
-    # Basic categories
-    "pci", "pii", "numbers", "true",
-    # Extended categories (50+ entity types)
+const WHISPER_MODELS: &[&str] = &[
+    "whisper-tiny", "whisper-base", "whisper-small", "whisper-medium", "whisper-large"
+];
+
+const ENHANCED_MODELS: &[&str] = &[
+    "enhanced", "enhanced-general", "enhanced-meeting", "enhanced-phonecall", "enhanced-finance"
+];
+
+const BASE_MODELS: &[&str] = &[
+    "base", "meeting", "phonecall", "finance", "conversationalai", "voicemail", "video", "custom"
+];
+
+const NOVA_3_MODELS: &[&str] = &["nova-3", "nova-3-general", "nova-3-medical"];
+
+// Redaction categories - matching Python version
+const REDACT_CHOICES: &[&str] = &[
+    "pci", "pii", "numbers", "true", "false", "aggressive_numbers", "ssn",
     "account_number", "address", "banking_information", "blood_type",
     "credit_card", "credit_card_cvv", "credit_card_expiration",
     "date", "date_interval", "date_of_birth", "drivers_license",
@@ -51,831 +79,1336 @@ REDACT_CHOICES = [
     "organization", "passport_number", "password", "person_age",
     "person_name", "phone_number", "physical_attribute", "political_affiliation",
     "religion", "statistics", "time", "url", "username", "vehicle_id",
-    "zodiac_sign", "routing_number", "ssn"
-]
+    "zodiac_sign", "routing_number"
+];
 
-def parse_keywords(ctx, param, value):
-    """Parse keyword:boost format"""
-    if not value:
-        return []
-    result = []
-    for v in value:
-        try:
-            word, boost = v.split(':', 1)
-            result.append(f"{word}:{boost}")
-        except ValueError:
-            raise click.BadParameter(f"Keywords must be in 'word:boost' format, got: {v}")
-    return result
+#[derive(Parser, Debug, Clone)]
+#[command(author, version, about = "Audio transcription using Deepgram API", long_about = None)]
+struct Args {
+    /// Input file path or URL
+    input_file: Option<String>,
 
-def parse_replace(ctx, param, value):
-    """Parse from:to format"""
-    if not value:
-        return []
-    result = []
-    for v in value:
-        try:
-            from_word, to_word = v.split(':', 1)
-            result.append(f"{from_word}:{to_word}")
-        except ValueError:
-            raise click.BadParameter(f"Replace must be in 'from:to' format, got: {v}")
-    return result
+    /// Model to use
+    /// Available models:
+    /// Nova-3: nova-3, nova-3-general, nova-3-medical
+    /// Nova-2: nova-2, nova-2-general, nova-2-meeting, nova-2-finance, nova-2-conversationalai,
+    ///         nova-2-voicemail, nova-2-video, nova-2-medical, nova-2-drivethru, nova-2-automotive
+    /// Nova: nova, nova-general, nova-phonecall, nova-medical
+    /// Enhanced: enhanced, enhanced-general, enhanced-meeting, enhanced-phonecall, enhanced-finance
+    /// Base: base, meeting, phonecall, finance, conversationalai, voicemail, video, custom
+    #[arg(short, long, default_value = "nova-3")]
+    model: String,
 
-def parse_extra(ctx, param, value):
-    """Parse key=value format"""
-    if not value:
-        return []
-    result = []
-    for v in value:
-        try:
-            key, val = v.split('=', 1)
-            result.append({key: val})
-        except ValueError:
-            raise click.BadParameter(f"Extra must be in 'key=value' format, got: {v}")
-    return result
+    /// Disable smart formatting
+    #[arg(long)]
+    no_smart_format: bool,
 
-# Chunking functions
-async def download_file(url: str, output_path: str):
-    """Download file from URL."""
-    print(f"Downloading: {url}")
-    response = requests.get(url, stream=True)
-    response.raise_for_status()
+    /// Disable speaker diarization
+    #[arg(long)]
+    no_diarize: bool,
 
-    total_size = int(response.headers.get('content-length', 0))
-    downloaded = 0
+    /// Disable paragraph detection
+    #[arg(long)]
+    no_paragraphs: bool,
 
-    with open(output_path, 'wb') as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            if chunk:
-                f.write(chunk)
-                downloaded += len(chunk)
-                if total_size > 0:
-                    progress = (downloaded / total_size) * 100
-                    print(f"\rDownload progress: {progress:.1f}%", end='', flush=True)
-    print()
+    /// Disable utterance segmentation
+    #[arg(long)]
+    no_utterances: bool,
 
-async def get_audio_duration(file_path: str) -> float:
-    """Get audio duration in seconds using ffprobe."""
-    cmd = [
-        'ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
-        '-of', 'csv=p=0', file_path
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise Exception(f"Failed to get duration: {result.stderr}")
-    return float(result.stdout.strip())
+    /// Add punctuation
+    #[arg(long)]
+    punctuate: bool,
 
-async def chunk_audio(file_path: str, chunk_minutes: int = 90) -> List[str]:
-    """Split audio file into chunks using ffmpeg."""
-    print(f"Analyzing audio file: {file_path}")
+    /// Convert numbers to digits
+    #[arg(long)]
+    numerals: bool,
 
-    # Get total duration
-    total_duration = await get_audio_duration(file_path)
-    chunk_duration = chunk_minutes * 60  # Convert to seconds
+    /// Filter profanity
+    #[arg(long)]
+    profanity_filter: bool,
 
-    file_stem = Path(file_path).stem
-    output_dir = Path(f"{file_stem}_chunks")
-    output_dir.mkdir(exist_ok=True)
+    /// Convert measurements to abbreviations
+    #[arg(long)]
+    measurements: bool,
 
-    total_chunks = int(total_duration / chunk_duration) + (1 if total_duration % chunk_duration else 0)
-    print(f"Total duration: {total_duration/3600:.1f} hours")
-    print(f"Splitting into {total_chunks} chunks of {chunk_minutes} minutes each")
+    /// Format dictation commands
+    #[arg(long)]
+    dictation: bool,
 
-    chunks = []
+    /// Include filler words
+    #[arg(long)]
+    filler_words: bool,
 
-    for i in range(total_chunks):
-        start_time = i * chunk_duration
-        original_ext = Path(file_path).suffix
-        chunk_path = output_dir / f"chunk_{i:03d}{original_ext}"
+    /// Language code (BCP-47 format)
+    /// Supported languages: bg, ca, cs, da, da-DK, de, de-CH, el, en, en-AU, en-GB, en-IN, en-NZ, en-US,
+    /// es, es-419, es-LATAM, et, fi, fr, fr-CA, hi, hi-Latn, hu, id, it, ja, ko, ko-KR, lt, lv, ms,
+    /// nl, nl-BE, no, pl, pt, pt-BR, pt-PT, ro, ru, sk, sv, sv-SE, taq, th, th-TH, tr, uk, vi,
+    /// zh, zh-CN, zh-HK, zh-Hans, zh-Hant, zh-TW
+    #[arg(long, default_value = "en")]
+    language: String,
 
-        cmd = [
-            'ffmpeg', '-y', '-i', file_path,
-            '-ss', str(start_time),
-            '-t', str(chunk_duration),
-            '-c', 'copy',  # Copy streams without re-encoding
-            str(chunk_path)
-        ]
+    /// Auto-detect language
+    #[arg(long)]
+    detect_language: bool,
 
-        print(f"Creating chunk {i+1}/{total_chunks}...")
-        result = subprocess.run(cmd, capture_output=True, text=True)
+    /// Process channels independently
+    #[arg(long)]
+    multichannel: bool,
 
-        if result.returncode != 0:
-            print(f"Warning: Failed to create chunk {i}: {result.stderr}")
-            continue
+    /// Number of independent audio channels
+    #[arg(long)]
+    channels: Option<u32>,
 
-        chunks.append(str(chunk_path))
+    /// Utterance split duration
+    #[arg(long, default_value = "0.8")]
+    utt_split: f64,
 
-        # Get actual chunk duration
-        try:
-            actual_duration = await get_audio_duration(str(chunk_path))
-            print(f"Created chunk {i+1}/{total_chunks}: {chunk_path} ({actual_duration:.1f}s)")
-        except:
-            print(f"Created chunk {i+1}/{total_chunks}: {chunk_path}")
+    /// Detect entities
+    #[arg(long)]
+    detect_entities: bool,
 
-    return chunks
+    /// Detect topics
+    #[arg(long)]
+    detect_topics: bool,
 
-async def transcribe_chunk(client: DeepgramClient, chunk_path: str, chunk_index: int, **kwargs) -> dict:
-    """Transcribe a single audio chunk."""
-    try:
-        # Check if file exists and has content
-        if not os.path.exists(chunk_path):
-            raise Exception(f"Chunk file does not exist: {chunk_path}")
+    /// Identify topics
+    #[arg(long)]
+    topics: bool,
 
-        file_size = os.path.getsize(chunk_path)
-        if file_size == 0:
-            raise Exception(f"Chunk file is empty: {chunk_path} (0 bytes)")
+    /// Detect speaker intents
+    #[arg(long)]
+    intents: bool,
 
-        print(f"Processing chunk {chunk_index}: {chunk_path} ({file_size/1024/1024:.1f}MB)")
+    /// Analyze sentiment
+    #[arg(long)]
+    sentiment: bool,
 
-        with open(chunk_path, "rb") as audio_file:
-            buffer_data = audio_file.read()
+    /// Generate summary
+    #[arg(long)]
+    summarize: Option<String>,
 
-        # Use same options as main function
-        options = PrerecordedOptions(
-            model=kwargs['model'],
-            smart_format=kwargs['smart_format'],
-            utterances=kwargs['utterances'],
-            punctuate=kwargs['punctuate'],
-            diarize=kwargs['diarize'],
-            paragraphs=kwargs['paragraphs'],
-            numerals=kwargs['numerals'],
-            profanity_filter=kwargs['profanity_filter'],
-            measurements=kwargs['measurements'],
-            dictation=kwargs['dictation'],
-            filler_words=kwargs['filler_words'],
-            detect_entities=kwargs['detect_entities'],
-            detect_language=kwargs['detect_language'],
-            detect_topics=kwargs['detect_topics'],
-            topics=kwargs['topics'],
-            intents=kwargs['intents'],
-            sentiment=kwargs['sentiment'],
-            multichannel=kwargs['multichannel'],
-            language=kwargs['language'],
-            utt_split=kwargs['utt_split'],
-            version=kwargs['version']
-        )
+    /// Boost keywords (format: word:boost). Use 'keyterms' for Nova-3 models.
+    /// Example: --keywords "neural:2.5" --keywords "networks:1.8"
+    #[arg(long)]
+    keywords: Vec<String>,
 
-        response = await client.listen.asyncprerecorded.v("1").transcribe_file(
-            {"buffer": buffer_data}, options
-        )
+    /// Key terms for Nova-3 models (format: word:boost)
+    /// Example: --keyterms "artificial:2.0" --keyterms "intelligence:1.5"
+    #[arg(long)]
+    keyterms: Vec<String>,
 
-        result = response.to_dict()
-        result["chunk_index"] = chunk_index
-        result["chunk_file"] = chunk_path
+    /// Search for terms
+    #[arg(long)]
+    search: Vec<String>,
 
-        # Calculate time offset for this chunk
-        chunk_minutes = kwargs.get('chunk_minutes', 90)
-        time_offset_seconds = chunk_index * chunk_minutes * 60
+    /// Replace terms (format: from:to)
+    #[arg(long)]
+    replace: Vec<String>,
 
-        # Adjust timestamps
-        if "results" in result and "channels" in result["results"]:
-            for channel in result["results"]["channels"]:
-                if "alternatives" in channel:
-                    for alternative in channel["alternatives"]:
-                        if "words" in alternative:
-                            for word in alternative["words"]:
-                                if "start" in word:
-                                    word["start"] += time_offset_seconds
-                                if "end" in word:
-                                    word["end"] += time_offset_seconds
+    /// Redact sensitive info
+    /// Available options: true, false, pci, pii, numbers, aggressive_numbers, ssn,
+    /// account_number, address, banking_information, blood_type, credit_card, 
+    /// credit_card_cvv, credit_card_expiration, date, date_interval, date_of_birth,
+    /// drivers_license, drug, duration, email_address, event, filename, gender_sexuality,
+    /// healthcare_number, injury, ip_address, language, location, marital_status,
+    /// medical_condition, medical_process, money, nationality, occupation, organization,
+    /// passport_number, password, person_age, person_name, phone_number, physical_attribute,
+    /// political_affiliation, religion, statistics, time, url, username, vehicle_id,
+    /// zodiac_sign, routing_number
+    #[arg(long)]
+    redact: Vec<String>,
 
-        transcript = result["results"]["channels"][0]["alternatives"][0]["transcript"]
-        print(f"Chunk {chunk_index} completed: {len(transcript)} characters")
+    /// Custom topic for detection
+    #[arg(long)]
+    custom_topic: Option<String>,
 
-        return result
+    /// Custom topic mode
+    /// Allowed values: strict, extended
+    #[arg(long, default_value = "extended")]
+    custom_topic_mode: String,
 
-    except Exception as e:
-        error_msg = str(e)
-        print(f"Error processing chunk {chunk_index}: {error_msg}")
-        print(f"Chunk file: {chunk_path}")
+    /// Tag for the request
+    #[arg(long)]
+    tag: Option<String>,
 
-        # Add more detailed error info
-        if hasattr(e, 'response') and e.response:
-            try:
-                error_details = e.response.json()
-                print(f"API Error details: {error_details}")
-                error_msg = f"{error_msg} - API Details: {error_details}"
-            except:
-                print(f"HTTP Status: {e.response.status_code}")
-                error_msg = f"{error_msg} - HTTP {e.response.status_code}"
+    /// URL for receiving results
+    #[arg(long)]
+    callback: Option<String>,
 
-        return {"error": error_msg, "chunk_index": chunk_index, "chunk_file": chunk_path}
+    /// Model tier level
+    #[arg(long)]
+    tier: Option<String>,
 
-async def process_chunks_streaming(chunks: List[str], output_file: str, **kwargs):
-    """Process chunks with controlled concurrency and maintain order."""
-    client = DeepgramClient()
+    /// Max transcript alternatives
+    #[arg(long)]
+    alternatives: Option<u32>,
 
-    output_path = Path(output_file)
-    transcript_path = output_path.with_suffix('.txt')
+    /// Audio encoding for streaming
+    /// Supported encodings: linear16, flac, mulaw, amr-nb, amr-wb, opus, speex, ogg-opus
+    #[arg(long)]
+    encoding: Option<String>,
 
-    semaphore = asyncio.Semaphore(3)
+    /// Sample rate in Hz
+    #[arg(long)]
+    sample_rate: Option<u32>,
 
-    async def process_with_semaphore(chunk_path: str, index: int):
-        async with semaphore:
-            return await transcribe_chunk(client, chunk_path, index, **kwargs)
+    /// Model version
+    #[arg(long, default_value = "latest")]
+    version: String,
 
-    # Process chunks and maintain order
-    with open(output_file, 'w') as json_file, open(transcript_path, 'w') as txt_file:
-        json_file.write('[\n')
-        txt_file.write(f"Transcript for {len(chunks)} audio chunks\n")
-        txt_file.write("=" * 50 + "\n\n")
+    /// Chunk duration in minutes
+    #[arg(long, default_value = "90")]
+    chunk_minutes: u32,
 
-        tasks = [process_with_semaphore(chunk, i) for i, chunk in enumerate(chunks)]
+    /// Output file for chunking mode
+    #[arg(short, long, default_value = "transcription.json")]
+    output: String,
 
-        # Process with progress updates
-        completed_count = 0
+    /// Enable live transcription from microphone
+    #[arg(long)]
+    live: bool,
 
-        for i, task in enumerate(asyncio.as_completed(tasks)):
-            result = await task
-            completed_count += 1
+    /// Output full JSON response
+    #[arg(long)]
+    json: bool,
 
-            # Find the chunk index from the result
-            chunk_idx = result.get('chunk_index', i) if isinstance(result, dict) else i
+    /// Utterance end timeout (seconds). Use with interim_results
+    #[arg(long)]
+    utterance_end: Option<f64>,
 
-            print(f"Progress: {completed_count}/{len(chunks)} chunks completed ({completed_count/len(chunks)*100:.1f}%)")
+    /// Endpointing timeout (milliseconds). Set to false to disable
+    #[arg(long, default_value = "300")]
+    endpointing: String,
 
-            # Store result for later ordered processing
-            if not hasattr(process_chunks_streaming, 'results'):
-                process_chunks_streaming.results = [None] * len(chunks)
-            process_chunks_streaming.results[chunk_idx] = result
+    /// Opt out of Model Improvement Program
+    #[arg(long)]
+    mip_opt_out: bool,
 
-        # Now process results in order
-        for i, result in enumerate(process_chunks_streaming.results):
-            if isinstance(result, Exception):
-                result = {"error": str(result), "chunk_index": i}
+    /// Callback method for webhook
+    /// Allowed values: POST, GET, PUT, DELETE
+    #[arg(long, default_value = "POST")]
+    callback_method: String,
 
-            # Write JSON result
-            if i > 0:
-                json_file.write(',\n')
-            json.dump(result, json_file, indent=2)
-            json_file.flush()
+    /// Extra parameters (format: key=value)
+    #[arg(long)]
+    extra: Vec<String>,
+}
 
-            # Write transcript if successful
-            if "error" not in result and "results" in result:
-                chunk_index = result["chunk_index"]
-                transcript = result["results"]["channels"][0]["alternatives"][0]["transcript"]
+#[derive(Serialize, Deserialize, Debug)]
+struct DeepgramResponse {
+    results: Results,
+}
 
-                txt_file.write(f"Chunk {chunk_index + 1}:\n")
-                txt_file.write(f"{transcript}\n\n")
-                txt_file.flush()
+#[derive(Serialize, Deserialize, Debug)]
+struct Results {
+    channels: Vec<Channel>,
+    #[serde(default)]
+    summary: Option<Summary>,
+    #[serde(default)]
+    topics: Option<Topics>,
+    #[serde(default)]
+    intents: Option<Intents>,
+}
 
-                print(f"Processed chunk {chunk_index + 1}/{len(chunks)}")
-            else:
-                chunk_idx = result.get('chunk_index', 'unknown')
-                error_msg = result.get('error', 'Unknown error')
-                print(f"Skipped chunk {chunk_idx} due to error: {error_msg}")
-                print(f"ERROR CHUNK {chunk_idx}: {error_msg}", file=sys.stderr)
+#[derive(Serialize, Deserialize, Debug)]
+struct Channel {
+    alternatives: Vec<Alternative>,
+}
 
-        json_file.write('\n]')
+#[derive(Serialize, Deserialize, Debug)]
+struct Alternative {
+    transcript: String,
+    #[serde(default)]
+    paragraphs: Option<Paragraphs>,
+    #[serde(default)]
+    words: Option<Vec<Word>>,
+}
 
-    print(f"\nTranscription complete!")
-    print(f"JSON output: {output_file}")
-    print(f"Text transcript: {transcript_path}")
+#[derive(Serialize, Deserialize, Debug)]
+struct Paragraphs {
+    transcript: String,
+    paragraphs: Vec<Paragraph>,
+}
 
-async def live_transcribe(**kwargs):
-    """Perform live transcription from microphone."""
-    try:
-        # Get API key
-        api_key = os.environ.get('DEEPGRAM_API_KEY')
-        if not api_key:
-            print("Error: DEEPGRAM_API_KEY environment variable not set")
-            return
+#[derive(Serialize, Deserialize, Debug)]
+struct Paragraph {
+    sentences: Vec<Sentence>,
+    #[serde(default)]
+    speaker: Option<u32>,
+}
 
-        config = DeepgramClientOptions(options={"keepalive": "true"})
-        deepgram = DeepgramClient(api_key, config)
+#[derive(Serialize, Deserialize, Debug)]
+struct Sentence {
+    text: String,
+}
 
-        dg_connection = deepgram.listen.asynclive.v("1")
+#[derive(Serialize, Deserialize, Debug)]
+struct Word {
+    word: String,
+    #[serde(default)]
+    start: Option<f64>,
+    #[serde(default)]
+    end: Option<f64>,
+    #[serde(default)]
+    speaker: Option<u32>,
+}
 
-        async def on_message(self, result, **kwargs):
-            try:
-                if hasattr(result, 'channel') and result.channel and result.channel.alternatives:
-                    sentence = result.channel.alternatives[0].transcript
-                    if len(sentence) == 0:
-                        return
-                    if result.is_final:
-                        print(f"\033[92m{sentence}\033[0m")
-                    else:
-                        print(f"\033[90m{sentence}\033[0m", end='\r')
-            except Exception as e:
-                print(f"Error in transcript: {e}")
+#[derive(Serialize, Deserialize, Debug)]
+struct Summary {
+    #[serde(default)]
+    short: Option<String>,
+}
 
-        async def on_close(self, close, **kwargs):
-            print("Connection Closed")
+#[derive(Serialize, Deserialize, Debug)]
+struct Topics {
+    segments: Vec<TopicSegment>,
+}
 
-        async def on_error(self, error, **kwargs):
-            print(f"Error: {error}")
+#[derive(Serialize, Deserialize, Debug)]
+struct TopicSegment {
+    topics: Vec<Topic>,
+}
 
-        dg_connection.on(LiveTranscriptionEvents.Transcript, on_message)
-        dg_connection.on(LiveTranscriptionEvents.Close, on_close)
-        dg_connection.on(LiveTranscriptionEvents.Error, on_error)
+#[derive(Serialize, Deserialize, Debug)]
+struct Topic {
+    topic: String,
+}
 
-        # Convert language code to locale format for live streaming
-        lang_code = kwargs.get('language', 'en')
-        if lang_code == 'en':
-            lang_code = 'en-US'
+#[derive(Serialize, Deserialize, Debug)]
+struct Intents {
+    segments: Vec<IntentSegment>,
+}
 
-        # For live streaming, default to nova-2 if nova-3 is selected
-        live_model = kwargs.get('model', 'nova-2')
-        if live_model == 'nova-3':
-            live_model = 'nova-2'
+#[derive(Serialize, Deserialize, Debug)]
+struct IntentSegment {
+    intent: String,
+}
 
-        options = LiveOptions(
-            model=live_model,
-            language=lang_code,
-            smart_format=kwargs.get('smart_format', True),
-            encoding="linear16",
-            channels=1,
-            sample_rate=16000,
-            interim_results=True,
-            utterance_end_ms="1000",
-            vad_events=True,
-            endpointing=300,
-            diarize=kwargs.get('diarize', False),
-        )
+#[derive(Serialize, Deserialize, Debug)]
+struct LiveResponse {
+    #[serde(rename = "type")]
+    message_type: Option<String>,
+    #[serde(flatten)]
+    content: LiveContent,
+    is_final: Option<bool>,
+    error: Option<String>,
+}
 
-        addons = {
-            "no_delay": "true"
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(untagged)]
+enum LiveContent {
+    Results { 
+        channel: LiveChannel 
+    },
+    Event {
+        channel: Option<Vec<u32>>,
+        timestamp: Option<f64>,
+    },
+    Unknown(serde_json::Value),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct LiveChannel {
+    alternatives: Vec<LiveAlternative>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct LiveAlternative {
+    transcript: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ChunkResult {
+    result: Option<DeepgramResponse>,
+    error: Option<String>,
+    chunk_index: usize,
+    chunk_file: String,
+}
+
+async fn get_audio_duration(file_path: &str) -> Result<f64> {
+    let output = Command::new("ffprobe")
+        .args(&["-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", file_path])
+        .output()
+        .context("Failed to execute ffprobe")?;
+
+    if !output.status.success() {
+        return Err(anyhow::anyhow!("ffprobe failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+
+    let duration_str = String::from_utf8(output.stdout).context("Invalid UTF-8 from ffprobe")?;
+    let duration: f64 = duration_str.trim().parse().context("Failed to parse duration")?;
+    Ok(duration)
+}
+
+async fn chunk_audio(file_path: &str, chunk_minutes: u32) -> Result<Vec<String>> {
+    println!("Analyzing audio file: {}", file_path);
+
+    let total_duration = get_audio_duration(file_path).await?;
+    let chunk_duration = chunk_minutes as f64 * 60.0;
+
+    let file_stem = Path::new(file_path).file_stem()
+        .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid file name"))?;
+
+    let output_dir = format!("{}_chunks", file_stem);
+    fs::create_dir_all(&output_dir).context("Failed to create chunks directory")?;
+
+    let total_chunks = (total_duration / chunk_duration).ceil() as usize;
+    println!("Total duration: {:.1} hours", total_duration / 3600.0);
+    println!("Splitting into {} chunks of {} minutes each", total_chunks, chunk_minutes);
+
+    let mut chunks = Vec::new();
+    let file_ext = Path::new(file_path).extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("mp4");
+
+    for i in 0..total_chunks {
+        let start_time = i as f64 * chunk_duration;
+        let chunk_path = format!("{}/chunk_{:03}.{}", output_dir, i, file_ext);
+
+        println!("Creating chunk {}/{}...", i + 1, total_chunks);
+
+        let output = Command::new("ffmpeg")
+            .args(&[
+                "-y", "-i", file_path,
+                "-ss", &start_time.to_string(),
+                "-t", &chunk_duration.to_string(),
+                "-c", "copy",
+                &chunk_path
+            ])
+            .output()
+            .context("Failed to execute ffmpeg")?;
+
+        if !output.status.success() {
+            eprintln!("Warning: Failed to create chunk {}: {}", i, String::from_utf8_lossy(&output.stderr));
+            continue;
         }
 
-        print("Starting live transcription... Press Ctrl+C to stop.")
-
-        if await dg_connection.start(options, addons=addons) is False:
-            print("Failed to connect to Deepgram")
-            return
-
-        microphone = Microphone(dg_connection.send)
-        microphone.start()
-
-        try:
-            while True:
-                await asyncio.sleep(1)
-        except KeyboardInterrupt:
-            print("\nStopping live transcription...")
-        finally:
-            microphone.finish()
-            await dg_connection.finish()
-
-    except Exception as e:
-        print(f"Could not open socket: {e}")
-        return
-
-
-async def chunk_and_transcribe(input_file, output, chunk_minutes, **kwargs):
-    """Handle chunking workflow."""
-
-    temp_file = None
-
-    try:
-        # Handle URL vs file
-        if input_file.startswith('http'):
-            # Download to temp file
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.m4a')
-            await download_file(input_file, temp_file.name)
-            input_file = temp_file.name
-
-        # Create chunks
-        chunks = await chunk_audio(input_file, chunk_minutes)
-
-        # Process chunks with ordered output
-        await process_chunks_streaming(chunks, output, chunk_minutes=chunk_minutes, **kwargs)
-
-        print(f"\nKept audio chunks in: {Path(chunks[0]).parent}")
-
-        # Cleanup temp file
-        if temp_file:
-            os.unlink(temp_file.name)
-
-    except Exception as e:
-        print(f"Error in chunking: {str(e)}", file=sys.stderr)
-        sys.exit(1)
-
-@click.command()
-@click.argument('input_file', required=False)
-
-# Model selection
-@click.option('-m', '--model', type=click.Choice(ALL_MODELS), default='nova-3',
-              help='Model to use')
-
-# Core features with smart defaults
-@click.option('--no-smart-format', 'smart_format', flag_value=False, default=True,
-              help='Disable smart formatting (enabled by default)')
-@click.option('--no-diarize', 'diarize', flag_value=False, default=True,
-              help='Disable speaker diarization (enabled by default)')
-@click.option('--no-paragraphs', 'paragraphs', flag_value=False, default=True,
-              help='Disable paragraph detection (enabled by default)')
-@click.option('--no-utterances', 'utterances', flag_value=False, default=True,
-              help='Disable utterance segmentation (enabled by default)')
-
-# Additional formatting
-@click.option('--punctuate', is_flag=True, default=False,
-              help='Add punctuation (not needed with smart_format)')
-@click.option('--numerals', is_flag=True, default=False,
-              help='Convert numbers to digits')
-@click.option('--profanity-filter', is_flag=True, default=False,
-              help='Filter profanity')
-@click.option('--measurements', is_flag=True, default=False,
-              help='Convert measurements to abbreviations')
-@click.option('--dictation', is_flag=True, default=False,
-              help='Format dictation commands')
-@click.option('--filler-words', is_flag=True, default=False,
-              help='Include filler words (um, uh)')
-
-# Language options
-@click.option('--language', default='en', help='Language code')
-@click.option('--detect-language', is_flag=True, default=False,
-              help='Auto-detect language')
-
-# Advanced features
-@click.option('--multichannel', is_flag=True, default=False,
-              help='Process channels independently')
-@click.option('--channels', type=int, help='Number of independent audio channels')
-@click.option('--utt-split', type=float, default=0.8,
-              help='Utterance split duration')
-
-# Entity/content detection
-@click.option('--detect-entities', is_flag=True, default=False,
-              help='Detect entities')
-@click.option('--detect-topics', is_flag=True, default=False,
-              help='Detect topics')
-@click.option('--topics', is_flag=True, default=False,
-              help='Identify topics')
-@click.option('--intents', is_flag=True, default=False,
-              help='Detect speaker intents')
-@click.option('--sentiment', is_flag=True, default=False,
-              help='Analyze sentiment')
-@click.option('--summarize', type=click.Choice(['v2']),
-              help='Generate summary')
-
-# Search and modification
-@click.option('--keywords', multiple=True, callback=parse_keywords,
-              help='Boost keywords (format: word:boost)')
-@click.option('--search', multiple=True,
-              help='Search for terms (not supported by Whisper)')
-@click.option('--replace', multiple=True, callback=parse_replace,
-              help='Replace terms (format: from:to)')
-@click.option('--redact', type=click.Choice(REDACT_CHOICES), multiple=True,
-              help='Redact sensitive info')
-
-# Custom options
-@click.option('--custom-topic', help='Custom topic for detection')
-@click.option('--custom-topic-mode', type=click.Choice(['strict', 'extended']),
-              default='extended', help='Custom topic mode')
-@click.option('--tag', help='Tag for the request')
-@click.option('--callback', help='URL for receiving results')
-@click.option('--tier', help='Model tier level')
-@click.option('--alternatives', type=int,
-              help='Max transcript alternatives')
-@click.option('--encoding',
-              type=click.Choice(['linear16', 'flac', 'mulaw', 'amr-nb', 'amr-wb', 'opus', 'speex']),
-              help='Audio encoding for streaming')
-@click.option('--sample-rate', type=int, help='Sample rate in Hz')
-@click.option('--extra', multiple=True, callback=parse_extra,
-              help='Extra parameters (format: key=value)')
-@click.option('--version', default='latest', help='Model version')
-
-# Chunking options
-@click.option('--chunk-minutes', type=int, default=90,
-              help='Chunk duration in minutes')
-@click.option('-o', '--output', default='transcription.json',
-              help='Output file for chunking mode')
-
-# Live mode
-@click.option('--live', is_flag=True, help='Enable live transcription from microphone')
-
-# Output options
-@click.option('--json', 'output_json', is_flag=True, default=False,
-              help='Output full JSON response')
-def cli_main(input_file, model, smart_format, diarize, paragraphs, utterances,
-             punctuate, numerals, profanity_filter, measurements, dictation,
-             filler_words, language, detect_language, multichannel, channels,
-             utt_split, detect_entities, detect_topics, topics, intents,
-             sentiment, summarize, keywords, search, replace, redact,
-             custom_topic, custom_topic_mode, tag, callback, tier,
-             alternatives, encoding, sample_rate, extra, version,
-             chunk_minutes, output, output_json, live):
-    """Click CLI wrapper for async main function"""
-    asyncio.run(main(input_file, model, smart_format, diarize, paragraphs, utterances,
-                     punctuate, numerals, profanity_filter, measurements, dictation,
-                     filler_words, language, detect_language, multichannel, channels,
-                     utt_split, detect_entities, detect_topics, topics, intents,
-                     sentiment, summarize, keywords, search, replace, redact,
-                     custom_topic, custom_topic_mode, tag, callback, tier,
-                     alternatives, encoding, sample_rate, extra, version,
-                     chunk_minutes, output, output_json, live))
-
-async def main(input_file, model, smart_format, diarize, paragraphs, utterances,
-               punctuate, numerals, profanity_filter, measurements, dictation,
-               filler_words, language, detect_language, multichannel, channels,
-               utt_split, detect_entities, detect_topics, topics, intents,
-               sentiment, summarize, keywords, search, replace, redact,
-               custom_topic, custom_topic_mode, tag, callback, tier,
-               alternatives, encoding, sample_rate, extra, version,
-               chunk_minutes, output, output_json, live):
-    """Transcribe audio using Deepgram API with smart defaults"""
-
-    # Package all options for easy passing
-    options = {
-        'model': model, 'smart_format': smart_format, 'diarize': diarize,
-        'paragraphs': paragraphs, 'utterances': utterances, 'punctuate': punctuate,
-        'numerals': numerals, 'profanity_filter': profanity_filter,
-        'measurements': measurements, 'dictation': dictation, 'filler_words': filler_words,
-        'language': language, 'detect_language': detect_language, 'multichannel': multichannel,
-        'channels': channels, 'utt_split': utt_split, 'detect_entities': detect_entities,
-        'detect_topics': detect_topics, 'topics': topics, 'intents': intents,
-        'sentiment': sentiment, 'summarize': summarize, 'keywords': keywords,
-        'search': search, 'replace': replace, 'redact': redact,
-        'custom_topic': custom_topic, 'custom_topic_mode': custom_topic_mode,
-        'tag': tag, 'callback': callback, 'tier': tier, 'alternatives': alternatives,
-        'encoding': encoding, 'sample_rate': sample_rate, 'extra': extra,
-        'version': version
+        chunks.push(chunk_path);
     }
 
-    # Get API key
-    api_key = os.environ.get('DEEPGRAM_API_KEY')
-    if not api_key:
-        click.echo("Error: DEEPGRAM_API_KEY environment variable not set")
-        sys.exit(1)
+    Ok(chunks)
+}
 
-    # Handle live streaming mode
-    if live:
-        await live_transcribe(**options)
-        return
+async fn download_file(url: &str, output_path: &str) -> Result<()> {
+    println!("Downloading: {}", url);
 
-    # Check if input file is provided for non-live mode
-    if not input_file:
-        click.echo("Error: Input file is required (or use --live for live transcription)")
-        sys.exit(1)
+    let client = reqwest::Client::new();
+    let response = client.get(url).send().await?;
 
-    # Check if we should use chunking automatically
-    should_chunk = False
-
-    # Only check file duration for local files (not URLs)
-    if not input_file.startswith('http'):
-        try:
-            file_path = Path(input_file)
-            if file_path.exists():
-                # Get audio duration to decide on chunking
-                duration = await get_audio_duration(str(file_path))
-                # Auto-chunk if file is longer than 2 hours (7200 seconds)
-                if duration > 7200:
-                    should_chunk = True
-                    print(f"File duration: {duration/3600:.1f} hours - automatically enabling chunking")
-        except Exception as e:
-            # If we can't get duration, continue with normal processing
-            print(f"Warning: Could not determine file duration: {e}")
-
-    if should_chunk:
-        await chunk_and_transcribe(input_file, output, chunk_minutes, **options)
-        return
-
-    # Validate dependencies
-    if paragraphs and not any([punctuate, diarize, multichannel, smart_format]):
-        click.echo("Error: --paragraphs requires --punctuate, --diarize, --multichannel, or --smart-format")
-        sys.exit(1)
-
-    # Language-specific validations
-    if language != 'en' and sentiment:
-        click.echo("Error: --sentiment is only supported for English (--language en)")
-        sys.exit(1)
-
-    # Model-language compatibility - auto-fallback for better UX
-    if model == 'nova-3' and language != 'en':
-        # Nova-3 has issues with non-English languages, fallback to nova-2
-        print(f"Note: Using nova-2 for {language} language (better compatibility)", file=sys.stderr)
-        model = 'nova-2'
-        options['model'] = model
-
-    # Check for Whisper limitations
-    is_whisper = model.startswith("whisper-")
-    if is_whisper:
-        if search:
-            click.echo("Error: --search is not supported with Whisper models")
-            sys.exit(1)
-        # Note: redact IS supported by Whisper according to docs
-
-    # Build query parameters
-    params = []
-
-    # Add all boolean options
-    for key in ['smart_format', 'diarize', 'paragraphs', 'utterances', 'punctuate',
-                'numerals', 'profanity_filter', 'measurements', 'dictation',
-                'filler_words', 'detect_entities', 'detect_language', 'detect_topics',
-                'topics', 'intents', 'sentiment', 'multichannel']:
-        if options[key]:
-            params.append((key, 'true'))
-
-    # Add required parameters
-    params.append(('model', model))
-    params.append(('language', language))
-    params.append(('utt_split', str(utt_split)))
-    params.append(('version', version))
-
-    # Add optional parameters
-    if custom_topic:
-        params.append(('custom_topic', custom_topic))
-        params.append(('custom_topic_mode', custom_topic_mode))
-    if tag:
-        params.append(('tag', tag))
-    if callback:
-        params.append(('callback', callback))
-    if tier:
-        params.append(('tier', tier))
-    if alternatives:
-        params.append(('alternatives', str(alternatives)))
-    if encoding:
-        params.append(('encoding', encoding))
-    if sample_rate:
-        params.append(('sample_rate', str(sample_rate)))
-    if channels:
-        params.append(('channels', str(channels)))
-    if summarize:
-        params.append(('summarize', summarize))
-
-    # Handle multiple value parameters
-    if keywords:
-        # For Nova-3, use keyterms instead
-        param_name = 'keyterms' if 'nova-3' in model else 'keywords'
-        for kw in keywords:
-            params.append((param_name, kw))
-
-    if search and not is_whisper:
-        for term in search:
-            params.append(('search', term))
-
-    if redact:
-        for category in redact:
-            params.append(('redact', category))
-
-    if replace:
-        for replacement in replace:
-            params.append(('replace', replacement))
-
-    # Add extra parameters
-    if extra:
-        for extra_dict in extra:
-            for k, v in extra_dict.items():
-                params.append((k, v))
-
-    # Build URL with proper encoding
-    query_string = urlencode(params)
-    url = f"https://api.deepgram.com/v1/listen?{query_string}"
-
-    # Prepare request
-    headers = {
-        'Authorization': f'Token {api_key}',
-        'Accept': 'application/json'
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!("Download failed: {}", response.status()));
     }
 
-    # Handle input (URL or file)
-    if input_file.startswith('http'):
-        # For URLs, we need to send as JSON with 'url' field
-        headers['Content-Type'] = 'application/json'
-        data = json.dumps({'url': input_file})
-    else:
-        # Read file
-        file_path = Path(input_file)
-        if not file_path.exists():
-            click.echo(f"Error: File not found: {input_file}")
-            sys.exit(1)
+    let total_size = response.content_length().unwrap_or(0);
+    let mut downloaded = 0u64;
 
-        # Guess content type
-        content_type, _ = mimetypes.guess_type(input_file)
-        if not content_type:
-            # Default to audio/mpeg
-            content_type = 'audio/mpeg'
+    let mut file = fs::File::create(output_path).context("Failed to create output file")?;
+    let mut stream = response.bytes_stream();
 
-        headers['Content-Type'] = content_type
-        with open(input_file, 'rb') as f:
-            data = f.read()
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context("Failed to read chunk")?;
+        file.write_all(&chunk).context("Failed to write chunk")?;
+        downloaded += chunk.len() as u64;
 
-    # Make request
-    try:
-        response = requests.post(url, headers=headers, data=data, timeout=None)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        print(f"Request failed: {e}", file=sys.stderr)
-        if hasattr(e, 'response') and e.response is not None:
-            if e.response.status_code == 400:
-                try:
-                    error_data = e.response.json()
-                    print(f"Error details: {error_data}", file=sys.stderr)
-                except:
-                    print(f"Response body: {e.response.text}", file=sys.stderr)
-        sys.exit(1)
+        if total_size > 0 {
+            let progress = (downloaded as f64 / total_size as f64) * 100.0;
+            print!("\rDownload progress: {:.1}%", progress);
+            io::stdout().flush().unwrap();
+        }
+    }
 
-    # Parse response
-    result = response.json()
+    if total_size > 0 {
+        println!();
+    }
 
-    # If JSON output requested, print and exit
-    if output_json:
-        print(json.dumps(result, indent=2))
-        sys.exit(0)
+    Ok(())
+}
 
-    # Extract channels data
-    channels = result.get('results', {}).get('channels', [])
-    if not channels:
-        print("No transcription results found", file=sys.stderr)
-        sys.exit(1)
+async fn transcribe_chunk(client: &reqwest::Client, chunk_path: &str, chunk_index: usize, args: &Args, api_key: &str) -> ChunkResult {
+    let file_size = match fs::metadata(chunk_path) {
+        Ok(metadata) => metadata.len(),
+        Err(e) => {
+            return ChunkResult {
+                result: None,
+                error: Some(format!("Failed to get file metadata: {}", e)),
+                chunk_index,
+                chunk_file: chunk_path.to_string(),
+            };
+        }
+    };
 
-    # Get the first channel (or handle multichannel if needed)
-    channel = channels[0]
-    alternatives = channel.get('alternatives', [])
-    if not alternatives:
-        print("No alternatives found", file=sys.stderr)
-        sys.exit(1)
+    if file_size == 0 {
+        return ChunkResult {
+            result: None,
+            error: Some("Chunk file is empty".to_string()),
+            chunk_index,
+            chunk_file: chunk_path.to_string(),
+        };
+    }
 
-    alternative = alternatives[0]
+    println!("Processing chunk {}: {} ({:.1}MB)", chunk_index, chunk_path, file_size as f64 / 1024.0 / 1024.0);
 
-    # First, check if diarization is enabled and count unique speakers
-    unique_speakers = set()
-    if diarize:
-        if 'paragraphs' in alternative and 'paragraphs' in alternative.get('paragraphs', {}):
-            for para in alternative.get('paragraphs', {}).get('paragraphs', []):
-                speaker = para.get('speaker')
-                if speaker is not None:
-                    unique_speakers.add(speaker)
-        elif 'words' in alternative:
-            for word in alternative.get('words', []):
-                speaker = word.get('speaker')
-                if speaker is not None:
-                    unique_speakers.add(speaker)
+    let file_data = match fs::read(chunk_path) {
+        Ok(data) => data,
+        Err(e) => {
+            return ChunkResult {
+                result: None,
+                error: Some(format!("Failed to read chunk file: {}", e)),
+                chunk_index,
+                chunk_file: chunk_path.to_string(),
+            };
+        }
+    };
 
-    # Determine if we should show speaker labels
-    show_speakers = diarize and len(unique_speakers) > 1
+    let params = build_query_params(args);
+    let url = format!("https://api.deepgram.com/v1/listen?{}", params.join("&"));
 
-    # Check if we have paragraphs in the response
-    if paragraphs and 'paragraphs' in alternative:
-        # Use the paragraph-formatted output
-        paragraphs = alternative.get('paragraphs', {})
+    let mime_type = from_path(chunk_path).first_or_octet_stream();
+    let part = multipart::Part::bytes(file_data)
+        .file_name(Path::new(chunk_path).file_name().unwrap().to_str().unwrap().to_string())
+        .mime_str(mime_type.as_ref()).unwrap();
 
-        if 'paragraphs' in paragraphs:
-            # Output with paragraph structure
-            for para in paragraphs.get('paragraphs', []):
-                speaker = para.get('speaker')
-                if speaker is not None and show_speakers:
-                    print(f"\nSpeaker {speaker}:")
+    let form = multipart::Form::new().part("file", part);
 
-                # Get sentences for this paragraph
-                sentences = para.get('sentences', [])
-                for sentence in sentences:
-                    print(sentence.get('text', ''), end=' ')
-                print()  # New line after paragraph
-        else:
-            # Just paragraphs without speaker labels
-            transcript = paragraphs.get('transcript', '')
-            if transcript:
-                # The transcript with paragraphs is already formatted with newlines
-                print(transcript)
-            else:
-                # Fallback to basic transcript
-                print(alternative.get('transcript', ''))
+    let response = match client
+        .post(&url)
+        .header("Authorization", format!("Token {}", api_key))
+        .multipart(form)
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            return ChunkResult {
+                result: None,
+                error: Some(format!("Request failed: {}", e)),
+                chunk_index,
+                chunk_file: chunk_path.to_string(),
+            };
+        }
+    };
 
-    elif show_speakers and 'words' in alternative:
-        # Diarization without paragraphs - show speaker changes
-        words = alternative.get('words', [])
-        current_speaker = None
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_default();
+        return ChunkResult {
+            result: None,
+            error: Some(format!("HTTP {}: {}", status, error_text)),
+            chunk_index,
+            chunk_file: chunk_path.to_string(),
+        };
+    }
 
-        for word in words:
-            speaker = word.get('speaker')
-            if speaker != current_speaker:
-                if current_speaker is not None:
-                    print()  # New line between speakers
-                print(f"\nSpeaker {speaker}: ", end='')
-                current_speaker = speaker
-            print(word.get('word', ''), end=' ')
-        print()  # Final newline
+    match response.json::<DeepgramResponse>().await {
+        Ok(mut result) => {
+            let transcript = result.results.channels[0].alternatives[0].transcript.clone();
+            println!("Chunk {} completed: {} characters", chunk_index, transcript.len());
 
-    else:
-        # Just print basic transcript
-        transcript = alternative.get('transcript', '')
-        print(transcript)
+            // Adjust timestamps for chunk offset (matching Python logic)
+            let time_offset_seconds = (chunk_index as u32 * args.chunk_minutes * 60) as f64;
+            
+            // Adjust word timestamps if present
+            for channel in &mut result.results.channels {
+                for alternative in &mut channel.alternatives {
+                    if let Some(ref mut words) = alternative.words {
+                        for word in words {
+                            if let Some(ref mut start) = word.start {
+                                *start += time_offset_seconds;
+                            }
+                            if let Some(ref mut end) = word.end {
+                                *end += time_offset_seconds;
+                            }
+                        }
+                    }
+                }
+            }
 
-    # Print additional information if requested
+            ChunkResult {
+                result: Some(result),
+                error: None,
+                chunk_index,
+                chunk_file: chunk_path.to_string(),
+            }
+        }
+        Err(e) => ChunkResult {
+            result: None,
+            error: Some(format!("Failed to parse response: {}", e)),
+            chunk_index,
+            chunk_file: chunk_path.to_string(),
+        },
+    }
+}
 
-    if summarize and 'summary' in result.get('results', {}):
-        print("\n--- Summary ---")
-        summary = result['results'].get('summary', {})
-        if isinstance(summary, dict) and 'short' in summary:
-            print(summary.get('short', ''))
-        else:
-            print(summary)
+fn build_query_params(args: &Args) -> Vec<String> {
+    let mut params = Vec::new();
 
-    if topics and 'topics' in result.get('results', {}):
-        print("\n--- Topics ---")
-        topics_result = result['results'].get('topics', {})
-        if 'segments' in topics_result:
-            for segment in topics_result['segments']:
-                topics_list = segment.get('topics', [])
-                if topics_list:
-                    print(f"Topics: {', '.join([t.get('topic', '') for t in topics_list])}")
+    // Core parameters
+    params.push(format!("model={}", args.model));
+    params.push(format!("language={}", args.language));
+    params.push(format!("version={}", args.version));
+    params.push(format!("utt_split={}", args.utt_split));
 
-    if intents and 'intents' in result.get('results', {}):
-        print("\n--- Intents ---")
-        intents_result = result['results'].get('intents', {})
-        if 'segments' in intents_result:
-            for segment in intents_result['segments']:
-                intent = segment.get('intent', '')
-                if intent:
-                    print(f"Intent: {intent}")
+    // Boolean parameters
+    if !args.no_smart_format { params.push("smart_format=true".to_string()); }
+    if !args.no_diarize { params.push("diarize=true".to_string()); }
+    if !args.no_paragraphs { params.push("paragraphs=true".to_string()); }
+    if !args.no_utterances { params.push("utterances=true".to_string()); }
+    if args.punctuate { params.push("punctuate=true".to_string()); }
+    if args.numerals { params.push("numerals=true".to_string()); }
+    if args.profanity_filter { params.push("profanity_filter=true".to_string()); }
+    if args.measurements { params.push("measurements=true".to_string()); }
+    if args.dictation { params.push("dictation=true".to_string()); }
+    if args.filler_words { params.push("filler_words=true".to_string()); }
+    if args.detect_language { params.push("detect_language=true".to_string()); }
+    if args.multichannel { params.push("multichannel=true".to_string()); }
+    if args.detect_entities { params.push("detect_entities=true".to_string()); }
+    if args.detect_topics { params.push("detect_topics=true".to_string()); }
+    if args.topics { params.push("topics=true".to_string()); }
+    if args.intents { params.push("intents=true".to_string()); }
+    if args.sentiment { params.push("sentiment=true".to_string()); }
 
-if __name__ == "__main__":
-    cli_main()
+    // Optional parameters
+    if let Some(channels) = args.channels {
+        params.push(format!("channels={}", channels));
+    }
+    if let Some(tier) = &args.tier {
+        params.push(format!("tier={}", tier));
+    }
+    if let Some(alternatives) = args.alternatives {
+        params.push(format!("alternatives={}", alternatives));
+    }
+    if let Some(encoding) = &args.encoding {
+        params.push(format!("encoding={}", encoding));
+    }
+    if let Some(sample_rate) = args.sample_rate {
+        params.push(format!("sample_rate={}", sample_rate));
+    }
+    if let Some(summarize) = &args.summarize {
+        params.push(format!("summarize={}", summarize));
+    }
+    if let Some(custom_topic) = &args.custom_topic {
+        params.push(format!("custom_topic={}", custom_topic));
+        params.push(format!("custom_topic_mode={}", args.custom_topic_mode));
+    }
+    if let Some(tag) = &args.tag {
+        params.push(format!("tag={}", tag));
+    }
+    if let Some(callback) = &args.callback {
+        params.push(format!("callback={}", callback));
+    }
+
+    // Optional parameters with values
+    if let Some(utterance_end) = args.utterance_end {
+        params.push(format!("utterance_end={}", utterance_end));
+    }
+    if args.mip_opt_out {
+        params.push("mip_opt_out=true".to_string());
+    }
+    if args.callback.is_some() {
+        params.push(format!("callback_method={}", args.callback_method));
+    }
+
+    // Multiple value parameters
+    for keyword in &args.keywords {
+        params.push(format!("keywords={}", keyword));
+    }
+
+    for keyterm in &args.keyterms {
+        params.push(format!("keyterms={}", keyterm));
+    }
+
+    for search_term in &args.search {
+        params.push(format!("search={}", search_term));
+    }
+
+    for replace_term in &args.replace {
+        params.push(format!("replace={}", replace_term));
+    }
+
+    for redact_category in &args.redact {
+        params.push(format!("redact={}", redact_category));
+    }
+
+    // Extra parameters
+    for extra_param in &args.extra {
+        if let Some((key, value)) = extra_param.split_once('=') {
+            params.push(format!("{}={}", key, value));
+        }
+    }
+
+    params
+}
+
+async fn process_single_file(client: &reqwest::Client, input_file: &str, args: &Args, api_key: &str) -> Result<()> {
+    let params = build_query_params(args);
+    let url = format!("https://api.deepgram.com/v1/listen?{}", params.join("&"));
+
+    let response = if input_file.starts_with("http") {
+        // URL input
+        let body = serde_json::json!({ "url": input_file });
+        client
+            .post(&url)
+            .header("Authorization", format!("Token {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await?
+    } else {
+        // File input
+        let file_data = fs::read(input_file).context("Failed to read input file")?;
+        let mime_type = from_path(input_file).first_or_octet_stream();
+
+        let part = multipart::Part::bytes(file_data)
+            .file_name(Path::new(input_file).file_name().unwrap().to_str().unwrap().to_string())
+            .mime_str(mime_type.as_ref()).unwrap();
+
+        let form = multipart::Form::new().part("file", part);
+
+        client
+            .post(&url)
+            .header("Authorization", format!("Token {}", api_key))
+            .multipart(form)
+            .send()
+            .await?
+    };
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(anyhow::anyhow!("Request failed: HTTP {} - {}", status, error_text));
+    }
+
+    let result: DeepgramResponse = response.json().await?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+        return Ok(());
+    }
+
+    format_output(&result, args);
+    Ok(())
+}
+
+async fn process_chunks(chunks: Vec<String>, args: &Args, api_key: &str) -> Result<()> {
+    let client = reqwest::Client::new();
+    let mut results = Vec::new();
+
+    let pb = ProgressBar::new(chunks.len() as u64);
+    pb.set_style(ProgressStyle::default_bar()
+        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+        .unwrap()
+        .progress_chars("#>-"));
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        pb.set_message(format!("Processing chunk {}", i + 1));
+        let result = transcribe_chunk(&client, chunk, i, args, api_key).await;
+        results.push(result);
+        pb.inc(1);
+    }
+
+    pb.finish_with_message("Transcription complete!");
+
+    // Write results to files
+    let json_output = serde_json::to_string_pretty(&results)?;
+    fs::write(&args.output, json_output)?;
+
+    let text_output = args.output.replace(".json", ".txt");
+    let mut text_file = fs::File::create(&text_output)?;
+
+    writeln!(text_file, "Transcript for {} audio chunks", chunks.len())?;
+    writeln!(text_file, "{}", "=".repeat(50))?;
+    writeln!(text_file)?;
+
+    for result in &results {
+        if let Some(ref deepgram_result) = result.result {
+            writeln!(text_file, "Chunk {}:", result.chunk_index + 1)?;
+            let transcript = &deepgram_result.results.channels[0].alternatives[0].transcript;
+            writeln!(text_file, "{}", transcript)?;
+            writeln!(text_file)?;
+        } else if let Some(ref error) = result.error {
+            writeln!(text_file, "Chunk {} ERROR: {}", result.chunk_index + 1, error)?;
+            writeln!(text_file)?;
+        }
+    }
+
+    println!("JSON output: {}", args.output);
+    println!("Text transcript: {}", text_output);
+
+    Ok(())
+}
+
+fn format_output(result: &DeepgramResponse, args: &Args) {
+    let channel = &result.results.channels[0];
+    let alternative = &channel.alternatives[0];
+
+    // Check for speaker diarization
+    let mut unique_speakers = std::collections::HashSet::new();
+    if !args.no_diarize {
+        if let Some(ref paragraphs) = alternative.paragraphs {
+            for paragraph in &paragraphs.paragraphs {
+                if let Some(speaker) = paragraph.speaker {
+                    unique_speakers.insert(speaker);
+                }
+            }
+        } else if let Some(ref words) = alternative.words {
+            for word in words {
+                if let Some(speaker) = word.speaker {
+                    unique_speakers.insert(speaker);
+                }
+            }
+        }
+    }
+
+    let show_speakers = !args.no_diarize && unique_speakers.len() > 1;
+
+    // Output transcript
+    if !args.no_paragraphs && alternative.paragraphs.is_some() {
+        let paragraphs = alternative.paragraphs.as_ref().unwrap();
+
+        for paragraph in &paragraphs.paragraphs {
+            if let Some(speaker) = paragraph.speaker {
+                if show_speakers {
+                    println!("\nSpeaker {}:", speaker);
+                }
+            }
+
+            for sentence in &paragraph.sentences {
+                print!("{} ", sentence.text);
+            }
+            println!();
+        }
+    } else if show_speakers && alternative.words.is_some() {
+        let words = alternative.words.as_ref().unwrap();
+        let mut current_speaker = None;
+
+        for word in words {
+            if let Some(speaker) = word.speaker {
+                if current_speaker != Some(speaker) {
+                    if current_speaker.is_some() {
+                        println!();
+                    }
+                    print!("\nSpeaker {}: ", speaker);
+                    current_speaker = Some(speaker);
+                }
+            }
+            print!("{} ", word.word);
+        }
+        println!();
+    } else {
+        println!("{}", alternative.transcript);
+    }
+
+    // Additional output sections
+    if let Some(ref summary) = result.results.summary {
+        println!("\n--- Summary ---");
+        if let Some(ref short) = summary.short {
+            println!("{}", short);
+        }
+    }
+
+    if let Some(ref topics) = result.results.topics {
+        println!("\n--- Topics ---");
+        for segment in &topics.segments {
+            let topic_names: Vec<String> = segment.topics.iter().map(|t| t.topic.clone()).collect();
+            if !topic_names.is_empty() {
+                println!("Topics: {}", topic_names.join(", "));
+            }
+        }
+    }
+
+    if let Some(ref intents) = result.results.intents {
+        println!("\n--- Intents ---");
+        for segment in &intents.segments {
+            if !segment.intent.is_empty() {
+                println!("Intent: {}", segment.intent);
+            }
+        }
+    }
+}
+
+async fn live_transcription(args: &Args, api_key: &str) -> Result<()> {
+    println!("Starting live transcription... Press Ctrl+C to stop.");
+
+    // Set up audio capture first to get the actual sample rate
+    let (audio_tx, audio_rx) = unbounded::<Vec<u8>>();
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    let stop_flag_clone = stop_flag.clone();
+
+    // Get audio config and start capture
+    let actual_sample_rate = {
+        let host = cpal::default_host();
+        let device = host.default_input_device()
+            .ok_or_else(|| anyhow::anyhow!("No default input device found"))?;
+
+        println!("Using audio device: {}", device.name().unwrap_or("Unknown".to_string()));
+
+        let supported_configs = device.supported_input_configs()
+            .context("Failed to get supported configs")?;
+
+        let config_range = supported_configs
+            .filter(|config| config.channels() <= CHANNELS && config.sample_format() == cpal::SampleFormat::F32)
+            .min_by_key(|config| {
+                let min_rate = config.min_sample_rate().0;
+                let max_rate = config.max_sample_rate().0;
+                if SAMPLE_RATE >= min_rate && SAMPLE_RATE <= max_rate {
+                    0
+                } else {
+                    std::cmp::min(
+                        (min_rate as i32 - SAMPLE_RATE as i32).abs(),
+                        (max_rate as i32 - SAMPLE_RATE as i32).abs()
+                    )
+                }
+            })
+            .ok_or_else(|| anyhow::anyhow!("No suitable audio config found"))?;
+
+        let target_rate = if SAMPLE_RATE >= config_range.min_sample_rate().0 && SAMPLE_RATE <= config_range.max_sample_rate().0 {
+            SAMPLE_RATE
+        } else if SAMPLE_RATE < config_range.min_sample_rate().0 {
+            config_range.min_sample_rate().0
+        } else {
+            config_range.max_sample_rate().0
+        };
+
+        target_rate
+    };
+
+    // Build WebSocket URL with actual audio parameters
+    let mut live_args = args.clone();
+    live_args.encoding = Some("linear16".to_string());
+    live_args.sample_rate = Some(actual_sample_rate);
+    live_args.channels = Some(CHANNELS as u32);
+
+    let params = build_query_params(&live_args);
+    let ws_url = format!("wss://api.deepgram.com/v1/listen?{}", params.join("&"));
+
+    // Add live-specific parameters
+    let ws_url = format!("{}&interim_results=true&vad_events=true&endpointing={}",
+                        ws_url, args.endpointing);
+
+    // Create properly formatted WebSocket request
+    let url = url::Url::parse(&ws_url).context("Invalid WebSocket URL")?;
+
+    let request = tokio_tungstenite::tungstenite::http::Request::builder()
+        .method("GET")
+        .uri(ws_url.as_str())
+        .header("Host", url.host_str().unwrap_or("api.deepgram.com"))
+        .header("Upgrade", "websocket")
+        .header("Connection", "Upgrade")
+        .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .header("Sec-WebSocket-Version", "13")
+        .header("Authorization", format!("Token {}", api_key))
+        .body(())
+        .context("Failed to build WebSocket request")?;
+
+    // Connect to WebSocket
+    let (ws_stream, _) = connect_async(request).await
+        .context("Failed to connect to Deepgram WebSocket")?;
+
+    let (mut ws_sender, mut ws_receiver) = ws_stream.split();
+
+    // Start audio capture in a separate thread with the actual sample rate
+    let audio_handle = thread::spawn(move || {
+        capture_audio_with_rate(audio_tx, stop_flag_clone, actual_sample_rate)
+    });
+
+    // Send audio data to WebSocket
+    let audio_sender = {
+        let stop_flag = stop_flag.clone();
+        tokio::spawn(async move {
+            while !stop_flag.load(Ordering::Relaxed) {
+                match audio_rx.recv_timeout(Duration::from_millis(10)) {
+                    Ok(audio_data) => {
+                        if !audio_data.is_empty() {
+                            if let Err(e) = ws_sender.send(Message::Binary(audio_data)).await {
+                                eprintln!("Failed to send audio data: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Timeout is normal, continue loop
+                        continue;
+                    }
+                }
+            }
+        })
+    };
+
+    // Handle WebSocket messages
+    let message_handler = tokio::spawn(async move {
+        while let Some(msg) = ws_receiver.next().await {
+            match msg {
+                Ok(Message::Text(text)) => {
+                    if let Ok(response) = serde_json::from_str::<serde_json::Value>(&text) {
+                        handle_live_response(response);
+                    }
+                }
+                Ok(Message::Close(frame)) => {
+                    if let Some(frame) = frame {
+                        println!("\nWebSocket closed: {} - {}", frame.code, frame.reason);
+                    } else {
+                        println!("\nWebSocket connection closed");
+                    }
+                    break;
+                }
+                Err(e) => {
+                    eprintln!("WebSocket error: {}", e);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    // Wait for Ctrl+C
+    tokio::signal::ctrl_c().await.context("Failed to listen for Ctrl+C")?;
+
+    // Cleanup
+    println!("\nStopping live transcription...");
+    stop_flag.store(true, Ordering::Relaxed);
+
+    // Wait for tasks to complete
+    let _ = tokio::time::timeout(Duration::from_millis(200), async {
+        let _ = tokio::join!(audio_sender, message_handler);
+    }).await;
+
+    // Wait for audio thread to finish
+    if let Err(e) = audio_handle.join() {
+        eprintln!("Audio thread error: {:?}", e);
+    }
+
+    Ok(())
+}
+
+fn capture_audio_with_rate(tx: Sender<Vec<u8>>, stop_flag: Arc<AtomicBool>, target_sample_rate: u32) -> Result<()> {
+    let host = cpal::default_host();
+    let device = host.default_input_device()
+        .ok_or_else(|| anyhow::anyhow!("No default input device found"))?;
+
+    // Try to get the best config for the device
+    let supported_configs = device.supported_input_configs()
+        .context("Failed to get supported configs")?;
+
+    // Find a config that matches our requirements or is close
+    let config_range = supported_configs
+        .filter(|config| config.channels() <= CHANNELS && config.sample_format() == cpal::SampleFormat::F32)
+        .min_by_key(|config| {
+            // Prefer configs closer to our target sample rate
+            let min_rate = config.min_sample_rate().0;
+            let max_rate = config.max_sample_rate().0;
+            if target_sample_rate >= min_rate && target_sample_rate <= max_rate {
+                0 // Perfect match
+            } else {
+                std::cmp::min(
+                    (min_rate as i32 - target_sample_rate as i32).abs(),
+                    (max_rate as i32 - target_sample_rate as i32).abs()
+                )
+            }
+        })
+        .ok_or_else(|| anyhow::anyhow!("No suitable audio config found"))?;
+
+    let config = config_range.with_sample_rate(SampleRate(target_sample_rate));
+
+    println!("Audio config: {} channels, {} Hz, {:?}",
+             config.channels(), config.sample_rate().0, config.sample_format());
+
+    let stop_flag_callback = stop_flag.clone();
+    let samples_sent = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let samples_sent_callback = samples_sent.clone();
+
+    let stream = device.build_input_stream(
+        &config.config(),
+        move |data: &[f32], _: &cpal::InputCallbackInfo| {
+            if stop_flag_callback.load(Ordering::Relaxed) {
+                return;
+            }
+
+            // Convert f32 samples to i16 PCM
+            let mut pcm_data = Vec::with_capacity(data.len() * 2);
+            for &sample in data {
+                let sample_i16 = (sample * 32767.0).clamp(-32768.0, 32767.0) as i16;
+                pcm_data.extend_from_slice(&sample_i16.to_le_bytes());
+            }
+
+            // Send audio data if it contains actual samples
+            if !pcm_data.is_empty() {
+                if tx.send(pcm_data).is_ok() {
+                    samples_sent_callback.fetch_add(data.len() as u64, Ordering::Relaxed);
+                }
+            }
+        },
+        |err| eprintln!("Audio stream error: {}", err),
+        None,
+    )?;
+
+    stream.play()?;
+    println!("Audio stream started, listening for audio...");
+
+    // Keep the stream alive
+    while !stop_flag.load(Ordering::Relaxed) {
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    println!("Audio capture stopped. Total samples sent: {}", samples_sent.load(Ordering::Relaxed));
+    Ok(())
+}
+
+fn handle_live_response(response: serde_json::Value) {
+    match serde_json::from_value::<LiveResponse>(response.clone()) {
+        Ok(live_response) => {
+            // Handle error messages first
+            if let Some(error) = live_response.error {
+                eprintln!("Deepgram error: {}", error);
+                return;
+            }
+
+            // Handle different message types
+            match live_response.message_type.as_deref() {
+                Some("Results") => {
+                    if let Some(transcript) = extract_transcript_from_response(&live_response) {
+                        let is_final = live_response.is_final.unwrap_or(false);
+                        
+                        if is_final {
+                            // Final transcript - print in green
+                            print!("\r\x1b[92m{}\x1b[0m\n", transcript);
+                        } else {
+                            // Interim transcript - print in gray, overwriting previous
+                            print!("\r\x1b[90m{}\x1b[0m", transcript);
+                        }
+                        io::stdout().flush().unwrap();
+                    }
+                },
+                Some("Metadata") => {
+                    // Metadata received - connection is working
+                },
+                Some("SpeechStarted") => {
+                    // Speech started - audio is being processed
+                },
+                Some("UtteranceEnd") => {
+                    println!(); // New line after utterance
+                },
+                Some("CloseStream") => {
+                    println!("Stream closing...");
+                },
+                _ => {
+                    // Handle legacy format or unknown types
+                    if let Some(transcript) = extract_transcript_from_response(&live_response) {
+                        let is_final = live_response.is_final.unwrap_or(false);
+                        
+                        if is_final {
+                            print!("\r\x1b[92m{}\x1b[0m\n", transcript);
+                        } else {
+                            print!("\r\x1b[90m{}\x1b[0m", transcript);
+                        }
+                        io::stdout().flush().unwrap();
+                    } else {
+                        // Debug unknown messages
+                        println!("Unknown message: {}", response);
+                    }
+                }
+            }
+        },
+        Err(_) => {
+            // Fallback for malformed responses
+            println!("Failed to parse response: {}", response);
+        }
+    }
+}
+
+fn extract_transcript_from_response(response: &LiveResponse) -> Option<String> {
+    match &response.content {
+        LiveContent::Results { channel } => {
+            let transcript = channel.alternatives.first()?.transcript.clone();
+            if transcript.is_empty() {
+                None
+            } else {
+                Some(transcript)
+            }
+        },
+        _ => None,
+    }
+}
+
+fn validate_args(mut args: Args) -> Result<Args> {
+    // Model validation
+    let all_models: Vec<&str> = NOVA_MODELS.iter()
+        .chain(WHISPER_MODELS.iter())
+        .chain(ENHANCED_MODELS.iter())
+        .chain(BASE_MODELS.iter())
+        .chain(NOVA_3_MODELS.iter())
+        .copied()
+        .collect();
+    
+    if !all_models.contains(&args.model.as_str()) {
+        return Err(anyhow::anyhow!(
+            "Invalid model '{}'. Available models: {}", 
+            args.model, 
+            all_models.join(", ")
+        ));
+    }
+
+    // Redaction validation
+    for redact_item in &args.redact {
+        if !REDACT_CHOICES.contains(&redact_item.as_str()) {
+            return Err(anyhow::anyhow!(
+                "Invalid redaction category '{}'. Available options: {}", 
+                redact_item, 
+                REDACT_CHOICES.join(", ")
+            ));
+        }
+    }
+
+    // Keywords format validation
+    for keyword in &args.keywords {
+        if !keyword.contains(':') {
+            return Err(anyhow::anyhow!(
+                "Keywords must be in 'word:boost' format, got: {}", 
+                keyword
+            ));
+        }
+    }
+
+    // Keyterms format validation
+    for keyterm in &args.keyterms {
+        if !keyterm.contains(':') {
+            return Err(anyhow::anyhow!(
+                "Keyterms must be in 'word:boost' format, got: {}", 
+                keyterm
+            ));
+        }
+    }
+
+    // Replace format validation
+    for replace_item in &args.replace {
+        if !replace_item.contains(':') {
+            return Err(anyhow::anyhow!(
+                "Replace must be in 'from:to' format, got: {}", 
+                replace_item
+            ));
+        }
+    }
+
+    // Extra format validation
+    for extra_item in &args.extra {
+        if !extra_item.contains('=') {
+            return Err(anyhow::anyhow!(
+                "Extra must be in 'key=value' format, got: {}", 
+                extra_item
+            ));
+        }
+    }
+
+    // Feature dependencies validation (matching Python logic)
+    if !args.no_paragraphs && 
+       !args.punctuate && 
+       args.no_diarize && 
+       !args.multichannel && 
+       args.no_smart_format {
+        return Err(anyhow::anyhow!(
+            "--paragraphs requires --punctuate, --diarize, --multichannel, or --smart-format"
+        ));
+    }
+
+    // Language-specific validations
+    if args.language != "en" && args.sentiment {
+        return Err(anyhow::anyhow!(
+            "--sentiment is only supported for English (--language en)"
+        ));
+    }
+
+    // Model-language compatibility - auto-fallback for better UX
+    if args.model == "nova-3" && args.language != "en" {
+        eprintln!("Note: Using nova-2 for {} language (better compatibility)", args.language);
+        args.model = "nova-2".to_string();
+    }
+
+    // Whisper model limitations
+    let is_whisper = WHISPER_MODELS.contains(&args.model.as_str());
+    if is_whisper && !args.search.is_empty() {
+        return Err(anyhow::anyhow!(
+            "--search is not supported with Whisper models"
+        ));
+    }
+
+    // Auto-select keywords vs keyterms based on model
+    if !args.keywords.is_empty() && NOVA_3_MODELS.contains(&args.model.as_str()) && args.keyterms.is_empty() {
+        eprintln!("Note: Converting --keywords to --keyterms for Nova-3 model");
+        args.keyterms = args.keywords.clone();
+        args.keywords.clear();
+    }
+
+    // Live streaming model fallback
+    if args.live && args.model == "nova-3" {
+        eprintln!("Note: Using nova-2 for live streaming (nova-3 not supported)");
+        args.model = "nova-2".to_string();
+    }
+
+    // Live streaming locale conversion
+    if args.live && args.language == "en" {
+        args.language = "en-US".to_string();
+    }
+
+    Ok(args)
+}
+
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+
+
+    let api_key = env::var("DEEPGRAM_API_KEY")
+        .context("DEEPGRAM_API_KEY environment variable not set")?;
+
+    // Validate and fix arguments (matching Python validation logic)
+    let validated_args = validate_args(args)?;
+
+    if validated_args.live {
+        return live_transcription(&validated_args, &api_key).await;
+    }
+
+    let input_file = validated_args.input_file.as_ref()
+        .ok_or_else(|| anyhow::anyhow!("Input file is required (or use --live for live transcription)"))?;
+
+    let client = reqwest::Client::new();
+
+    // Check if we should use chunking
+    let should_chunk = if !input_file.starts_with("http") {
+        match get_audio_duration(input_file).await {
+            Ok(duration) => {
+                if duration > 7200.0 {
+                    println!("File duration: {:.1} hours - automatically enabling chunking", duration / 3600.0);
+                    true
+                } else {
+                    false
+                }
+            }
+            Err(_) => false,
+        }
+    } else {
+        false
+    };
+
+    if should_chunk {
+        let temp_file = if input_file.starts_with("http") {
+            let temp = NamedTempFile::new().context("Failed to create temporary file")?;
+            let temp_path = temp.path().to_str().unwrap().to_string();
+            download_file(input_file, &temp_path).await?;
+            Some((temp, temp_path))
+        } else {
+            None
+        };
+
+        let file_path = temp_file.as_ref().map(|(_, path)| path.as_str()).unwrap_or(input_file);
+        let chunks = chunk_audio(file_path, validated_args.chunk_minutes).await?;
+        process_chunks(chunks, &validated_args, &api_key).await?;
+
+        // Cleanup happens automatically when temp_file goes out of scope
+    } else {
+        process_single_file(&client, input_file, &validated_args, &api_key).await?;
+    }
+
+    Ok(())
+}
