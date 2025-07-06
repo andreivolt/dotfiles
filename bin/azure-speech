@@ -1,586 +1,1034 @@
-#!/usr/bin/env -S uv run --script --quiet
-"""Azure Speech Service text-to-speech CLI."""
-# /// script
-# dependencies = [
-#   "argparse",
-#   "azure-cognitiveservices-speech",
-#   "requests",
-#   "sh",
-#   "tabulate",
-# ]
-# ///
-
-
-import os
-import sys
-import json
-import time
-import argparse
-import sh
-import re
-import tempfile
-import threading
-from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Iterator
-from urllib.parse import urljoin
-
-import requests
-import azure.cognitiveservices.speech as speechsdk
-
-
-class AzureSpeechSynthesizer:
-    """Azure Speech Service Text-to-Speech synthesizer with WebSocket streaming and chunking."""
-
-    def __init__(self, region: str, key: str):
-        self.region = region
-        self.key = key
-        self.base_url = f"https://{region}.tts.speech.microsoft.com"
-        self.token_url = f"https://{region}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
-        self.cache_dir = Path.home() / ".cache" / "azure-speech"
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.voices_cache = self.cache_dir / "voices.json"
-        self.token_cache = self.cache_dir / "token.json"
-
-        # Azure limits
-        self.max_ssml_size = 64 * 1024  # 64KB per WebSocket turn
-        self.max_plain_text_f0 = 3000   # Free tier
-        self.max_plain_text_s0 = 20000  # Standard tier
-
-    def get_access_token(self) -> str:
-        """Get cached access token or fetch new one."""
-        if self.token_cache.exists():
-            try:
-                token_data = json.loads(self.token_cache.read_text())
-                expiry = datetime.fromisoformat(token_data['expiry'])
-                if expiry > datetime.now():
-                    return token_data['token']
-            except (json.JSONDecodeError, KeyError, ValueError):
-                pass
-
-        response = requests.post(
-            self.token_url,
-            headers={
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Content-Length': '0',
-                'Ocp-Apim-Subscription-Key': self.key
-            }
-        )
-        response.raise_for_status()
-
-        token = response.text
-        expiry = datetime.now() + timedelta(minutes=9)  # Token valid for 10min, cache for 9
-
-        token_data = {'token': token, 'expiry': expiry.isoformat()}
-        self.token_cache.write_text(json.dumps(token_data))
-
-        return token
-
-    def get_voices(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
-        """Get list of available voices with caching."""
-        if not force_refresh and self.voices_cache.exists():
-            try:
-                return json.loads(self.voices_cache.read_text())
-            except json.JSONDecodeError:
-                pass
-
-        response = requests.get(
-            f"{self.base_url}/cognitiveservices/voices/list",
-            headers={'Ocp-Apim-Subscription-Key': self.key}
-        )
-        response.raise_for_status()
-
-        voices = response.json()
-        self.voices_cache.write_text(json.dumps(voices, indent=2))
-        return voices
-
-    def filter_voices(self, voices: List[Dict], locale: str = None, gender: str = None,
-                     neural_only: bool = False, styles_only: bool = False) -> List[Dict]:
-        """Filter voices by various criteria."""
-        filtered = voices
-
-        if locale:
-            filtered = [v for v in filtered if v.get('Locale', '').lower().startswith(locale.lower())]
-
-        if gender:
-            filtered = [v for v in filtered if v.get('Gender', '').lower() == gender.lower()]
-
-        if neural_only:
-            filtered = [v for v in filtered if 'Neural' in v.get('VoiceType', '')]
-
-        if styles_only:
-            filtered = [v for v in filtered if v.get('StyleList')]
-
-        return filtered
-
-    def build_ssml(self, text: str, voice_name: str, rate: str = None, pitch: str = None,
-                   volume: str = None, style: str = None, style_degree: str = None,
-                   role: str = None, emotion: str = None, locale: str = "en-US") -> str:
-        """Build SSML with advanced features."""
-
-        # Handle pre-existing SSML
-        if text.strip().startswith('<speak'):
-            return text
-
-        voice_attrs = f'name="{voice_name}"'
-
-        # Build prosody attributes
-        prosody_attrs = []
-        if rate:
-            prosody_attrs.append(f'rate="{rate}"')
-        if pitch:
-            prosody_attrs.append(f'pitch="{pitch}"')
-        if volume:
-            prosody_attrs.append(f'volume="{volume}"')
-
-        # Build expression attributes
-        express_attrs = []
-        if style:
-            express_attrs.append(f'style="{style}"')
-        if style_degree:
-            express_attrs.append(f'styledegree="{style_degree}"')
-        if role:
-            express_attrs.append(f'role="{role}"')
-
-        # Build SSML layers
-        content = text
-
-        # Wrap in prosody if needed
-        if prosody_attrs:
-            prosody_str = ' '.join(prosody_attrs)
-            content = f'<prosody {prosody_str}>{content}</prosody>'
-
-        # Wrap in expression if needed
-        if express_attrs:
-            express_str = ' '.join(express_attrs)
-            content = f'<mstts:express-as {express_str}>{content}</mstts:express-as>'
-
-        # Wrap in voice
-        content = f'<voice {voice_attrs}>{content}</voice>'
-
-        # Complete SSML document
-        ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
-xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="{locale}">
-{content}
-</speak>'''
-
-        return ssml
-
-    def chunk_text(self, text: str, max_chars: int = None) -> Iterator[str]:
-        """Chunk text on sentence boundaries to respect Azure limits."""
-        if max_chars is None:
-            max_chars = self.max_plain_text_s0  # Default to S0 limit
-
-        # If text is short enough, return as single chunk
-        if len(text) <= max_chars:
-            yield text
-            return
-
-        # Split on sentence boundaries
-        sentence_pattern = r'(?<=[.!?])\s+'
-        sentences = re.split(sentence_pattern, text)
-
-        current_chunk = ""
-        for sentence in sentences:
-            # If single sentence exceeds limit, split further
-            if len(sentence) > max_chars:
-                # Split on clause boundaries
-                clause_pattern = r'(?<=[,;:])\s+'
-                clauses = re.split(clause_pattern, sentence)
-
-                for clause in clauses:
-                    if len(current_chunk) + len(clause) + 1 > max_chars:
-                        if current_chunk:
-                            yield current_chunk.strip()
-                            current_chunk = clause
-                        else:
-                            # Even single clause too long, force split
-                            while len(clause) > max_chars:
-                                yield clause[:max_chars].strip()
-                                clause = clause[max_chars:]
-                            current_chunk = clause
-                    else:
-                        current_chunk += (" " if current_chunk else "") + clause
-            else:
-                # Normal sentence processing
-                if len(current_chunk) + len(sentence) + 1 > max_chars:
-                    if current_chunk:
-                        yield current_chunk.strip()
-                        current_chunk = sentence
-                    else:
-                        current_chunk = sentence
-                else:
-                    current_chunk += (" " if current_chunk else "") + sentence
-
-        if current_chunk:
-            yield current_chunk.strip()
-
-    def synthesize_streaming(self, text: str, voice_name: str, output_format: str = "audio-48khz-192kbitrate-mono-mp3",
-                           output_file: str = None, play_audio: bool = True, tempo: float = None,
-                           rate: str = None, pitch: str = None, volume: str = None, style: str = None,
-                           style_degree: str = None, role: str = None, locale: str = "en-US") -> List[bytes]:
-        """Synthesize speech using WebSocket streaming with chunking."""
-
-        # Create speech config
-        speech_config = speechsdk.SpeechConfig(subscription=self.key, region=self.region)
-        speech_config.speech_synthesis_output_format = self._get_sdk_format(output_format)
-
-        chunks = list(self.chunk_text(text))
-        audio_chunks = []
-        temp_files = []
-
-        for i, chunk in enumerate(chunks):
-            # Build SSML for chunk
-            ssml = self.build_ssml(
-                chunk, voice_name, rate, pitch, volume,
-                style, style_degree, role, locale
-            )
-
-            # Create synthesizer for this chunk
-            synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
-
-            # Synthesize chunk
-            result = synthesizer.speak_ssml_async(ssml).get()
-
-
-            if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-                audio_data = result.audio_data
-                audio_chunks.append(audio_data)
-
-                if play_audio and not output_file:
-                    # Play immediately for streaming effect
-                    self._play_audio_chunk(audio_data, tempo, i == 0)
-                else:
-                    # Save to temp file for concatenation
-                    temp_file = tempfile.NamedTemporaryFile(suffix=f'_chunk_{i}.mp3', delete=False)
-                    temp_file.write(audio_data)
-                    temp_file.close()
-                    temp_files.append(temp_file.name)
-
-            elif result.reason == speechsdk.ResultReason.Canceled:
-                cancellation = result.cancellation_details
-                print(f"Synthesis canceled: {cancellation.reason}", file=sys.stderr)
-                if cancellation.error_details:
-                    print(f"Error: {cancellation.error_details}", file=sys.stderr)
-                break
-
-        # If saving to file, concatenate all chunks
-        if output_file:
-            if len(audio_chunks) == 1:
-                # Single chunk, save directly
-                Path(output_file).write_bytes(audio_chunks[0])
-                print(f"Audio saved to: {output_file}")
-            elif len(audio_chunks) > 1:
-                # Multiple chunks, concatenate raw audio data
-                combined_audio = b''.join(audio_chunks)
-                Path(output_file).write_bytes(combined_audio)
-                print(f"Audio saved to: {output_file}")
-
-            # Cleanup temp files
-            for temp_file in temp_files:
-                try:
-                    os.unlink(temp_file)
-                except OSError:
-                    pass
-
-        return audio_chunks
-
-    def _get_sdk_format(self, format_string: str) -> speechsdk.SpeechSynthesisOutputFormat:
-        """Convert format string to SDK format enum."""
-        format_map = {
-            'audio-48khz-192kbitrate-mono-mp3': speechsdk.SpeechSynthesisOutputFormat.Audio48Khz192KBitRateMonoMp3,
-            'audio-48khz-96kbitrate-mono-mp3': speechsdk.SpeechSynthesisOutputFormat.Audio48Khz96KBitRateMonoMp3,
-            'audio-24khz-160kbitrate-mono-mp3': speechsdk.SpeechSynthesisOutputFormat.Audio24Khz160KBitRateMonoMp3,
-            'audio-24khz-96kbitrate-mono-mp3': speechsdk.SpeechSynthesisOutputFormat.Audio24Khz96KBitRateMonoMp3,
-            'audio-16khz-128kbitrate-mono-mp3': speechsdk.SpeechSynthesisOutputFormat.Audio16Khz128KBitRateMonoMp3,
-            'audio-16khz-64kbitrate-mono-mp3': speechsdk.SpeechSynthesisOutputFormat.Audio16Khz64KBitRateMonoMp3,
-            'riff-48khz-16bit-mono-pcm': speechsdk.SpeechSynthesisOutputFormat.Riff48Khz16BitMonoPcm,
-            'riff-24khz-16bit-mono-pcm': speechsdk.SpeechSynthesisOutputFormat.Riff24Khz16BitMonoPcm,
-            'riff-16khz-16bit-mono-pcm': speechsdk.SpeechSynthesisOutputFormat.Riff16Khz16BitMonoPcm,
-        }
-        return format_map.get(format_string, speechsdk.SpeechSynthesisOutputFormat.Audio48Khz192KBitRateMonoMp3)
-
-    def _play_audio_chunk(self, audio_data: bytes, tempo: float = None, is_first: bool = False):
-        """Play audio chunk with optional tempo adjustment."""
-        try:
-            if tempo and tempo != 1.0:
-                # Use ffmpeg for tempo adjustment, then sox for playback
-                ffmpeg = sh.ffmpeg('-i', '-', '-filter:a', f'atempo={tempo}', '-f', 'wav', '-',
-                                   _in=audio_data, _piped=True, _err='/dev/null')
-                sh.sox('-t', 'wav', '-', '-d', _in=ffmpeg, _err='/dev/null')
-            else:
-                # Direct playback with sox - Azure SDK returns WAV data
-                sh.sox('-t', 'wav', '-', '-d', _in=audio_data, _err='/dev/null')
-        except sh.CommandNotFound as e:
-            if is_first:  # Only show error once
-                print(f"Audio playback failed: {e}. Install sox for audio playback.", file=sys.stderr)
-        except sh.ErrorReturnCode:
-            pass  # Ignore playback errors silently
-
-    def _concatenate_audio_files(self, temp_files: List[str], output_file: str):
-        """Concatenate audio files using ffmpeg."""
-        try:
-            # Create concat file list
-            concat_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
-            for temp_file in temp_files:
-                concat_file.write(f"file '{temp_file}'\n")
-            concat_file.close()
-
-            # Use ffmpeg to concatenate
-            sh.ffmpeg('-f', 'concat', '-safe', '0', '-i', concat_file.name,
-                      '-c', 'copy', '-y', output_file)
-            print(f"Audio saved to: {output_file}")
-
-            # Cleanup concat file
-            os.unlink(concat_file.name)
-
-        except sh.CommandNotFound:
-            print("ffmpeg not found. Saving first chunk only.", file=sys.stderr)
-            if temp_files:
-                Path(output_file).write_bytes(Path(temp_files[0]).read_bytes())
-        except sh.ErrorReturnCode as e:
-            print(f"Concatenation failed: {e}", file=sys.stderr)
-
-    def synthesize(self, ssml: str, output_format: str = "audio-48khz-192kbitrate-mono-mp3",
-                   output_file: str = None, play_audio: bool = True, tempo: float = None) -> bytes:
-        """Synthesize speech from SSML."""
-        token = self.get_access_token()
-
-        headers = {
-            'Content-Type': 'application/ssml+xml',
-            'X-Microsoft-OutputFormat': output_format,
-            'Authorization': f'Bearer {token}',
-            'User-Agent': 'azure-speech-cli'
-        }
-
-        response = requests.post(
-            f"{self.base_url}/cognitiveservices/v1",
-            headers=headers,
-            data=ssml
-        )
-
-        if not response.ok:
-            print(f"Error {response.status_code}: {response.text}", file=sys.stderr)
-            sys.exit(1)
-
-        audio_data = response.content
-
-        if output_file:
-            Path(output_file).write_bytes(audio_data)
-            print(f"Audio saved to: {output_file}")
-            return audio_data
-
-        if play_audio:
-            self._play_audio(audio_data, tempo)
-
-        return audio_data
-
-    def _play_audio(self, audio_data: bytes, tempo: float = None):
-        """Play audio through ffmpeg and sox."""
-        try:
-            if tempo and tempo != 1.0:
-                # Use ffmpeg for tempo adjustment, then sox for playback
-                ffmpeg = sh.ffmpeg('-i', '-', '-filter:a', f'atempo={tempo}', '-f', 'mp3', '-',
-                                   _in=audio_data, _piped=True, _err='/dev/null')
-                sh.sox('-t', 'mp3', '-', '-d', _in=ffmpeg, _err='/dev/null')
-            else:
-                # Direct playback with sox
-                sh.sox('-t', 'mp3', '-', '-d', _in=audio_data, _err='/dev/null')
-        except sh.CommandNotFound as e:
-            print(f"Audio playback failed: {e}. Install ffmpeg and sox for audio playback.", file=sys.stderr)
-        except sh.ErrorReturnCode:
-            pass  # Ignore playback errors silently
-
-
-def get_audio_formats():
-    """Get available audio formats organized by quality."""
-    return {
-        'high_quality': [
-            'audio-48khz-192kbitrate-mono-mp3',
-            'audio-48khz-96kbitrate-mono-mp3',
-            'riff-48khz-16bit-mono-pcm',
-        ],
-        'standard': [
-            'audio-24khz-160kbitrate-mono-mp3',
-            'audio-24khz-96kbitrate-mono-mp3',
-            'riff-24khz-16bit-mono-pcm',
-        ],
-        'low_bandwidth': [
-            'audio-16khz-128kbitrate-mono-mp3',
-            'audio-16khz-64kbitrate-mono-mp3',
-            'riff-16khz-16bit-mono-pcm',
-        ]
+#!/usr/bin/env rust-script
+//! Azure Speech Service text-to-speech CLI.
+//!
+//! ```cargo
+//! [dependencies]
+//! clap = { version = "4.5", features = ["derive"] }
+//! ureq = { version = "2.10", features = ["json"] }
+//! serde = { version = "1.0", features = ["derive"] }
+//! serde_json = "1.0"
+//! dirs = "5.0"
+//! chrono = { version = "0.4", features = ["serde"] }
+//! regex = "1.10"
+//! tempfile = "3.10"
+//! comfy-table = "7.1"
+//! anyhow = "1.0"
+//! tungstenite = { version = "0.24", features = ["native-tls"] }
+//! uuid = { version = "1.10", features = ["v4"] }
+//! is-terminal = "0.4"
+//! rodio = "0.20"
+//! derive_more = { version = "1.0", features = ["display", "from", "into", "as_ref"] }
+//! ```
+
+use anyhow::{anyhow, Result};
+use chrono::{DateTime, Duration, Local};
+use clap::{Parser, ValueEnum};
+use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Table};
+use dirs::cache_dir;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::{self, Cursor, Read};
+use tungstenite::{connect, Message};
+use is_terminal::IsTerminal;
+use rodio::{Decoder, OutputStream, Sink};
+use derive_more::Display;
+use std::path::{Path, PathBuf};
+
+const DEFAULT_VOICE: &str = "en-US-AriaNeural";
+const DEFAULT_LOCALE: &str = "en-US";
+const DEFAULT_FORMAT: &str = "audio-48khz-192kbitrate-mono-mp3";
+const MAX_PLAIN_TEXT_S0: usize = 20000; // Standard tier
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Voice {
+    #[serde(rename = "Name")]
+    name: String,
+    #[serde(rename = "DisplayName")]
+    display_name: String,
+    #[serde(rename = "LocalName")]
+    local_name: String,
+    #[serde(rename = "ShortName")]
+    short_name: String,
+    #[serde(rename = "Gender")]
+    gender: String,
+    #[serde(rename = "Locale")]
+    locale: String,
+    #[serde(rename = "LocaleName")]
+    locale_name: String,
+    #[serde(rename = "SampleRateHertz")]
+    sample_rate_hertz: String,
+    #[serde(rename = "VoiceType")]
+    voice_type: String,
+    #[serde(rename = "Status")]
+    status: String,
+    #[serde(rename = "StyleList", default)]
+    style_list: Vec<String>,
+    #[serde(rename = "RolePlayList", default)]
+    role_play_list: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TokenCache {
+    token: String,
+    expiry: DateTime<Local>,
+}
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+#[command(about = "Azure Speech Service Text-to-Speech CLI with advanced SSML support")]
+struct Args {
+    /// Text to synthesize (or read from stdin)
+    text: Vec<String>,
+
+    /// Voice name
+    #[arg(short, long, default_value = DEFAULT_VOICE)]
+    voice: String,
+
+    /// Voice locale
+    #[arg(short, long, default_value = DEFAULT_LOCALE)]
+    locale: String,
+
+    /// Language code (shorthand for locale, e.g., 'fr' for French)
+    #[arg(long)]
+    lang: Option<String>,
+
+    /// Speaking rate (e.g., slow, medium, fast, +20%, -10%)
+    #[arg(short, long)]
+    rate: Option<String>,
+
+    /// Voice pitch (e.g., low, medium, high, +2st, -50Hz)
+    #[arg(short, long)]
+    pitch: Option<String>,
+
+    /// Voice volume (e.g., silent, soft, medium, loud, +6dB)
+    #[arg(long)]
+    volume: Option<String>,
+
+    /// Speaking style (e.g., cheerful, sad, angry, excited)
+    #[arg(short, long)]
+    style: Option<String>,
+
+    /// Style intensity (0.01-2.0, default varies by style)
+    #[arg(long)]
+    style_degree: Option<String>,
+
+    /// Role-play (e.g., Girl, Boy, YoungAdultFemale, OlderAdultMale)
+    #[arg(long)]
+    role: Option<String>,
+
+    /// Audio output format
+    #[arg(long, default_value = DEFAULT_FORMAT)]
+    format: String,
+
+    /// Audio quality preset (overrides --format)
+    #[arg(long, value_enum)]
+    quality: Option<AudioQuality>,
+
+    /// Audio tempo adjustment
+    #[arg(short, long, default_value = "1.0")]
+    tempo: f32,
+
+    /// Save audio to file
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+
+    /// Max characters per chunk
+    #[arg(long)]
+    chunk_size: Option<usize>,
+
+    /// List available voices
+    #[arg(long)]
+    list_voices: bool,
+
+    /// Show neural voices only
+    #[arg(long)]
+    neural_only: bool,
+
+    /// Show voices with styles
+    #[arg(long)]
+    styles_only: bool,
+
+    /// Filter by gender
+    #[arg(long, value_enum)]
+    gender: Option<Gender>,
+
+    /// Voice type preference
+    #[arg(long, value_enum, default_value = "neural")]
+    voice_type: Option<VoiceType>,
+
+    /// Show available styles in voice list
+    #[arg(long)]
+    show_styles: bool,
+
+    /// Refresh cached voice list
+    #[arg(long)]
+    refresh_voices: bool,
+
+    /// List available audio formats
+    #[arg(long)]
+    list_formats: bool,
+
+    /// Test mode - generates silence for testing audio playback
+    #[arg(long, hide = true)]
+    test_mode: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Display)]
+enum AudioQuality {
+    #[display("high")]
+    High,
+    #[display("standard")]
+    Standard,
+    #[display("low")]
+    Low,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Display)]
+enum Gender {
+    #[display("Male")]
+    Male,
+    #[display("Female")]
+    Female,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Display)]
+enum VoiceType {
+    #[display("Neural")]
+    Neural,
+    #[display("Standard")]
+    Standard,
+    #[display("Studio")]
+    Studio,
+}
+
+struct AzureSpeechSynthesizer {
+    region: String,
+    key: String,
+    base_url: String,
+    token_url: String,
+    voices_cache: PathBuf,
+    token_cache: PathBuf,
+    agent: ureq::Agent,
+}
+
+impl AzureSpeechSynthesizer {
+    fn new(region: String, key: String) -> Result<Self> {
+        let cache_dir = cache_dir()
+            .ok_or_else(|| anyhow!("Failed to get cache directory"))?
+            .join("azure-speech");
+        fs::create_dir_all(&cache_dir)?;
+
+        let voices_cache = cache_dir.join("voices.json");
+        let token_cache = cache_dir.join("token.json");
+
+        Ok(Self {
+            base_url: format!("https://{}.tts.speech.microsoft.com", region),
+            token_url: format!(
+                "https://{}.api.cognitive.microsoft.com/sts/v1.0/issueToken",
+                region
+            ),
+            region,
+            key,
+            voices_cache,
+            token_cache,
+            agent: ureq::Agent::new(),
+        })
     }
 
+    fn get_access_token(&self) -> Result<String> {
+        // Check cached token
+        if self.token_cache.exists() {
+            if let Ok(content) = fs::read_to_string(&self.token_cache) {
+                if let Ok(cache) = serde_json::from_str::<TokenCache>(&content) {
+                    if cache.expiry > Local::now() {
+                        return Ok(cache.token);
+                    }
+                }
+            }
+        }
 
-def print_voices_table(voices: List[Dict], show_styles: bool = False):
-    """Print voices in a formatted table."""
-    try:
-        from tabulate import tabulate
-    except ImportError:
-        # Fallback to simple formatting
-        for voice in voices:
-            print(f"{voice.get('Locale', ''):<12} {voice.get('DisplayName', ''):<30} "
-                  f"{voice.get('Gender', ''):<8} {voice.get('VoiceType', '')}")
-        return
+        // Fetch new token
+        let response = self
+            .agent
+            .post(&self.token_url)
+            .set("Content-Type", "application/x-www-form-urlencoded")
+            .set("Content-Length", "0")
+            .set("Ocp-Apim-Subscription-Key", &self.key)
+            .call()?;
 
-    headers = ['Locale', 'Display Name', 'Gender', 'Voice Type']
-    rows = []
+        if response.status() != 200 {
+            return Err(anyhow!(
+                "Failed to get access token: {}",
+                response.status()
+            ));
+        }
 
-    for voice in voices:
-        row = [
-            voice.get('Locale', ''),
-            voice.get('DisplayName', ''),
-            voice.get('Gender', ''),
-            voice.get('VoiceType', '')
-        ]
+        let token = response.into_string()?;
+        let expiry = Local::now() + Duration::minutes(9); // Token valid for 10min, cache for 9
 
-        if show_styles and voice.get('StyleList'):
-            row.append(', '.join(voice['StyleList'][:3]) + ('...' if len(voice['StyleList']) > 3 else ''))
-            if 'Styles' not in headers:
-                headers.append('Styles')
+        let cache = TokenCache { token: token.clone(), expiry };
+        fs::write(&self.token_cache, serde_json::to_string(&cache)?)?;
 
-        rows.append(row)
+        Ok(token)
+    }
 
-    print(tabulate(rows, headers=headers, tablefmt='grid'))
+    fn get_voices(&self, force_refresh: bool) -> Result<Vec<Voice>> {
+        // Check cached voices
+        if !force_refresh && self.voices_cache.exists() {
+            if let Ok(content) = fs::read_to_string(&self.voices_cache) {
+                if let Ok(voices) = serde_json::from_str::<Vec<Voice>>(&content) {
+                    return Ok(voices);
+                }
+            }
+        }
+
+        // Fetch voices
+        let response = self
+            .agent
+            .get(&format!(
+                "{}/cognitiveservices/voices/list",
+                self.base_url
+            ))
+            .set("Ocp-Apim-Subscription-Key", &self.key)
+            .call()?;
+
+        if response.status() != 200 {
+            return Err(anyhow!("Failed to get voices: {}", response.status()));
+        }
+
+        let voices: Vec<Voice> = response.into_json()?;
+        fs::write(
+            &self.voices_cache,
+            serde_json::to_string_pretty(&voices)?,
+        )?;
+
+        Ok(voices)
+    }
+
+    fn filter_voices(
+        &self,
+        voices: Vec<Voice>,
+        locale: Option<&str>,
+        gender: Option<Gender>,
+        voice_type: Option<VoiceType>,
+        neural_only: bool,
+        styles_only: bool,
+    ) -> Vec<Voice> {
+        voices
+            .into_iter()
+            .filter(|v| {
+                if let Some(loc) = locale {
+                    if !v.locale.to_lowercase().starts_with(&loc.to_lowercase()) {
+                        return false;
+                    }
+                }
+                if let Some(g) = gender {
+                    if v.gender != g.to_string() {
+                        return false;
+                    }
+                }
+                if let Some(vt) = voice_type {
+                    if !v.voice_type.contains(&vt.to_string()) {
+                        return false;
+                    }
+                }
+                if neural_only && !v.voice_type.contains("Neural") {
+                    return false;
+                }
+                if styles_only && v.style_list.is_empty() {
+                    return false;
+                }
+                true
+            })
+            .collect()
+    }
+
+    fn expand_language_code(lang_code: &str) -> String {
+        match lang_code.to_lowercase().as_str() {
+            "en" => "en-US".to_string(),
+            "fr" => "fr-FR".to_string(), 
+            "es" => "es-ES".to_string(),
+            "de" => "de-DE".to_string(),
+            "it" => "it-IT".to_string(),
+            "pt" => "pt-BR".to_string(),
+            "ru" => "ru-RU".to_string(),
+            "ja" => "ja-JP".to_string(),
+            "ko" => "ko-KR".to_string(),
+            "zh" => "zh-CN".to_string(),
+            "ar" => "ar-SA".to_string(),
+            "hi" => "hi-IN".to_string(),
+            "nl" => "nl-NL".to_string(),
+            "sv" => "sv-SE".to_string(),
+            "da" => "da-DK".to_string(),
+            "no" => "nb-NO".to_string(),
+            "fi" => "fi-FI".to_string(),
+            "pl" => "pl-PL".to_string(),
+            "tr" => "tr-TR".to_string(),
+            "th" => "th-TH".to_string(),
+            "vi" => "vi-VN".to_string(),
+            _ => lang_code.to_string(), // Return as-is if not recognized
+        }
+    }
+
+    fn select_voice(
+        &self,
+        voices: &[Voice],
+        target_locale: &str,
+        gender: Option<Gender>,
+        voice_type: Option<VoiceType>,
+    ) -> Option<String> {
+        let mut candidates: Vec<&Voice> = voices
+            .iter()
+            .filter(|v| v.locale.to_lowercase().starts_with(&target_locale.to_lowercase()))
+            .collect();
+
+        // Apply gender filter
+        if let Some(g) = gender {
+            candidates.retain(|v| v.gender == g.to_string());
+        }
+
+        // Apply voice type filter
+        if let Some(vt) = voice_type {
+            candidates.retain(|v| v.voice_type.contains(&vt.to_string()));
+        }
+
+        // Preference order: Neural > Studio > Standard
+        for preference in ["Neural", "Studio", "Standard"] {
+            if let Some(voice) = candidates.iter().find(|v| v.voice_type.contains(preference)) {
+                return Some(voice.name.clone());
+            }
+        }
+
+        // Fallback to any voice for the locale
+        candidates.first().map(|v| v.name.clone())
+    }
+
+    fn build_ssml(
+        &self,
+        text: &str,
+        voice_name: &str,
+        rate: Option<&str>,
+        pitch: Option<&str>,
+        volume: Option<&str>,
+        style: Option<&str>,
+        style_degree: Option<&str>,
+        role: Option<&str>,
+        locale: &str,
+    ) -> String {
+        // Handle pre-existing SSML
+        if text.trim().starts_with("<speak") {
+            return text.to_string();
+        }
+
+        let mut content = text.to_string();
+
+        // Build prosody attributes
+        let mut prosody_attrs = Vec::new();
+        if let Some(r) = rate {
+            prosody_attrs.push(format!(r#"rate="{}""#, r));
+        }
+        if let Some(p) = pitch {
+            prosody_attrs.push(format!(r#"pitch="{}""#, p));
+        }
+        if let Some(v) = volume {
+            prosody_attrs.push(format!(r#"volume="{}""#, v));
+        }
+
+        // Build expression attributes
+        let mut express_attrs = Vec::new();
+        if let Some(s) = style {
+            express_attrs.push(format!(r#"style="{}""#, s));
+        }
+        if let Some(sd) = style_degree {
+            express_attrs.push(format!(r#"styledegree="{}""#, sd));
+        }
+        if let Some(r) = role {
+            express_attrs.push(format!(r#"role="{}""#, r));
+        }
+
+        // Wrap in prosody if needed
+        if !prosody_attrs.is_empty() {
+            let prosody_str = prosody_attrs.join(" ");
+            content = format!("<prosody {}>{}</prosody>", prosody_str, content);
+        }
+
+        // Wrap in expression if needed
+        if !express_attrs.is_empty() {
+            let express_str = express_attrs.join(" ");
+            content = format!(
+                "<mstts:express-as {}>{}</mstts:express-as>",
+                express_str, content
+            );
+        }
+
+        // Wrap in voice
+        content = format!(r#"<voice name="{}">{}</voice>"#, voice_name, content);
+
+        // Complete SSML document
+        format!(
+            r#"<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
+xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="{}">
+{}
+</speak>"#,
+            locale, content
+        )
+    }
+
+    fn chunk_text(&self, text: &str, max_chars: Option<usize>) -> Vec<String> {
+        let max_chars = max_chars.unwrap_or(MAX_PLAIN_TEXT_S0);
+
+        // If text is short enough, return as single chunk
+        if text.len() <= max_chars {
+            return vec![text.to_string()];
+        }
+
+        let mut chunks = Vec::new();
+        let mut current_chunk = String::new();
+
+        // Split on sentence boundaries
+        let sentence_re = Regex::new(r"(?<=[.!?])\s+").unwrap();
+        let sentences: Vec<&str> = sentence_re.split(text).collect();
+
+        for sentence in sentences {
+            // If single sentence exceeds limit, split further
+            if sentence.len() > max_chars {
+                // Split on clause boundaries
+                let clause_re = Regex::new(r"(?<=[,;:])\s+").unwrap();
+                let clauses: Vec<&str> = clause_re.split(sentence).collect();
+
+                for clause in clauses {
+                    if current_chunk.len() + clause.len() + 1 > max_chars {
+                        if !current_chunk.is_empty() {
+                            chunks.push(current_chunk.trim().to_string());
+                            current_chunk.clear();
+                        }
+                        // Handle clause that's still too long
+                        if clause.len() > max_chars {
+                            let mut remaining = clause;
+                            while remaining.len() > max_chars {
+                                chunks.push(remaining[..max_chars].trim().to_string());
+                                remaining = &remaining[max_chars..];
+                            }
+                            current_chunk = remaining.to_string();
+                        } else {
+                            current_chunk = clause.to_string();
+                        }
+                    } else {
+                        if !current_chunk.is_empty() {
+                            current_chunk.push(' ');
+                        }
+                        current_chunk.push_str(clause);
+                    }
+                }
+            } else {
+                // Normal sentence processing
+                if current_chunk.len() + sentence.len() + 1 > max_chars {
+                    if !current_chunk.is_empty() {
+                        chunks.push(current_chunk.trim().to_string());
+                        current_chunk = sentence.to_string();
+                    }
+                } else {
+                    if !current_chunk.is_empty() {
+                        current_chunk.push(' ');
+                    }
+                    current_chunk.push_str(sentence);
+                }
+            }
+        }
+
+        if !current_chunk.is_empty() {
+            chunks.push(current_chunk.trim().to_string());
+        }
+
+        chunks
+    }
+
+    fn synthesize_rest(
+        &self,
+        ssml: &str,
+        output_format: &str,
+        output_file: Option<&Path>,
+        play_audio: bool,
+        tempo: Option<f32>,
+    ) -> Result<Vec<u8>> {
+        let token = self.get_access_token()?;
+
+        let response = self
+            .agent
+            .post(&format!("{}/cognitiveservices/v1", self.base_url))
+            .set("Content-Type", "application/ssml+xml")
+            .set("X-Microsoft-OutputFormat", output_format)
+            .set("Authorization", &format!("Bearer {}", token))
+            .set("User-Agent", "azure-speech-cli")
+            .send_string(ssml)?;
+
+        if response.status() != 200 {
+            return Err(anyhow!(
+                "Error {}: {}",
+                response.status(),
+                response.into_string().unwrap_or_else(|_| "Unknown error".to_string())
+            ));
+        }
+
+        let mut audio_data = Vec::new();
+        response.into_reader().read_to_end(&mut audio_data)?;
+        
+
+        if let Some(path) = output_file {
+            let final_data = if output_format.starts_with("raw-") {
+                create_wav_from_pcm(&audio_data, 48000, 1, 16)?
+            } else {
+                audio_data.clone()
+            };
+            fs::write(path, &final_data)?;
+            println!("Audio saved to: {}", path.display());
+        }
+
+        if play_audio && output_file.is_none() {
+            play_audio_data(&audio_data, output_format, tempo)?;
+        }
+
+        Ok(audio_data)
+    }
+
+    fn synthesize_streaming(
+        &self,
+        text: &str,
+        voice_name: &str,
+        output_format: &str,
+        output_file: Option<&Path>,
+        play_audio: bool,
+        tempo: Option<f32>,
+        rate: Option<&str>,
+        pitch: Option<&str>,
+        volume: Option<&str>,
+        style: Option<&str>,
+        style_degree: Option<&str>,
+        role: Option<&str>,
+        locale: &str,
+        chunk_size: Option<usize>,
+    ) -> Result<Vec<Vec<u8>>> {
+        let chunks = self.chunk_text(text, chunk_size);
+        let mut audio_chunks = Vec::new();
+
+        for (_i, chunk) in chunks.iter().enumerate() {
+            // Build SSML for chunk
+            let ssml = self.build_ssml(
+                chunk,
+                voice_name,
+                rate,
+                pitch,
+                volume,
+                style,
+                style_degree,
+                role,
+                locale,
+            );
+
+            // Create WebSocket connection
+            let token = self.get_access_token()?;
+            let ws_url = format!(
+                "wss://{}.tts.speech.microsoft.com/cognitiveservices/websocket/v1?Authorization=Bearer%20{}",
+                self.region, token
+            );
+
+            let (mut ws_stream, _) = connect(&ws_url)?;
+
+            // Send configuration
+            let config = serde_json::json!({
+                "context": {
+                    "synthesis": {
+                        "audio": {
+                            "outputFormat": output_format
+                        }
+                    }
+                }
+            });
+
+            let config_msg = format!(
+                "Path: speech.config\r\nX-RequestId: {}\r\nX-Timestamp: {}\r\nContent-Type: application/json\r\n\r\n{}",
+                uuid::Uuid::new_v4(),
+                chrono::Utc::now().to_rfc3339(),
+                config
+            );
+
+            ws_stream.send(Message::Text(config_msg))?;
+
+            // Send SSML
+            let ssml_msg = format!(
+                "Path: ssml\r\nX-RequestId: {}\r\nX-Timestamp: {}\r\nContent-Type: application/ssml+xml\r\n\r\n{}",
+                uuid::Uuid::new_v4(),
+                chrono::Utc::now().to_rfc3339(),
+                ssml
+            );
+
+            ws_stream.send(Message::Text(ssml_msg))?;
+
+            // Receive audio data
+            let mut chunk_audio = Vec::new();
+            loop {
+                let msg = ws_stream.read()?;
+                match msg {
+                    Message::Binary(data) => {
+                        // Azure WebSocket format: [length_high, length_low, ...header..., audio_data]
+                        if data.len() >= 2 {
+                            let header_length = ((data[0] as u16) << 8) | (data[1] as u16);
+                            let audio_start = 2 + header_length as usize;
+                            if audio_start < data.len() {
+                                chunk_audio.extend_from_slice(&data[audio_start..]);
+                            }
+                        }
+                    }
+                    Message::Text(text) => {
+                        if text.contains("Path:turn.end") {
+                            break;
+                        }
+                    }
+                    Message::Close(_) => break,
+                    _ => {}
+                }
+            }
+
+            if !chunk_audio.is_empty() {
+                audio_chunks.push(chunk_audio.clone());
+
+                if play_audio && output_file.is_none() {
+                    // Play immediately for streaming effect
+                    play_audio_data(&chunk_audio, output_format, tempo)?;
+                }
+            }
+        }
+
+        // If saving to file, concatenate all chunks
+        if let Some(path) = output_file {
+            if audio_chunks.len() == 1 {
+                // Single chunk, save directly
+                fs::write(path, &audio_chunks[0])?;
+                println!("Audio saved to: {}", path.display());
+            } else if audio_chunks.len() > 1 {
+                // Multiple chunks, concatenate
+                concatenate_audio_chunks(&audio_chunks, path, output_format)?;
+            }
+        }
+
+        Ok(audio_chunks)
+    }
+}
+
+fn play_audio_data(audio_data: &[u8], format: &str, tempo: Option<f32>) -> Result<()> {
+    // Get the default output device
+    let (_stream, stream_handle) = OutputStream::try_default()
+        .map_err(|e| anyhow!("Failed to get audio output device: {}", e))?;
+    
+    // Create a sink for audio playback
+    let sink = Sink::try_new(&stream_handle)
+        .map_err(|e| anyhow!("Failed to create audio sink: {}", e))?;
+
+    // Adjust playback speed if tempo is specified
+    if let Some(t) = tempo {
+        sink.set_speed(t);
+    }
+
+    // Check if this is raw PCM data that needs WAV header
+    let audio_with_header = if format.starts_with("raw-") {
+        create_wav_from_pcm(audio_data, 48000, 1, 16)?
+    } else {
+        audio_data.to_vec()
+    };
+
+    // Create a cursor from audio data and decode it
+    let cursor = Cursor::new(audio_with_header);
+    let source = Decoder::new(cursor)
+        .map_err(|e| anyhow!("Failed to decode audio: {}", e))?;
+
+    // Play the audio
+    sink.append(source);
+    sink.sleep_until_end();
+
+    Ok(())
+}
 
 
-# Parse arguments
-parser = argparse.ArgumentParser(
-    description='Azure Speech Service Text-to-Speech CLI with advanced SSML support',
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter
-)
+fn create_wav_from_pcm(pcm_data: &[u8], sample_rate: u32, channels: u16, bits_per_sample: u16) -> Result<Vec<u8>> {
+    let mut wav_data = Vec::new();
+    
+    // WAV header
+    wav_data.extend_from_slice(b"RIFF");
+    let file_size = 36 + pcm_data.len() as u32;
+    wav_data.extend_from_slice(&file_size.to_le_bytes());
+    wav_data.extend_from_slice(b"WAVE");
+    
+    // Format chunk
+    wav_data.extend_from_slice(b"fmt ");
+    wav_data.extend_from_slice(&16u32.to_le_bytes()); // Chunk size
+    wav_data.extend_from_slice(&1u16.to_le_bytes()); // Audio format (PCM)
+    wav_data.extend_from_slice(&channels.to_le_bytes());
+    wav_data.extend_from_slice(&sample_rate.to_le_bytes());
+    
+    let byte_rate = sample_rate * channels as u32 * bits_per_sample as u32 / 8;
+    wav_data.extend_from_slice(&byte_rate.to_le_bytes());
+    
+    let block_align = channels * bits_per_sample / 8;
+    wav_data.extend_from_slice(&block_align.to_le_bytes());
+    wav_data.extend_from_slice(&bits_per_sample.to_le_bytes());
+    
+    // Data chunk
+    wav_data.extend_from_slice(b"data");
+    wav_data.extend_from_slice(&(pcm_data.len() as u32).to_le_bytes());
+    wav_data.extend_from_slice(pcm_data);
+    
+    Ok(wav_data)
+}
 
-# Input options
-parser.add_argument('text', nargs='*', help='Text to synthesize (or read from stdin)')
-parser.add_argument('-f', '--file', help='Read text from file')
 
-# Voice selection
-parser.add_argument('-v', '--voice', default='en-US-AriaNeural',
-                   help='Voice name')
-parser.add_argument('-l', '--locale', default='en-US',
-                   help='Voice locale')
+fn concatenate_audio_chunks(audio_chunks: &[Vec<u8>], output_path: &Path, format: &str) -> Result<()> {
+    let combined_audio = if format.starts_with("raw-") {
+        // For PCM, concatenate raw data then add WAV header
+        let mut raw_combined = Vec::new();
+        for chunk in audio_chunks {
+            raw_combined.extend_from_slice(chunk);
+        }
+        create_wav_from_pcm(&raw_combined, 48000, 1, 16)?
+    } else {
+        // For compressed formats, simple concatenation
+        let mut combined_audio = Vec::new();
+        for chunk in audio_chunks {
+            combined_audio.extend_from_slice(chunk);
+        }
+        combined_audio
+    };
+    
+    fs::write(output_path, combined_audio)?;
+    println!("Audio saved to: {}", output_path.display());
+    Ok(())
+}
 
-# SSML options
-parser.add_argument('-r', '--rate', help='Speaking rate (e.g., slow, medium, fast, +20%%, -10%%)')
-parser.add_argument('-p', '--pitch', help='Voice pitch (e.g., low, medium, high, +2st, -50Hz)')
-parser.add_argument('--volume', help='Voice volume (e.g., silent, soft, medium, loud, +6dB)')
-parser.add_argument('-s', '--style', help='Speaking style (e.g., cheerful, sad, angry, excited)')
-parser.add_argument('--style-degree', help='Style intensity (0.01-2.0, default varies by style)')
-parser.add_argument('--role', help='Role-play (e.g., Girl, Boy, YoungAdultFemale, OlderAdultMale)')
+fn get_audio_formats() -> std::collections::HashMap<&'static str, Vec<&'static str>> {
+    let mut formats = std::collections::HashMap::new();
+    formats.insert(
+        "high_quality",
+        vec![
+            "raw-48khz-16bit-mono-pcm",
+            "audio-48khz-192kbitrate-mono-mp3", 
+            "audio-48khz-96kbitrate-mono-mp3",
+        ],
+    );
+    formats.insert(
+        "standard", 
+        vec![
+            "raw-24khz-16bit-mono-pcm",
+            "audio-24khz-160kbitrate-mono-mp3",
+            "audio-24khz-96kbitrate-mono-mp3",
+        ],
+    );
+    formats.insert(
+        "low_bandwidth",
+        vec![
+            "raw-16khz-16bit-mono-pcm",
+            "audio-16khz-128kbitrate-mono-mp3",
+            "audio-16khz-64kbitrate-mono-mp3",
+        ],
+    );
+    formats
+}
 
-# Audio options
-parser.add_argument('--format', default='audio-48khz-192kbitrate-mono-mp3',
-                   help='Audio output format')
-parser.add_argument('--quality', choices=['high', 'standard', 'low'],
-                   help='Audio quality preset (overrides --format)')
-parser.add_argument('-t', '--tempo', type=float, default=1.0,
-                   help='Audio tempo adjustment')
-parser.add_argument('-o', '--output', help='Save audio to file')
-parser.add_argument('--no-play', action='store_true', help='Don\'t play audio')
+fn print_voices_table(voices: &[Voice], show_styles: bool) {
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL)
+        .apply_modifier(UTF8_ROUND_CORNERS)
+        .set_header(vec!["Locale", "Display Name", "Gender", "Voice Type"]);
 
-# Streaming and chunking options
-parser.add_argument('--streaming', action='store_true', default=True,
-                   help='Use WebSocket streaming')
-parser.add_argument('--no-streaming', action='store_true',
-                   help='Disable streaming, use traditional REST API')
-parser.add_argument('--chunk-size', type=int, default=None,
-                   help='Max characters per chunk')
+    for voice in voices {
+        let mut row = vec![
+            voice.locale.clone(),
+            voice.display_name.clone(),
+            voice.gender.clone(),
+            voice.voice_type.clone(),
+        ];
 
-# Voice listing and filtering
-parser.add_argument('--list-voices', action='store_true', help='List available voices')
-parser.add_argument('--neural-only', action='store_true', help='Show neural voices only')
-parser.add_argument('--styles-only', action='store_true', help='Show voices with styles')
-parser.add_argument('--gender', choices=['Male', 'Female'], help='Filter by gender')
-parser.add_argument('--show-styles', action='store_true', help='Show available styles in voice list')
-parser.add_argument('--refresh-voices', action='store_true', help='Refresh cached voice list')
+        if show_styles && !voice.style_list.is_empty() {
+            let styles = if voice.style_list.len() > 3 {
+                format!(
+                    "{}...",
+                    voice.style_list[..3].join(", ")
+                )
+            } else {
+                voice.style_list.join(", ")
+            };
+            row.push(styles);
+            if table.column_count() == 4 {
+                table.set_header(vec!["Locale", "Display Name", "Gender", "Voice Type", "Styles"]);
+            }
+        }
 
-# Utility options
-parser.add_argument('--preview', action='store_true', help='Show SSML without synthesis')
-parser.add_argument('--list-formats', action='store_true', help='List available audio formats')
+        table.add_row(row);
+    }
 
-args = parser.parse_args()
+    println!("{}", table);
+}
 
-# Check for required environment variables
-region = os.getenv('AZURE_SPEECH_REGION')
-key = os.getenv('AZURE_SPEECH_KEY')
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("Error: {:#}", e);
+        std::process::exit(1);
+    }
+}
 
-if not region or not key:
-    print("Error: AZURE_SPEECH_REGION and AZURE_SPEECH_KEY environment variables required",
-          file=sys.stderr)
-    sys.exit(1)
+fn run() -> Result<()> {
+    let args = Args::parse();
 
-synthesizer = AzureSpeechSynthesizer(region, key)
+    // Check for required environment variables
+    let region = match std::env::var("AZURE_SPEECH_REGION") {
+        Ok(region) => region,
+        Err(_) => {
+            eprintln!("Error: AZURE_SPEECH_REGION environment variable required");
+            std::process::exit(1);
+        }
+    };
+    let key = match std::env::var("AZURE_SPEECH_KEY") {
+        Ok(key) => key,
+        Err(_) => {
+            eprintln!("Error: AZURE_SPEECH_KEY environment variable required");
+            std::process::exit(1);
+        }
+    };
 
-# Handle utility commands
-if args.list_formats:
-    formats = get_audio_formats()
-    for quality, format_list in formats.items():
-        print(f"\n{quality.replace('_', ' ').title()}:")
-        for fmt in format_list:
-            print(f"  {fmt}")
-    sys.exit(0)
+    let synthesizer = AzureSpeechSynthesizer::new(region, key)?;
 
-if args.list_voices:
-    voices = synthesizer.get_voices(args.refresh_voices)
-    filtered = synthesizer.filter_voices(
-        voices, args.locale, args.gender, args.neural_only, args.styles_only
-    )
-    print_voices_table(filtered, args.show_styles)
-    sys.exit(0)
+    // Handle utility commands
+    if args.list_formats {
+        let formats = get_audio_formats();
+        for (quality, format_list) in formats {
+            println!("\n{}:", quality.replace('_', " ").to_uppercase());
+            for fmt in format_list {
+                println!("  {}", fmt);
+            }
+        }
+        return Ok(());
+    }
 
-# Get text input
-text = ' '.join(args.text) if args.text else ''
+    if args.list_voices {
+        let voices = synthesizer.get_voices(args.refresh_voices)?;
+        let filtered = synthesizer.filter_voices(
+            voices,
+            Some(&args.locale),
+            args.gender,
+            args.voice_type,
+            args.neural_only,
+            args.styles_only,
+        );
+        print_voices_table(&filtered, args.show_styles);
+        return Ok(());
+    }
 
-if args.file:
-    text = Path(args.file).read_text()
-elif not text and not sys.stdin.isatty():
-    text = sys.stdin.read()
+    // Get text input
+    let text = if !args.text.is_empty() {
+        args.text.join(" ")
+    } else if !io::stdin().is_terminal() {
+        let mut buffer = String::new();
+        io::stdin().read_to_string(&mut buffer)?;
+        buffer
+    } else {
+        return Err(anyhow!("No text provided"));
+    };
 
-if not text.strip():
-    print("Error: No text provided", file=sys.stderr)
-    sys.exit(1)
+    // Play audio unless saving to file
+    let should_play = args.output.is_none();
 
-# Handle quality presets
-output_format = args.format
-if args.quality:
-    formats = get_audio_formats()
-    quality_map = {'high': 'high_quality', 'standard': 'standard', 'low': 'low_bandwidth'}
-    output_format = formats[quality_map[args.quality]][0]
+    if text.trim().is_empty() {
+        return Err(anyhow!("No text provided"));
+    }
 
-# Build SSML
-ssml = synthesizer.build_ssml(
-    text, args.voice, args.rate, args.pitch, args.volume,
-    args.style, args.style_degree, args.role, locale=args.locale
-)
+    // Smart voice selection
+    let (selected_voice, selected_locale) = if args.lang.is_some() || args.gender.is_some() || args.voice_type.is_some() {
+        // User wants smart selection
+        let voices = synthesizer.get_voices(false)?;
+        
+        let target_locale = if let Some(lang) = &args.lang {
+            AzureSpeechSynthesizer::expand_language_code(lang)
+        } else {
+            args.locale.clone()
+        };
 
-if args.preview:
-    print(ssml)
-    sys.exit(0)
+        let selected_voice = synthesizer.select_voice(
+            &voices,
+            &target_locale,
+            args.gender,
+            args.voice_type,
+        ).unwrap_or_else(|| args.voice.clone());
 
-# Determine if we should use streaming
-use_streaming = args.streaming and not args.no_streaming
+        (selected_voice, target_locale)
+    } else {
+        (args.voice.clone(), args.locale.clone())
+    };
 
-if use_streaming:
-    # Set chunk size if specified
-    if args.chunk_size:
-        original_chunk_size = synthesizer.max_plain_text_s0
-        synthesizer.max_plain_text_s0 = args.chunk_size
+    // Handle quality presets
+    let output_format = if let Some(quality) = args.quality {
+        let formats = get_audio_formats();
+        let quality_key = format!("{}_quality", quality);
+        let quality_key = match quality_key.as_str() {
+            "high_quality" => "high_quality",
+            "standard_quality" => "standard", 
+            "low_quality" => "low_bandwidth",
+            _ => "standard",
+        };
+        formats[quality_key][0]
+    } else {
+        &args.format
+    };
 
-    # Use new streaming synthesis
-    synthesizer.synthesize_streaming(
-        text, args.voice, output_format, args.output,
-        not args.no_play, args.tempo if args.tempo != 1.0 else None,
-        args.rate, args.pitch, args.volume, args.style,
-        args.style_degree, args.role, args.locale
-    )
+    // Build SSML
+    let ssml = synthesizer.build_ssml(
+        &text,
+        &selected_voice,
+        args.rate.as_deref(),
+        args.pitch.as_deref(),
+        args.volume.as_deref(),
+        args.style.as_deref(),
+        args.style_degree.as_deref(),
+        args.role.as_deref(),
+        &selected_locale,
+    );
 
-    # Restore original chunk size
-    if args.chunk_size:
-        synthesizer.max_plain_text_s0 = original_chunk_size
-else:
-    # Use traditional SSML synthesis
-    synthesizer.synthesize(
-        ssml, output_format, args.output,
-        not args.no_play, args.tempo if args.tempo != 1.0 else None
-    )
+
+    // Always use streaming
+    let use_streaming = true;
+    let tempo = if args.tempo != 1.0 {
+        Some(args.tempo)
+    } else {
+        None
+    };
+
+    if use_streaming {
+        // Use streaming synthesis
+        synthesizer.synthesize_streaming(
+            &text,
+            &selected_voice,
+            output_format,
+            args.output.as_deref(),
+            should_play,
+            tempo,
+            args.rate.as_deref(),
+            args.pitch.as_deref(),
+            args.volume.as_deref(),
+            args.style.as_deref(),
+            args.style_degree.as_deref(),
+            args.role.as_deref(),
+            &selected_locale,
+            args.chunk_size,
+        )?;
+    } else {
+        // Use traditional REST synthesis
+        synthesizer.synthesize_rest(
+            &ssml,
+            output_format,
+            args.output.as_deref(),
+            should_play,
+            tempo,
+        )?;
+    }
+
+    Ok(())
+}

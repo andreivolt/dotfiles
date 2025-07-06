@@ -69,7 +69,7 @@ return {
         -- 'nil_ls',
         'pyright',
         'rust_analyzer',
-        'solargraph',
+        'ruby_lsp',
         'ts_ls',
         -- 'gopls',
       }
