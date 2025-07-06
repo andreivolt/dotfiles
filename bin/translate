@@ -1,6 +1,4 @@
 #!/usr/bin/env rust-script
-//! Text translation using AI models with parallel processing and caching
-//!
 //! ```cargo
 //! [dependencies]
 //! tiktoken-rs = "0.5"
@@ -32,7 +30,7 @@ use regex::Regex;
 
 #[derive(Parser)]
 #[command(name = "translate")]
-#[command(about = "Translate text using AI models with parallel processing")]
+#[command(about = "Translate text using AI models")]
 struct Args {
     #[arg(short = 't', long, help = "Target language for translation")]
     target_lang: String,
