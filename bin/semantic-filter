@@ -1,90 +1,221 @@
-#!/usr/bin/env -S uv run --script --quiet
-# /// script
-# dependencies = [
-#   "sh",
-#   "joblib",
-#   "platformdirs"
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! clap = { version = "4.0", features = ["derive"] }
+//! serde = { version = "1.0", features = ["derive"] }
+//! serde_json = "1.0"
+//! tokio = { version = "1.0", features = ["full"] }
+//! dirs = "5.0"
+//! sha2 = "0.10"
+//! hex = "0.4"
+//! ```
 
-import sys
-import argparse
-import json
-from sh import llm
-from platformdirs import user_cache_dir
-from joblib import Memory
+use clap::Parser;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::{self, Read};
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use sha2::{Digest, Sha256};
 
-cache_dir = user_cache_dir("semantic-filter")
-memory = Memory(cache_dir, verbose=0)
+#[derive(Parser)]
+#[command(name = "semantic-filter")]
+#[command(about = "Filter text semantically based on a prompt using LLM")]
+struct Args {
+    /// The prompt to filter by
+    prompt: String,
 
-parser = argparse.ArgumentParser(description='Filter text semantically based on a prompt using LLM')
-parser.add_argument('prompt', help='The prompt to filter by')
-parser.add_argument('-p', '--paragraphs', action='store_true', help='Filter by paragraphs instead of lines')
-parser.add_argument('-n', '--top-n', type=int, help='Return only top N most relevant items')
-parser.add_argument('-m', '--model', default='gpt-4o', help='LLM model to use')
-parser.add_argument('-v', '--verbose', action='store_true', help='Show reasoning')
-args = parser.parse_args()
+    /// Filter by paragraphs instead of lines
+    #[arg(short, long)]
+    paragraphs: bool,
 
-input_text = sys.stdin.read()
+    /// Return only top N most relevant items
+    #[arg(short = 'n', long)]
+    top_n: Option<usize>,
 
-if args.paragraphs:
-    items = [p for p in input_text.split('\n\n') if p.strip()]
-else:
-    items = [line for line in input_text.split('\n') if line.strip()]
+    /// LLM model to use
+    #[arg(short, long, default_value = "gpt-4o")]
+    model: String,
 
-if not items:
-    sys.exit(0)
+    /// Show reasoning
+    #[arg(short, long)]
+    verbose: bool,
+}
 
+#[derive(Serialize, Deserialize)]
+struct CacheEntry {
+    result: String,
+}
 
-@memory.cache
-def filter_text(text, filter_prompt, model, paragraphs, top_n, verbose):
-    """Filter text semantically using LLM with caching"""
-    system_prompt = f"""You are a semantic text filter. Given text content and a filter prompt, you must return only the parts that are semantically relevant to the prompt.
+fn get_cache_dir() -> PathBuf {
+    dirs::cache_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("semantic-filter")
+}
 
-Filter prompt: {filter_prompt}
+fn get_cache_key(text: &str, filter_prompt: &str, model: &str, paragraphs: bool, top_n: Option<usize>, verbose: bool) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(text.as_bytes());
+    hasher.update(filter_prompt.as_bytes());
+    hasher.update(model.as_bytes());
+    hasher.update(&[paragraphs as u8]);
+    hasher.update(&top_n.unwrap_or(0).to_le_bytes());
+    hasher.update(&[verbose as u8]);
+    hex::encode(hasher.finalize())
+}
+
+fn load_cache(cache_key: &str) -> Option<String> {
+    let cache_dir = get_cache_dir();
+    let cache_file = cache_dir.join(format!("{}.json", cache_key));
+
+    if let Ok(content) = fs::read_to_string(&cache_file) {
+        if let Ok(entry) = serde_json::from_str::<CacheEntry>(&content) {
+            return Some(entry.result);
+        }
+    }
+    None
+}
+
+fn save_cache(cache_key: &str, result: &str) {
+    let cache_dir = get_cache_dir();
+    if let Err(_) = fs::create_dir_all(&cache_dir) {
+        return;
+    }
+
+    let cache_file = cache_dir.join(format!("{}.json", cache_key));
+    let entry = CacheEntry {
+        result: result.to_string(),
+    };
+
+    if let Ok(json) = serde_json::to_string(&entry) {
+        let _ = fs::write(&cache_file, json);
+    }
+}
+
+fn filter_text(text: &str, filter_prompt: &str, model: &str, paragraphs: bool, top_n: Option<usize>, verbose: bool) -> Result<String, Box<dyn std::error::Error>> {
+    let cache_key = get_cache_key(text, filter_prompt, model, paragraphs, top_n, verbose);
+
+    if let Some(cached_result) = load_cache(&cache_key) {
+        return Ok(cached_result);
+    }
+
+    let item_type = if paragraphs { "paragraphs" } else { "lines" };
+    let top_n_instruction = if let Some(n) = top_n {
+        format!("- Return at most {} most relevant items", n)
+    } else {
+        String::new()
+    };
+
+    let verbose_instruction = if verbose {
+        "- First provide a brief reasoning section starting with \"REASONING:\" on its own line, then after a blank line provide the filtered text"
+    } else {
+        ""
+    };
+
+    let system_prompt = format!(
+        "You are a semantic text filter. Given text content and a filter prompt, you must return only the parts that are semantically relevant to the prompt.
+
+Filter prompt: {}
 
 Instructions:
 - Return the filtered text directly, not as JSON
-- Keep only {'paragraphs' if paragraphs else 'lines'} that are relevant to the filter prompt
+- Keep only {} that are relevant to the filter prompt
 - You can filter out off-topic sentences within paragraphs if needed
 - Maintain the original formatting and structure
 - Do not add any commentary or explanations
-{f'- Return at most {top_n} most relevant items' if top_n else ''}
-{f'- First provide a brief reasoning section starting with "REASONING:" on its own line, then after a blank line provide the filtered text' if verbose else ''}
+{}
+{}
 
-Respond with the filtered text only."""
+Respond with the filtered text only.",
+        filter_prompt, item_type, top_n_instruction, verbose_instruction
+    );
 
-    result = llm('prompt', '-m', model, '-s', system_prompt, text)
-    return str(result).strip()
+    let cmd = Command::new("llm")
+        .arg("prompt")
+        .arg("-m")
+        .arg(model)
+        .arg("-s")
+        .arg(&system_prompt)
+        .arg(text)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
 
-if args.paragraphs:
-    formatted_text = "\n\n".join(items)
-else:
-    formatted_text = "\n".join(items)
+    let output = cmd.wait_with_output()?;
 
-result = filter_text(formatted_text, args.prompt, args.model, args.paragraphs, args.top_n, args.verbose)
+    if !output.status.success() {
+        return Err(format!("LLM command failed: {}", String::from_utf8_lossy(&output.stderr)).into());
+    }
 
-# Handle verbose output
-if args.verbose and result.startswith("REASONING:"):
-    parts = result.split("\n\n", 1)
-    if len(parts) == 2:
-        reasoning_lines = parts[0].split("\n")
-        reasoning = "\n".join(reasoning_lines[1:])  # Skip "REASONING:" line
-        print(f"# Reasoning: {reasoning}\n", file=sys.stderr)
-        output = parts[1]
-    else:
-        output = result
-else:
-    output = result
+    let result = String::from_utf8(output.stdout)?.trim().to_string();
+    save_cache(&cache_key, &result);
 
-# Ensure blank lines between paragraphs
-lines = output.split('\n')
-formatted_output = []
-for line in lines:
-    if line.strip():  # Non-empty line
-        formatted_output.append(line)
-        formatted_output.append('')  # Add blank line after each paragraph
-# Remove trailing blank line if present
-if formatted_output and formatted_output[-1] == '':
-    formatted_output.pop()
-print('\n'.join(formatted_output))
+    Ok(result)
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+
+    let mut input_text = String::new();
+    io::stdin().read_to_string(&mut input_text)?;
+
+    let items: Vec<String> = if args.paragraphs {
+        input_text
+            .split("\n\n")
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+            .collect()
+    } else {
+        input_text
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect()
+    };
+
+    if items.is_empty() {
+        return Ok(());
+    }
+
+    let formatted_text = if args.paragraphs {
+        items.join("\n\n")
+    } else {
+        items.join("\n")
+    };
+
+    let result = filter_text(&formatted_text, &args.prompt, &args.model, args.paragraphs, args.top_n, args.verbose)?;
+
+    // Handle verbose output
+    let output = if args.verbose && result.starts_with("REASONING:") {
+        if let Some(double_newline_pos) = result.find("\n\n") {
+            let reasoning_part = &result[..double_newline_pos];
+            let reasoning = reasoning_part.strip_prefix("REASONING:\n").unwrap_or(&reasoning_part[10..]);
+            eprintln!("# Reasoning: {}\n", reasoning);
+            &result[double_newline_pos + 2..]
+        } else {
+            &result
+        }
+    } else {
+        &result
+    };
+
+    // Ensure blank lines between paragraphs
+    let lines: Vec<&str> = output.split('\n').collect();
+    let mut formatted_output = Vec::new();
+
+    for line in lines {
+        if !line.trim().is_empty() {
+            formatted_output.push(line.to_string());
+            formatted_output.push(String::new()); // Add blank line after each paragraph
+        }
+    }
+
+    // Remove trailing blank line if present
+    if formatted_output.last() == Some(&String::new()) {
+        formatted_output.pop();
+    }
+
+    println!("{}", formatted_output.join("\n"));
+
+    Ok(())
+}

@@ -17,7 +17,7 @@ use std::io::{self, Read};
 use std::process;
 
 use clap::Parser;
-use crossterm::style::{Color, SetBackgroundColor, SetForegroundColor, ResetColor};
+use crossterm::style::{Color, SetBackgroundColor, SetForegroundColor, ResetColor, Stylize};
 use serde_json::Value;
 use terminal_size::{Width, terminal_size};
 use textwrap::wrap;
@@ -301,14 +301,14 @@ impl TreeRenderer {
     fn render_header(&self, data: &Value, header_key: &str) {
         if let Some(story) = data.get(header_key) {
             let title = story.get("title").and_then(|v| v.as_str()).unwrap_or("No title");
-            if self.no_color {
+            if self.color_manager.no_color {
                 println!("{}", title);
             } else {
                 println!("{}", crossterm::style::style(title).bold());
             }
 
             if let Some(url) = story.get("url").and_then(|v| v.as_str()) {
-                if self.no_color {
+                if self.color_manager.no_color {
                     println!("{}", url);
                 } else {
                     println!("{}", crossterm::style::style(url).dim());
@@ -317,7 +317,7 @@ impl TreeRenderer {
 
             let points = story.get("points").and_then(|v| v.as_u64()).unwrap_or(0);
             let user = story.get("user").and_then(|v| v.as_str()).unwrap_or("unknown");
-            if self.no_color {
+            if self.color_manager.no_color {
                 println!("{} points by {}", points, user);
             } else {
                 println!("{} points by {}", 

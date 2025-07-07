@@ -1,269 +1,412 @@
-#!/usr/bin/env -S uv run --script --quiet
-"""Search Hacker News stories and comments using Algolia API."""
-# /// script
-# dependencies = [
-#   "requests",
-# ]
-# ///
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! clap = { version = "4.4", features = ["derive"] }
+//! reqwest = { version = "0.11", features = ["json"] }
+//! tokio = { version = "1.0", features = ["full"] }
+//! serde = { version = "1.0", features = ["derive"] }
+//! serde_json = "1.0"
+//! chrono = { version = "0.4", features = ["serde"] }
+//! html-escape = "0.2"
+//! console = "0.15"
+//! anyhow = "1.0"
+//! ammonia = "3.3"
+//! ```
 
+use clap::{Parser, ValueEnum};
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+use chrono::NaiveDate;
+use html_escape::decode_html_entities;
+use console::{style, Term};
+use anyhow::Result;
 
-import argparse
-import html
-import json
-import re
-import sys
-import time
-from datetime import datetime, timedelta
-import requests
+#[derive(Parser, Clone)]
+#[command(name = "hn-search")]
+#[command(about = "Search Hacker News stories and comments using Algolia API")]
+struct Args {
+    /// Search query (optional if using filters)
+    query: Option<String>,
 
+    /// Sort by relevance or date
+    #[arg(long, value_enum, default_value = "relevance")]
+    sort: SortBy,
 
-def parse_args():
-    parser = argparse.ArgumentParser(description='Search Hacker News using Algolia API',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    /// Filter by tags (story, comment, show_hn, ask_hn, poll)
+    #[arg(long)]
+    tags: Option<String>,
 
-    parser.add_argument('query', nargs='?', default='', help='Search query (optional if using filters)')
-    parser.add_argument('--sort', choices=['relevance', 'date'], default='relevance',
-                        help='Sort by relevance or date')
-    parser.add_argument('--tags', help='Filter by tags (story, comment, show_hn, ask_hn, poll)')
-    parser.add_argument('--author', help='Filter by author username')
-    parser.add_argument('--page', type=int, default=0, help='Page number')
-    parser.add_argument('--hits-per-page', type=int, default=20,
-                        help='Results per page')
-    parser.add_argument('--points', type=int, help='Minimum points filter')
-    parser.add_argument('--num-comments', type=int, help='Minimum comments filter')
-    parser.add_argument('--before', help='Filter before date (YYYY-MM-DD)')
-    parser.add_argument('--after', help='Filter after date (YYYY-MM-DD)')
-    parser.add_argument('--time-range', choices=['24h', 'week', 'month', 'year'],
-                        help='Time range shortcut')
-    parser.add_argument('--raw', action='store_true', help='Output raw JSON response')
-    parser.add_argument('--pretty', action='store_true', help='Formatted output')
-    parser.add_argument('-l', '--limit', type=int, help='Max results to fetch')
+    /// Filter by author username
+    #[arg(long)]
+    author: Option<String>,
 
-    return parser.parse_args()
+    /// Max results to fetch (uses optimal pagination automatically)
+    #[arg(short, long, default_value = "20")]
+    limit: u32,
 
+    /// Minimum points filter
+    #[arg(long)]
+    points: Option<u32>,
 
-def date_to_timestamp(date_str):
-    """Convert YYYY-MM-DD string to Unix timestamp"""
-    try:
-        dt = datetime.strptime(date_str, '%Y-%m-%d')
-        return int(dt.timestamp())
-    except ValueError:
-        print(f"Error: Invalid date format '{date_str}'. Use YYYY-MM-DD", file=sys.stderr)
-        sys.exit(1)
+    /// Minimum comments filter
+    #[arg(long)]
+    num_comments: Option<u32>,
 
+    /// Filter before date (YYYY-MM-DD)
+    #[arg(long)]
+    before: Option<String>,
 
-def build_numeric_filters(args):
-    """Build numeric filters string for API"""
-    filters = []
+    /// Filter after date (YYYY-MM-DD)
+    #[arg(long)]
+    after: Option<String>,
 
-    if args.points:
-        filters.append(f"points>={args.points}")
+    /// Time range shortcut
+    #[arg(long, value_enum)]
+    time_range: Option<TimeRange>,
 
-    if args.num_comments:
-        filters.append(f"num_comments>={args.num_comments}")
+    /// Output raw JSON response
+    #[arg(long)]
+    raw: bool,
 
-    # Handle time filtering
-    if args.before or args.after:
-        if args.before:
-            before_ts = date_to_timestamp(args.before)
-            filters.append(f"created_at_i<{before_ts}")
-        if args.after:
-            after_ts = date_to_timestamp(args.after)
-            filters.append(f"created_at_i>{after_ts}")
-    elif args.time_range:
-        now = int(time.time())
-        if args.time_range == '24h':
-            cutoff = now - 86400
-        elif args.time_range == 'week':
-            cutoff = now - 604800
-        elif args.time_range == 'month':
-            cutoff = now - 2592000
-        elif args.time_range == 'year':
-            cutoff = now - 31536000
-        filters.append(f"created_at_i>{cutoff}")
+    /// Formatted output
+    #[arg(long)]
+    pretty: bool,
 
-    return ','.join(filters) if filters else None
+}
 
+#[derive(Clone, ValueEnum)]
+enum SortBy {
+    Relevance,
+    Date,
+}
 
-def build_tags(args):
-    """Build tags parameter including author filter"""
-    tags = []
+#[derive(Clone, ValueEnum)]
+enum TimeRange {
+    #[value(name = "24h")]
+    Day,
+    Week,
+    Month,
+    Year,
+}
 
-    if args.tags:
-        tags.extend(args.tags.split(','))
+#[derive(Deserialize, Serialize)]
+struct SearchResponse {
+    hits: Vec<Hit>,
+    #[serde(rename = "nbHits")]
+    nb_hits: u32,
+    page: u32,
+    #[serde(rename = "nbPages")]
+    nb_pages: u32,
+}
 
-    if args.author:
-        tags.append(f"author_{args.author}")
+#[derive(Deserialize, Serialize, Clone)]
+struct Hit {
+    #[serde(rename = "objectID")]
+    object_id: String,
+    title: Option<String>,
+    url: Option<String>,
+    author: Option<String>,
+    points: Option<u32>,
+    #[serde(rename = "num_comments")]
+    num_comments: Option<u32>,
+    #[serde(rename = "created_at")]
+    created_at: Option<String>,
+    #[serde(rename = "story_title")]
+    story_title: Option<String>,
+    #[serde(rename = "comment_text")]
+    comment_text: Option<String>,
+    #[serde(rename = "story_text")]
+    story_text: Option<String>,
+}
 
-    return ','.join(tags) if tags else None
+fn date_to_timestamp(date_str: &str) -> Result<u64> {
+    let date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+        .map_err(|_| anyhow::anyhow!("Invalid date format '{}'. Use YYYY-MM-DD", date_str))?;
+    Ok(date.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp() as u64)
+}
 
+fn build_numeric_filters(args: &Args) -> Option<String> {
+    let mut filters = Vec::new();
 
-def build_query_params(args):
-    """Build query parameters for API request"""
-    params = {
-        'query': args.query,
-        'page': args.page,
-        'hitsPerPage': min(args.hits_per_page, 1000)
+    if let Some(points) = args.points {
+        filters.push(format!("points>={}", points));
     }
 
-    tags = build_tags(args)
-    if tags:
-        params['tags'] = tags
-
-    numeric_filters = build_numeric_filters(args)
-    if numeric_filters:
-        params['numericFilters'] = numeric_filters
-
-    return params
-
-
-def strip_html_tags(text):
-    """Remove HTML tags and clean up text"""
-    # Replace paragraph and break tags with newlines
-    text = re.sub(r'<p>', '\n\n', text)
-    text = re.sub(r'</p>', '', text)
-    text = re.sub(r'<br\s*/?>', '\n', text)
-    # Remove all other HTML tags
-    text = re.sub(r'<[^>]+>', '', text)
-    # Clean up excessive whitespace while preserving paragraph breaks
-    text = re.sub(r' +', ' ', text)  # Multiple spaces to single space
-    text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)  # Multiple newlines to double
-    return text.strip()
-
-
-def format_hit(hit, pretty=False):
-    """Format a single search result for display"""
-    hit_type = 'story' if 'story_text' in hit or 'title' in hit else 'comment'
-    hn_url = f"https://news.ycombinator.com/item?id={hit.get('objectID', '')}"
-
-    if hit_type == 'story':
-        title = html.unescape(hit.get('title', 'No title'))
-        url = hit.get('url', '')
-        author = hit.get('author', 'unknown')
-        points = hit.get('points', 0)
-        comments = hit.get('num_comments', 0)
-        created = hit.get('created_at', '')
-
-        if pretty:
-            result = f"📰 {title}"
-            if url:
-                result += f"\n   🔗 {url}"
-            result += f"\n   💬 {hn_url}"
-            result += f"\n   👤 {author} | ⭐ {points} | 💬 {comments} | 📅 {created}"
-        else:
-            # Greppable format: one line per result
-            result = f"[STORY] {title} | {author} | {points}pts | {comments}cmt | {created} | {hn_url}"
-            if url:
-                result += f" | {url}"
-
-    else:  # comment
-        author = hit.get('author', 'unknown')
-        story_title = html.unescape(hit.get('story_title', 'Unknown story'))
-        comment_text = strip_html_tags(html.unescape(hit.get('comment_text', '')))
-        created = hit.get('created_at', '')
-
-        if pretty:
-            result = f"💬 Comment by {author} on: {story_title}"
-            if comment_text:
-                # Indent each line of the comment
-                indented_text = '\n   '.join(comment_text.split('\n'))
-                result += f"\n   {indented_text}"
-            result += f"\n   🔗 {hn_url}"
-            result += f"\n   📅 {created}"
-        else:
-            # Greppable format: one line per result (collapse newlines for grep)
-            result = f"[COMMENT] {author} on \"{story_title}\" | {created} | {hn_url}"
-            if comment_text:
-                single_line_text = comment_text.replace('\n', ' ')
-                result += f" | {single_line_text}"
-
-    return result
-
-
-def search_hn(args):
-    """Perform the search and return results"""
-    base_url = 'https://hn.algolia.com/api/v1/search_by_date' if args.sort == 'date' else 'https://hn.algolia.com/api/v1/search'
-    params = build_query_params(args)
-
-    try:
-        response = requests.get(base_url, params=params)
-        response.raise_for_status()
-        return response.json()
-    except requests.HTTPError as e:
-        print(f"API Error: {e.response.status_code} {e.response.reason}", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-
-args = parse_args()
-
-if args.hits_per_page > 1000:
-    print("Warning: hits-per-page capped at 1000", file=sys.stderr)
-
-# Handle --limit flag with multiple page fetches
-if args.limit:
-    all_hits = []
-    total_fetched = 0
-    current_page = args.page
-
-    while total_fetched < args.limit:
-        args.page = current_page
-        results = search_hn(args)
-        hits = results.get('hits', [])
-        nb_hits = results.get('nbHits', 0)
-
-        if not hits:
-            break
-
-        # Add hits up to the requested count
-        remaining = args.limit - total_fetched
-        all_hits.extend(hits[:remaining])
-        total_fetched += len(hits[:remaining])
-
-        # Check if we've fetched everything or reached the last page
-        if len(hits) < args.hits_per_page or total_fetched >= args.limit or total_fetched >= nb_hits:
-            break
-
-        current_page += 1
-
-    # Create a synthetic results object for display
-    results = {
-        'hits': all_hits,
-        'nbHits': results.get('nbHits', 0),
-        'page': args.page,
-        'nbPages': results.get('nbPages', 0)
+    if let Some(num_comments) = args.num_comments {
+        filters.push(format!("num_comments>={}", num_comments));
     }
-else:
-    results = search_hn(args)
 
-if args.raw:
-    print(json.dumps(results, indent=2))
-    sys.exit(0)
+    if args.before.is_some() || args.after.is_some() {
+        if let Some(before) = &args.before {
+            match date_to_timestamp(before) {
+                Ok(ts) => filters.push(format!("created_at_i<{}", ts)),
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        if let Some(after) = &args.after {
+            match date_to_timestamp(after) {
+                Ok(ts) => filters.push(format!("created_at_i>{}", ts)),
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    } else if let Some(time_range) = &args.time_range {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
 
-hits = results.get('hits', [])
-nb_hits = results.get('nbHits', 0)
-page = results.get('page', 0)
-nb_pages = results.get('nbPages', 0)
+        let cutoff = match time_range {
+            TimeRange::Day => now - 86400,
+            TimeRange::Week => now - 604800,
+            TimeRange::Month => now - 2592000,
+            TimeRange::Year => now - 31536000,
+        };
 
-if args.pretty:
-    if args.limit:
-        print(f"Fetched {len(hits)} of {args.limit} requested results (total available: {nb_hits})")
-    else:
-        print(f"Found {nb_hits} results (page {page + 1}/{nb_pages})")
-    print("=" * 80)
+        filters.push(format!("created_at_i>{}", cutoff));
+    }
 
-if not hits:
-    print("No results found.")
-    sys.exit(0)
+    if filters.is_empty() {
+        None
+    } else {
+        Some(filters.join(","))
+    }
+}
 
-if args.pretty:
-    for i, hit in enumerate(hits, 1):
-        print(f"{i}. {format_hit(hit, pretty=True)}")
-        print()
-else:
-    # Greppable format: one result per line
+fn build_tags(args: &Args) -> Option<String> {
+    let mut tags = Vec::new();
 
-    for hit in hits:
-        print(format_hit(hit, pretty=False))
+    if let Some(tag_str) = &args.tags {
+        tags.extend(tag_str.split(',').map(|s| s.to_string()));
+    }
+
+    if let Some(author) = &args.author {
+        tags.push(format!("author_{}", author));
+    }
+
+    if tags.is_empty() {
+        None
+    } else {
+        Some(tags.join(","))
+    }
+}
+
+fn build_query_params(args: &Args, page: u32, hits_per_page: u32) -> HashMap<String, String> {
+    let mut params = HashMap::new();
+
+    params.insert("query".to_string(), args.query.as_deref().unwrap_or("").to_string());
+    params.insert("page".to_string(), page.to_string());
+    params.insert("hitsPerPage".to_string(), hits_per_page.to_string());
+
+    if let Some(tags) = build_tags(args) {
+        params.insert("tags".to_string(), tags);
+    }
+
+    if let Some(filters) = build_numeric_filters(args) {
+        params.insert("numericFilters".to_string(), filters);
+    }
+
+    params
+}
+
+fn strip_html_tags(text: &str) -> String {
+    // Use ammonia to safely strip HTML tags while preserving text structure
+    let mut builder = ammonia::Builder::new();
+    builder.tags(std::collections::HashSet::new()); // Remove all tags
+    builder.clean_content_tags(std::collections::HashSet::new()); // Don't preserve content of any tags
+    
+    let cleaned = builder.clean(text).to_string();
+    
+    // Clean up excessive whitespace
+    let cleaned = cleaned.replace("\n\n\n", "\n\n");
+    let cleaned = cleaned.trim();
+    
+    cleaned.to_string()
+}
+
+fn format_hit(hit: &Hit, pretty: bool, use_color: bool) -> String {
+    let hit_type = if hit.story_text.is_some() || hit.title.is_some() {
+        "story"
+    } else {
+        "comment"
+    };
+
+    let hn_url = format!("https://news.ycombinator.com/item?id={}", hit.object_id);
+
+    if hit_type == "story" {
+        let title = hit.title.as_deref().unwrap_or("No title");
+        let title = decode_html_entities(title).to_string();
+        let url = hit.url.as_deref().unwrap_or("");
+        let author = hit.author.as_deref().unwrap_or("unknown");
+        let points = hit.points.unwrap_or(0);
+        let comments = hit.num_comments.unwrap_or(0);
+        let created = hit.created_at.as_deref().unwrap_or("");
+
+        if pretty {
+            let mut result = format!("📰 {}", title);
+            if !url.is_empty() {
+                result.push_str(&format!("\n   🔗 {}", url));
+            }
+            result.push_str(&format!("\n   💬 {}", hn_url));
+            result.push_str(&format!("\n   👤 {} | ⭐ {} | 💬 {} | 📅 {}", author, points, comments, created));
+            result
+        } else {
+            let story_tag = if use_color {
+                style("[STORY]").blue().bright().to_string()
+            } else {
+                "[STORY]".to_string()
+            };
+            let mut result = format!("{} {} | {} | {}pts | {}cmt | {} | {}", story_tag, title, author, points, comments, created, hn_url);
+            if !url.is_empty() {
+                result.push_str(&format!(" | {}", url));
+            }
+            result
+        }
+    } else {
+        let author = hit.author.as_deref().unwrap_or("unknown");
+        let story_title = hit.story_title.as_deref().unwrap_or("Unknown story");
+        let story_title = decode_html_entities(story_title).to_string();
+        let comment_text = hit.comment_text.as_deref().unwrap_or("");
+        let comment_text = strip_html_tags(&decode_html_entities(comment_text).to_string());
+        let created = hit.created_at.as_deref().unwrap_or("");
+
+        if pretty {
+            let mut result = format!("💬 Comment by {} on: {}", author, story_title);
+            if !comment_text.is_empty() {
+                let indented_text = comment_text.lines()
+                    .map(|line| format!("   {}", line))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                result.push_str(&format!("\n{}", indented_text));
+            }
+            result.push_str(&format!("\n   🔗 {}", hn_url));
+            result.push_str(&format!("\n   📅 {}", created));
+            result
+        } else {
+            let comment_tag = if use_color {
+                style("[COMMENT]").green().bright().to_string()
+            } else {
+                "[COMMENT]".to_string()
+            };
+            let mut result = format!("{} {} on \"{}\" | {} | {}", comment_tag, author, story_title, created, hn_url);
+            if !comment_text.is_empty() {
+                let single_line_text = comment_text.replace('\n', " ");
+                result.push_str(&format!(" | {}", single_line_text));
+            }
+            result
+        }
+    }
+}
+
+async fn search_hn(args: &Args, page: u32, hits_per_page: u32) -> Result<SearchResponse> {
+    let base_url = match args.sort {
+        SortBy::Date => "https://hn.algolia.com/api/v1/search_by_date",
+        SortBy::Relevance => "https://hn.algolia.com/api/v1/search",
+    };
+
+    let params = build_query_params(args, page, hits_per_page);
+    let client = Client::new();
+    let response = client.get(base_url).query(&params).send().await?;
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!("API Error: {}", response.status()));
+    }
+
+    let search_response: SearchResponse = response.json().await?;
+    Ok(search_response)
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+    
+    // Calculate optimal pagination strategy
+    let requested_limit = args.limit;
+    let max_hits_per_page = 1000u32;
+    
+    let mut all_hits = Vec::new();
+    let mut total_fetched = 0u32;
+    let mut current_page = 0u32;
+    let mut last_response: Option<SearchResponse> = None;
+    
+    while total_fetched < requested_limit {
+        // Calculate optimal hits_per_page for this request
+        let remaining = requested_limit - total_fetched;
+        let hits_per_page = remaining.min(max_hits_per_page);
+        
+        let response = search_hn(&args, current_page, hits_per_page).await?;
+        let hits = &response.hits;
+        
+        if hits.is_empty() {
+            break;
+        }
+        
+        // Take only what we need (shouldn't exceed but be safe)
+        let hits_to_take = (hits.len() as u32).min(remaining);
+        
+        for hit in hits.iter().take(hits_to_take as usize) {
+            all_hits.push(hit.clone());
+        }
+        total_fetched += hits_to_take;
+        
+        // Stop if we've got everything we need or hit API limits
+        if total_fetched >= requested_limit || 
+           hits.len() < hits_per_page as usize || 
+           total_fetched >= response.nb_hits {
+            last_response = Some(response);
+            break;
+        }
+        
+        current_page += 1;
+        last_response = Some(response);
+    }
+    
+    let results = SearchResponse {
+        hits: all_hits,
+        nb_hits: last_response.as_ref().map(|r| r.nb_hits).unwrap_or(0),
+        page: 0, // Always show as page 0 since we're doing count-based
+        nb_pages: last_response.as_ref().map(|r| r.nb_pages).unwrap_or(0),
+    };
+
+    if args.raw {
+        println!("{}", serde_json::to_string_pretty(&results)?);
+        return Ok(());
+    }
+
+    let hits = &results.hits;
+    let nb_hits = results.nb_hits;
+    let page = results.page;
+    let nb_pages = results.nb_pages;
+    let use_color = Term::stdout().features().colors_supported();
+
+    if args.pretty {
+        println!("Fetched {} of {} requested results (total available: {})",
+                 hits.len(), args.limit, nb_hits);
+        println!("{}", "=".repeat(80));
+    }
+
+    if hits.is_empty() {
+        println!("No results found.");
+        return Ok(());
+    }
+
+    if args.pretty {
+        for (i, hit) in hits.iter().enumerate() {
+            println!("{}. {}", i + 1, format_hit(hit, true, use_color));
+            println!();
+        }
+    } else {
+        for hit in hits {
+            println!("{}", format_hit(hit, false, use_color));
+        }
+    }
+
+    Ok(())
+}
