@@ -1,0 +1,711 @@
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! serpapi-search-rust = "0.1.1"
+//! tokio = { version = "1", features = ["full"] }
+//! clap = { version = "4.0", features = ["derive"] }
+//! serde_json = "1.0"
+//! ```
+
+use clap::{Arg, Command};
+use serpapi_search_rust::serp_api_search::SerpApiSearch;
+use std::collections::HashMap;
+use std::env;
+
+fn get_language_code(input: &str) -> Option<String> {
+    let languages = [
+        ("ar", "arabic", "lang_ar"),
+        ("hy", "armenian", "lang_hy"),
+        ("bg", "bulgarian", "lang_bg"),
+        ("ca", "catalan", "lang_ca"),
+        ("cs", "czech", "lang_cs"),
+        ("da", "danish", "lang_da"),
+        ("de", "german", "lang_de"),
+        ("el", "greek", "lang_el"),
+        ("en", "english", "lang_en"),
+        ("es", "spanish", "lang_es"),
+        ("et", "estonian", "lang_et"),
+        ("tl", "filipino", "lang_tl"),
+        ("fi", "finnish", "lang_fi"),
+        ("fr", "french", "lang_fr"),
+        ("hr", "croatian", "lang_hr"),
+        ("hi", "hindi", "lang_hi"),
+        ("hu", "hungarian", "lang_hu"),
+        ("id", "indonesian", "lang_id"),
+        ("is", "icelandic", "lang_is"),
+        ("it", "italian", "lang_it"),
+        ("iw", "hebrew", "lang_iw"),
+        ("he", "hebrew", "lang_he"),
+        ("ja", "japanese", "lang_ja"),
+        ("ko", "korean", "lang_ko"),
+        ("lt", "lithuanian", "lang_lt"),
+        ("lv", "latvian", "lang_lv"),
+        ("nl", "dutch", "lang_nl"),
+        ("no", "norwegian", "lang_no"),
+        ("fa", "persian", "lang_fa"),
+        ("pl", "polish", "lang_pl"),
+        ("pt", "portuguese", "lang_pt"),
+        ("ro", "romanian", "lang_ro"),
+        ("ru", "russian", "lang_ru"),
+        ("sk", "slovak", "lang_sk"),
+        ("sl", "slovenian", "lang_sl"),
+        ("sr", "serbian", "lang_sr"),
+        ("sv", "swedish", "lang_sv"),
+        ("th", "thai", "lang_th"),
+        ("tr", "turkish", "lang_tr"),
+        ("uk", "ukrainian", "lang_uk"),
+        ("vi", "vietnamese", "lang_vi"),
+        ("zh-cn", "chinese simplified", "lang_zh-CN"),
+        ("zh-tw", "chinese traditional", "lang_zh-TW"),
+    ];
+
+    let input_lower = input.to_lowercase();
+    
+    for (code, name, full_code) in &languages {
+        if input_lower == *code || input_lower == *name || input_lower == full_code.replace("lang_", "") {
+            return Some(full_code.to_string());
+        }
+    }
+    
+    None
+}
+
+fn get_country_code(input: &str) -> Option<String> {
+    let countries = [
+        ("af", "afghanistan", "countryAF"),
+        ("al", "albania", "countryAL"),
+        ("dz", "algeria", "countryDZ"),
+        ("as", "american samoa", "countryAS"),
+        ("ad", "andorra", "countryAD"),
+        ("ao", "angola", "countryAO"),
+        ("ai", "anguilla", "countryAI"),
+        ("aq", "antarctica", "countryAQ"),
+        ("ag", "antigua & barbuda", "countryAG"),
+        ("ar", "argentina", "countryAR"),
+        ("am", "armenia", "countryAM"),
+        ("aw", "aruba", "countryAW"),
+        ("au", "australia", "countryAU"),
+        ("at", "austria", "countryAT"),
+        ("az", "azerbaijan", "countryAZ"),
+        ("bs", "bahamas", "countryBS"),
+        ("bh", "bahrain", "countryBH"),
+        ("bd", "bangladesh", "countryBD"),
+        ("bb", "barbados", "countryBB"),
+        ("by", "belarus", "countryBY"),
+        ("be", "belgium", "countryBE"),
+        ("bz", "belize", "countryBZ"),
+        ("bj", "benin", "countryBJ"),
+        ("bm", "bermuda", "countryBM"),
+        ("bt", "bhutan", "countryBT"),
+        ("bo", "bolivia", "countryBO"),
+        ("ba", "bosnia & herzegovina", "countryBA"),
+        ("bw", "botswana", "countryBW"),
+        ("bv", "bouvet island", "countryBV"),
+        ("br", "brazil", "countryBR"),
+        ("io", "british indian ocean territory", "countryIO"),
+        ("vg", "british virgin islands", "countryVG"),
+        ("bn", "brunei", "countryBN"),
+        ("bg", "bulgaria", "countryBG"),
+        ("bf", "burkina faso", "countryBF"),
+        ("bi", "burundi", "countryBI"),
+        ("kh", "cambodia", "countryKH"),
+        ("cm", "cameroon", "countryCM"),
+        ("ca", "canada", "countryCA"),
+        ("cv", "cape verde", "countryCV"),
+        ("ky", "cayman islands", "countryKY"),
+        ("cf", "central african republic", "countryCF"),
+        ("td", "chad", "countryTD"),
+        ("cl", "chile", "countryCL"),
+        ("cn", "china", "countryCN"),
+        ("cx", "christmas island", "countryCX"),
+        ("cc", "cocos islands", "countryCC"),
+        ("co", "colombia", "countryCO"),
+        ("km", "comoros", "countryKM"),
+        ("cg", "congo brazzaville", "countryCG"),
+        ("cd", "congo kinshasa", "countryCD"),
+        ("ck", "cook islands", "countryCK"),
+        ("cr", "costa rica", "countryCR"),
+        ("ci", "cote divoire", "countryCI"),
+        ("hr", "croatia", "countryHR"),
+        ("cu", "cuba", "countryCU"),
+        ("cy", "cyprus", "countryCY"),
+        ("cz", "czechia", "countryCZ"),
+        ("dk", "denmark", "countryDK"),
+        ("dj", "djibouti", "countryDJ"),
+        ("dm", "dominica", "countryDM"),
+        ("do", "dominican republic", "countryDO"),
+        ("tp", "east timor", "countryTP"),
+        ("ec", "ecuador", "countryEC"),
+        ("eg", "egypt", "countryEG"),
+        ("sv", "el salvador", "countrySV"),
+        ("gq", "equatorial guinea", "countryGQ"),
+        ("er", "eritrea", "countryER"),
+        ("ee", "estonia", "countryEE"),
+        ("et", "ethiopia", "countryET"),
+        ("eu", "european union", "countryEU"),
+        ("fk", "falkland islands", "countryFK"),
+        ("fo", "faroe islands", "countryFO"),
+        ("fj", "fiji", "countryFJ"),
+        ("fi", "finland", "countryFI"),
+        ("fr", "france", "countryFR"),
+        ("fx", "france metropolitan", "countryFX"),
+        ("gf", "french guiana", "countryGF"),
+        ("pf", "french polynesia", "countryPF"),
+        ("tf", "french southern territories", "countryTF"),
+        ("ga", "gabon", "countryGA"),
+        ("gm", "gambia", "countryGM"),
+        ("ge", "georgia", "countryGE"),
+        ("de", "germany", "countryDE"),
+        ("gh", "ghana", "countryGH"),
+        ("gi", "gibraltar", "countryGI"),
+        ("gr", "greece", "countryGR"),
+        ("gl", "greenland", "countryGL"),
+        ("gd", "grenada", "countryGD"),
+        ("gp", "guadeloupe", "countryGP"),
+        ("gu", "guam", "countryGU"),
+        ("gt", "guatemala", "countryGT"),
+        ("gn", "guinea", "countryGN"),
+        ("gw", "guinea-bissau", "countryGW"),
+        ("gy", "guyana", "countryGY"),
+        ("ht", "haiti", "countryHT"),
+        ("hm", "heard island", "countryHM"),
+        ("hn", "honduras", "countryHN"),
+        ("hk", "hong kong", "countryHK"),
+        ("hu", "hungary", "countryHU"),
+        ("is", "iceland", "countryIS"),
+        ("in", "india", "countryIN"),
+        ("id", "indonesia", "countryID"),
+        ("ir", "iran", "countryIR"),
+        ("iq", "iraq", "countryIQ"),
+        ("ie", "ireland", "countryIE"),
+        ("il", "israel", "countryIL"),
+        ("it", "italy", "countryIT"),
+        ("jm", "jamaica", "countryJM"),
+        ("jp", "japan", "countryJP"),
+        ("jo", "jordan", "countryJO"),
+        ("kz", "kazakhstan", "countryKZ"),
+        ("ke", "kenya", "countryKE"),
+        ("ki", "kiribati", "countryKI"),
+        ("kw", "kuwait", "countryKW"),
+        ("kg", "kyrgyzstan", "countryKG"),
+        ("la", "laos", "countryLA"),
+        ("lv", "latvia", "countryLV"),
+        ("lb", "lebanon", "countryLB"),
+        ("ls", "lesotho", "countryLS"),
+        ("lr", "liberia", "countryLR"),
+        ("ly", "libya", "countryLY"),
+        ("li", "liechtenstein", "countryLI"),
+        ("lt", "lithuania", "countryLT"),
+        ("lu", "luxembourg", "countryLU"),
+        ("mo", "macao", "countryMO"),
+        ("mg", "madagascar", "countryMG"),
+        ("mw", "malawi", "countryMW"),
+        ("my", "malaysia", "countryMY"),
+        ("mv", "maldives", "countryMV"),
+        ("ml", "mali", "countryML"),
+        ("mt", "malta", "countryMT"),
+        ("mh", "marshall islands", "countryMH"),
+        ("mq", "martinique", "countryMQ"),
+        ("mr", "mauritania", "countryMR"),
+        ("mu", "mauritius", "countryMU"),
+        ("yt", "mayotte", "countryYT"),
+        ("mx", "mexico", "countryMX"),
+        ("fm", "micronesia", "countryFM"),
+        ("md", "moldova", "countryMD"),
+        ("mc", "monaco", "countryMC"),
+        ("mn", "mongolia", "countryMN"),
+        ("ms", "montserrat", "countryMS"),
+        ("ma", "morocco", "countryMA"),
+        ("mz", "mozambique", "countryMZ"),
+        ("mm", "myanmar", "countryMM"),
+        ("na", "namibia", "countryNA"),
+        ("nr", "nauru", "countryNR"),
+        ("np", "nepal", "countryNP"),
+        ("nl", "netherlands", "countryNL"),
+        ("an", "netherlands antilles", "countryAN"),
+        ("nc", "new caledonia", "countryNC"),
+        ("nz", "new zealand", "countryNZ"),
+        ("ni", "nicaragua", "countryNI"),
+        ("ne", "niger", "countryNE"),
+        ("ng", "nigeria", "countryNG"),
+        ("nu", "niue", "countryNU"),
+        ("nf", "norfolk island", "countryNF"),
+        ("kp", "north korea", "countryKP"),
+        ("mk", "north macedonia", "countryMK"),
+        ("mp", "northern mariana islands", "countryMP"),
+        ("no", "norway", "countryNO"),
+        ("om", "oman", "countryOM"),
+        ("pk", "pakistan", "countryPK"),
+        ("pw", "palau", "countryPW"),
+        ("ps", "palestine", "countryPS"),
+        ("pa", "panama", "countryPA"),
+        ("pg", "papua new guinea", "countryPG"),
+        ("py", "paraguay", "countryPY"),
+        ("pe", "peru", "countryPE"),
+        ("ph", "philippines", "countryPH"),
+        ("pn", "pitcairn islands", "countryPN"),
+        ("pl", "poland", "countryPL"),
+        ("pt", "portugal", "countryPT"),
+        ("pr", "puerto rico", "countryPR"),
+        ("qa", "qatar", "countryQA"),
+        ("re", "reunion", "countryRE"),
+        ("ro", "romania", "countryRO"),
+        ("ru", "russia", "countryRU"),
+        ("rw", "rwanda", "countryRW"),
+        ("ws", "samoa", "countryWS"),
+        ("sm", "san marino", "countrySM"),
+        ("st", "sao tome & principe", "countryST"),
+        ("sa", "saudi arabia", "countrySA"),
+        ("sn", "senegal", "countrySN"),
+        ("rs", "serbia", "countryRS"),
+        ("cs", "serbia and montenegro", "countryCS"),
+        ("sc", "seychelles", "countrySC"),
+        ("sl", "sierra leone", "countrySL"),
+        ("sg", "singapore", "countrySG"),
+        ("sk", "slovakia", "countrySK"),
+        ("si", "slovenia", "countrySI"),
+        ("sb", "solomon islands", "countrySB"),
+        ("so", "somalia", "countrySO"),
+        ("za", "south africa", "countryZA"),
+        ("gs", "south georgia", "countryGS"),
+        ("kr", "south korea", "countryKR"),
+        ("es", "spain", "countryES"),
+        ("lk", "sri lanka", "countryLK"),
+        ("sh", "st helena", "countrySH"),
+        ("kn", "st kitts & nevis", "countryKN"),
+        ("lc", "st lucia", "countryLC"),
+        ("pm", "st pierre & miquelon", "countryPM"),
+        ("vc", "st vincent & grenadines", "countryVC"),
+        ("sd", "sudan", "countrySD"),
+        ("sr", "suriname", "countrySR"),
+        ("sj", "svalbard & jan mayen", "countrySJ"),
+        ("sz", "swaziland", "countrySZ"),
+        ("se", "sweden", "countrySE"),
+        ("ch", "switzerland", "countryCH"),
+        ("sy", "syria", "countrySY"),
+        ("tw", "taiwan", "countryTW"),
+        ("tj", "tajikistan", "countryTJ"),
+        ("tz", "tanzania", "countryTZ"),
+        ("th", "thailand", "countryTH"),
+        ("tg", "togo", "countryTG"),
+        ("tk", "tokelau", "countryTK"),
+        ("to", "tonga", "countryTO"),
+        ("tt", "trinidad & tobago", "countryTT"),
+        ("tn", "tunisia", "countryTN"),
+        ("tr", "turkey", "countryTR"),
+        ("tm", "turkmenistan", "countryTM"),
+        ("tc", "turks & caicos islands", "countryTC"),
+        ("tv", "tuvalu", "countryTV"),
+        ("um", "us outlying islands", "countryUM"),
+        ("vi", "us virgin islands", "countryVI"),
+        ("ug", "uganda", "countryUG"),
+        ("ua", "ukraine", "countryUA"),
+        ("ae", "united arab emirates", "countryAE"),
+        ("uk", "united kingdom", "countryUK"),
+        ("gb", "united kingdom", "countryGB"),
+        ("us", "united states", "countryUS"),
+        ("uy", "uruguay", "countryUY"),
+        ("uz", "uzbekistan", "countryUZ"),
+        ("vu", "vanuatu", "countryVU"),
+        ("va", "vatican city", "countryVA"),
+        ("ve", "venezuela", "countryVE"),
+        ("vn", "vietnam", "countryVN"),
+        ("wf", "wallis & futuna", "countryWF"),
+        ("eh", "western sahara", "countryEH"),
+        ("ye", "yemen", "countryYE"),
+        ("yu", "yugoslavia", "countryYU"),
+        ("zm", "zambia", "countryZM"),
+        ("zw", "zimbabwe", "countryZW"),
+    ];
+
+    let input_lower = input.to_lowercase();
+    
+    for (code, name, full_code) in &countries {
+        if input_lower == *code || input_lower == *name || input_lower == full_code.replace("country", "") {
+            return Some(full_code.to_string());
+        }
+    }
+    
+    None
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let matches = Command::new("google-search")
+        .version("0.1.0")
+        .about("A CLI tool for Google search using SerpApi")
+        .arg(
+            Arg::new("query")
+                .value_name("QUERY")
+                .help("Search query")
+                .required(true)
+                .index(1),
+        )
+        .arg(
+            Arg::new("location")
+                .short('l')
+                .long("location")
+                .value_name("LOCATION")
+                .help("Geographic location for the search"),
+        )
+        .arg(
+            Arg::new("encoded-location")
+                .long("encoded-location")
+                .value_name("UULE")
+                .help("Google encoded location (can't be used with --location)"),
+        )
+        .arg(
+            Arg::new("place-id")
+                .long("place-id")
+                .value_name("LUDOCID")
+                .help("Google CID (customer identifier) of a place"),
+        )
+        .arg(
+            Arg::new("location-signature")
+                .long("location-signature")
+                .value_name("LSIG")
+                .help("Force knowledge graph map view"),
+        )
+        .arg(
+            Arg::new("knowledge-graph-id")
+                .long("knowledge-graph-id")
+                .value_name("KGMID")
+                .help("Google Knowledge Graph ID"),
+        )
+        .arg(
+            Arg::new("search-info")
+                .long("search-info")
+                .value_name("SI")
+                .help("Cached search parameters"),
+        )
+        .arg(
+            Arg::new("layout-params")
+                .long("layout-params")
+                .value_name("IBP")
+                .help("Render layouts and expansions"),
+        )
+        .arg(
+            Arg::new("filter-string")
+                .long("filter-string")
+                .value_name("UDS")
+                .help("Filter search string"),
+        )
+        .arg(
+            Arg::new("domain")
+                .long("domain")
+                .value_name("DOMAIN")
+                .help("Google domain to use")
+                .default_value("google.com"),
+        )
+        .arg(
+            Arg::new("country")
+                .long("country")
+                .value_name("COUNTRY")
+                .help("Country code (e.g., us, uk, fr)"),
+        )
+        .arg(
+            Arg::new("language")
+                .long("language")
+                .value_name("LANGUAGE")
+                .help("Language code (e.g., en, es, fr)"),
+        )
+        .arg(
+            Arg::new("country-restrict")
+                .long("country-restrict")
+                .value_name("COUNTRIES")
+                .help("Limit search to specific countries (e.g., us,de or france,germany)"),
+        )
+        .arg(
+            Arg::new("language-restrict")
+                .long("language-restrict")
+                .value_name("LANGUAGES")
+                .help("Limit search to specific languages (e.g., en,fr or english,french)"),
+        )
+        .arg(
+            Arg::new("advanced-search")
+                .long("advanced-search")
+                .value_name("TBS")
+                .help("Advanced search parameters (to be searched)"),
+        )
+        .arg(
+            Arg::new("no-autocorrect")
+                .long("no-autocorrect")
+                .help("Exclude auto-corrected results")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("filter")
+                .long("filter")
+                .help("Enable similar/omitted result filters (default)")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("no-filter")
+                .long("no-filter")
+                .help("Disable similar/omitted result filters")
+                .action(clap::ArgAction::SetTrue)
+                .conflicts_with("filter"),
+        )
+        .arg(
+            Arg::new("search-type")
+                .long("search-type")
+                .value_name("TYPE")
+                .help("Search type: images, local, videos, news, shopping, patents")
+                .value_parser(["images", "local", "videos", "news", "shopping", "patents"]),
+        )
+        .arg(
+            Arg::new("start")
+                .long("start")
+                .value_name("START")
+                .help("Result offset for pagination")
+                .default_value("0"),
+        )
+        .arg(
+            Arg::new("count")
+                .short('c')
+                .long("count")
+                .value_name("COUNT")
+                .help("Number of results to return")
+                .default_value("10"),
+        )
+        .arg(
+            Arg::new("no-cache")
+                .long("no-cache")
+                .help("Force fresh results (don't use cache)")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .get_matches();
+
+    let query = matches.get_one::<String>("query").unwrap();
+    
+    let api_key = env::var("SERPAPI_API_KEY")
+        .map_err(|_| "SERPAPI_API_KEY environment variable is required")?;
+
+    println!("Searching for: {}", query);
+    
+    let mut params = HashMap::<String, String>::new();
+    params.insert("q".to_string(), query.clone());
+    
+    // Add all optional parameters if provided, mapping readable flags to API parameters
+    if let Some(location) = matches.get_one::<String>("location") {
+        params.insert("location".to_string(), location.clone());
+        println!("Location: {}", location);
+    }
+    
+    if let Some(uule) = matches.get_one::<String>("encoded-location") {
+        params.insert("uule".to_string(), uule.clone());
+        println!("Encoded Location: {}", uule);
+    }
+    
+    if let Some(ludocid) = matches.get_one::<String>("place-id") {
+        params.insert("ludocid".to_string(), ludocid.clone());
+        println!("Place ID: {}", ludocid);
+    }
+    
+    if let Some(lsig) = matches.get_one::<String>("location-signature") {
+        params.insert("lsig".to_string(), lsig.clone());
+        println!("Location Signature: {}", lsig);
+    }
+    
+    if let Some(kgmid) = matches.get_one::<String>("knowledge-graph-id") {
+        params.insert("kgmid".to_string(), kgmid.clone());
+        println!("Knowledge Graph ID: {}", kgmid);
+    }
+    
+    if let Some(si) = matches.get_one::<String>("search-info") {
+        params.insert("si".to_string(), si.clone());
+        println!("Search Info: {}", si);
+    }
+    
+    if let Some(ibp) = matches.get_one::<String>("layout-params") {
+        params.insert("ibp".to_string(), ibp.clone());
+        println!("Layout Params: {}", ibp);
+    }
+    
+    if let Some(uds) = matches.get_one::<String>("filter-string") {
+        params.insert("uds".to_string(), uds.clone());
+        println!("Filter String: {}", uds);
+    }
+    
+    if let Some(google_domain) = matches.get_one::<String>("domain") {
+        params.insert("google_domain".to_string(), google_domain.clone());
+        println!("Google Domain: {}", google_domain);
+    }
+    
+    if let Some(gl) = matches.get_one::<String>("country") {
+        params.insert("gl".to_string(), gl.clone());
+        println!("Country: {}", gl);
+    }
+    
+    if let Some(hl) = matches.get_one::<String>("language") {
+        params.insert("hl".to_string(), hl.clone());
+        println!("Language: {}", hl);
+    }
+    
+    if let Some(cr_input) = matches.get_one::<String>("country-restrict") {
+        let countries: Vec<String> = cr_input
+            .split(',')
+            .filter_map(|country| get_country_code(country.trim()))
+            .collect();
+        
+        if !countries.is_empty() {
+            let cr_value = countries.join("|");
+            params.insert("cr".to_string(), cr_value.clone());
+            println!("Country Restrict: {}", cr_value);
+        } else {
+            eprintln!("Warning: No valid countries found in '{}'", cr_input);
+        }
+    }
+    
+    if let Some(lr_input) = matches.get_one::<String>("language-restrict") {
+        let languages: Vec<String> = lr_input
+            .split(',')
+            .filter_map(|lang| get_language_code(lang.trim()))
+            .collect();
+        
+        if !languages.is_empty() {
+            let lr_value = languages.join("|");
+            params.insert("lr".to_string(), lr_value.clone());
+            println!("Language Restrict: {}", lr_value);
+        } else {
+            eprintln!("Warning: No valid languages found in '{}'", lr_input);
+        }
+    }
+    
+    if let Some(tbs) = matches.get_one::<String>("advanced-search") {
+        params.insert("tbs".to_string(), tbs.clone());
+        println!("Advanced Search: {}", tbs);
+    }
+    
+    // Handle no-autocorrect flag
+    if matches.get_flag("no-autocorrect") {
+        params.insert("nfpr".to_string(), "1".to_string());
+        println!("No Auto-correct: enabled");
+    }
+    
+    // Handle filter flags
+    if matches.get_flag("no-filter") {
+        params.insert("filter".to_string(), "0".to_string());
+        println!("Similar Filter: disabled");
+    } else if matches.get_flag("filter") {
+        params.insert("filter".to_string(), "1".to_string());
+        println!("Similar Filter: enabled");
+    } else {
+        // Default to enabled
+        params.insert("filter".to_string(), "1".to_string());
+    }
+    
+    if let Some(search_type) = matches.get_one::<String>("search-type") {
+        let tbm_value = match search_type.as_str() {
+            "images" => "isch",
+            "local" => "lcl",
+            "videos" => "vid",
+            "news" => "nws",
+            "shopping" => "shop",
+            "patents" => "pts",
+            _ => search_type,
+        };
+        params.insert("tbm".to_string(), tbm_value.to_string());
+        println!("Search Type: {} ({})", search_type, tbm_value);
+    }
+    
+    if let Some(start) = matches.get_one::<String>("start") {
+        params.insert("start".to_string(), start.clone());
+        println!("Start: {}", start);
+    }
+    
+    if let Some(count) = matches.get_one::<String>("count") {
+        params.insert("num".to_string(), count.clone());
+        println!("Count: {}", count);
+    }
+    
+    if matches.get_flag("no-cache") {
+        params.insert("no_cache".to_string(), "true".to_string());
+        println!("No Cache: true");
+    }
+    
+    println!("---");
+
+    let search = SerpApiSearch::google(params, api_key);
+
+    match search.json().await {
+        Ok(results) => {
+            if let Some(organic_results) = results.get("organic_results") {
+                if let Some(organic_array) = organic_results.as_array() {
+                    println!("Found {} organic results:\n", organic_array.len());
+                    
+                    for (i, result) in organic_array.iter().enumerate() {
+                        if let (Some(title), Some(link), Some(snippet)) = (
+                            result.get("title").and_then(|t| t.as_str()),
+                            result.get("link").and_then(|l| l.as_str()),
+                            result.get("snippet").and_then(|s| s.as_str()),
+                        ) {
+                            println!("{}. {}", i + 1, title);
+                            println!("   Link: {}", link);
+                            println!("   Snippet: {}", snippet);
+                            println!();
+                        }
+                    }
+                } else {
+                    println!("No organic results found in the response.");
+                }
+            } else {
+                println!("No organic results found in the response.");
+            }
+
+            if let Some(local_results) = results.get("local_results") {
+                if let Some(places) = local_results.get("places") {
+                    if let Some(places_array) = places.as_array() {
+                        if !places_array.is_empty() {
+                            println!("Local results ({} places):", places_array.len());
+                            for (i, place) in places_array.iter().enumerate() {
+                                if let (Some(title), Some(address)) = (
+                                    place.get("title").and_then(|t| t.as_str()),
+                                    place.get("address").and_then(|a| a.as_str()),
+                                ) {
+                                    println!("{}. {}", i + 1, title);
+                                    println!("   Address: {}", address);
+                                    if let Some(rating) = place.get("rating").and_then(|r| r.as_f64()) {
+                                        println!("   Rating: {:.1}", rating);
+                                    }
+                                    println!();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if let Some(knowledge_graph) = results.get("knowledge_graph") {
+                if let Some(title) = knowledge_graph.get("title").and_then(|t| t.as_str()) {
+                    println!("Knowledge Graph:");
+                    println!("Title: {}", title);
+                    if let Some(description) = knowledge_graph.get("description").and_then(|d| d.as_str()) {
+                        println!("Description: {}", description);
+                    }
+                    println!();
+                }
+            }
+            
+            if let Some(related_questions) = results.get("related_questions") {
+                if let Some(questions_array) = related_questions.as_array() {
+                    if !questions_array.is_empty() {
+                        println!("Related Questions:");
+                        for question in questions_array {
+                            if let Some(q) = question.get("question").and_then(|q| q.as_str()) {
+                                println!("• {}", q);
+                            }
+                        }
+                        println!();
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Error performing search: {}", e);
+            std::process::exit(1);
+        }
+    }
+
+    Ok(())
+}
