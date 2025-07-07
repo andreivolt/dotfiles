@@ -301,15 +301,30 @@ impl TreeRenderer {
     fn render_header(&self, data: &Value, header_key: &str) {
         if let Some(story) = data.get(header_key) {
             let title = story.get("title").and_then(|v| v.as_str()).unwrap_or("No title");
-            println!("{}", title); // In a full implementation, you'd add bold formatting
+            if self.no_color {
+                println!("{}", title);
+            } else {
+                println!("{}", crossterm::style::style(title).bold());
+            }
 
             if let Some(url) = story.get("url").and_then(|v| v.as_str()) {
-                println!("{}", url); // In a full implementation, you'd add dim formatting
+                if self.no_color {
+                    println!("{}", url);
+                } else {
+                    println!("{}", crossterm::style::style(url).dim());
+                }
             }
 
             let points = story.get("points").and_then(|v| v.as_u64()).unwrap_or(0);
             let user = story.get("user").and_then(|v| v.as_str()).unwrap_or("unknown");
-            println!("{} points by {}", points, user); // In a full implementation, you'd add color formatting
+            if self.no_color {
+                println!("{} points by {}", points, user);
+            } else {
+                println!("{} points by {}", 
+                    crossterm::style::style(points).with(crossterm::style::Color::Green),
+                    crossterm::style::style(user).with(crossterm::style::Color::Blue)
+                );
+            }
             println!();
         }
     }
