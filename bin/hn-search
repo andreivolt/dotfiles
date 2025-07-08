@@ -11,6 +11,7 @@
 //! console = "0.15"
 //! anyhow = "1.0"
 //! ammonia = "3.3"
+//! regex = "1.10"
 //! ```
 
 use clap::{Parser, ValueEnum};
@@ -217,18 +218,79 @@ fn build_query_params(args: &Args, page: u32, hits_per_page: u32) -> HashMap<Str
 }
 
 fn strip_html_tags(text: &str) -> String {
-    // Use ammonia to safely strip HTML tags while preserving text structure
+    let mut result = text.to_string();
+    
+    // First, protect code blocks by marking them specially
+    // Use (?s) flag to make . match newlines
+    let re_pre = regex::Regex::new(r"(?s)<pre><code>(.*?)</code></pre>").unwrap();
+    let mut code_blocks = Vec::new();
+    let mut code_idx = 0;
+    
+    // Extract code blocks and replace with placeholders
+    for cap in re_pre.captures_iter(&result.clone()) {
+        if let Some(code) = cap.get(1) {
+            let placeholder = format!("__CODE_BLOCK_{}__", code_idx);
+            code_blocks.push(code.as_str().to_string());
+            result = result.replace(&cap[0], &format!("\n\n{}\n\n", placeholder));
+            code_idx += 1;
+        }
+    }
+    
+    // Handle inline code
+    let re_code = regex::Regex::new(r"<code>(.*?)</code>").unwrap();
+    result = re_code.replace_all(&result, "`$1`").to_string();
+    
+    // Replace paragraph and break tags with newlines
+    result = result.replace("<p>", "\n\n");
+    result = result.replace("</p>", "");
+    result = result.replace("<br>", "\n");
+    result = result.replace("<br/>", "\n");
+    result = result.replace("<br />", "\n");
+    
+    // Use ammonia to safely strip remaining HTML tags
     let mut builder = ammonia::Builder::new();
-    builder.tags(std::collections::HashSet::new()); // Remove all tags
-    builder.clean_content_tags(std::collections::HashSet::new()); // Don't preserve content of any tags
+    builder.tags(std::collections::HashSet::new());
+    builder.clean_content_tags(std::collections::HashSet::new());
     
-    let cleaned = builder.clean(text).to_string();
+    result = builder.clean(&result).to_string();
     
-    // Clean up excessive whitespace
-    let cleaned = cleaned.replace("\n\n\n", "\n\n");
-    let cleaned = cleaned.trim();
+    // Restore code blocks with proper indentation
+    for (idx, code) in code_blocks.iter().enumerate() {
+        let placeholder = format!("__CODE_BLOCK_{}__", idx);
+        // Decode HTML entities in code blocks
+        let decoded = html_escape::decode_html_entities(code);
+        // Indent code blocks for readability
+        let indented = decoded.lines()
+            .map(|line| format!("    {}", line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        result = result.replace(&placeholder, &indented);
+    }
     
-    cleaned.to_string()
+    // Clean up excessive whitespace while preserving structure
+    let lines: Vec<&str> = result.trim().split('\n').collect();
+    let mut cleaned_lines = Vec::new();
+    let mut prev_empty = false;
+    
+    for line in lines {
+        let trimmed = line.trim_end(); // Only trim end to preserve code indentation
+        if trimmed.is_empty() {
+            if !prev_empty {
+                cleaned_lines.push("");
+                prev_empty = true;
+            }
+        } else {
+            // Preserve leading spaces for code blocks
+            if line.starts_with("    ") {
+                cleaned_lines.push(line);
+            } else {
+                cleaned_lines.push(trimmed.trim());
+            }
+            prev_empty = false;
+        }
+    }
+    
+    cleaned_lines.join("\n")
 }
 
 fn format_hit(hit: &Hit, pretty: bool, use_color: bool) -> String {
@@ -382,8 +444,6 @@ async fn main() -> Result<()> {
 
     let hits = &results.hits;
     let nb_hits = results.nb_hits;
-    let page = results.page;
-    let nb_pages = results.nb_pages;
     let use_color = Term::stdout().features().colors_supported();
 
     if args.pretty {
