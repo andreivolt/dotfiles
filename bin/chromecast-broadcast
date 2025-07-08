@@ -33,8 +33,8 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use anyhow::{Result, Context};
 use local_ip_address;
 use futures_util::{SinkExt, StreamExt};
-use rust_cast::channels::media::{Media, StreamType};
 use rust_cast::CastDevice;
+use rust_cast::channels::media::{Media, StreamType};
 
 #[derive(Parser)]
 #[command(name = "chromecast-broadcast")]
@@ -416,8 +416,7 @@ impl ChromecastBroadcaster {
             }
         }
 
-        let mut cast_device = self.connect_to_device(&connection_device)?;
-
+        let _cast_device = self.connect_to_device(&connection_device)?;
         println!("Connected to Chromecast: {}", device.name);
 
         // For now, just establish connection and print success
@@ -494,8 +493,11 @@ impl ChromecastBroadcaster {
 
         println!("Broadcasting {} to {}", file_path, device.name);
 
-        // Keep server running for the duration of the audio
-        tokio::time::timeout(Duration::from_secs(300), server_handle).await??;
+        // Keep server running longer for the media to play
+        println!("Serving audio file for 120 seconds...");
+        tokio::time::timeout(Duration::from_secs(120), server_handle).await.ok();
+        
+        println!("Finished broadcasting");
 
         // Clean up
         let _ = tokio::fs::remove_file(&temp_file).await;

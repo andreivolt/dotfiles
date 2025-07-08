@@ -9,18 +9,13 @@ echo "Decrypting all encrypted dotfiles..."
 
 git ls-files -z | grep -z "\.enc\.yaml$" | while IFS= read -r -d '' encrypted_file; do
     file="${encrypted_file%.enc.yaml}"
-    
-    if [ -f "$file" ]; then
-        echo "Skipping $file (already exists)"
-        continue
-    fi
-    
+
     echo "Decrypting $file..."
-    
+
     sops --output-type binary -d "$encrypted_file" > "$file"
-    
+
     chmod 644 "$file"
-    
+
     echo "✓ Decrypted to $file"
 done
 
