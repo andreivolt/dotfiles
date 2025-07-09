@@ -1,5 +1,5 @@
 export BROWSER=google-chrome-stable
-export CURL_CA_BUNDLE=~/.local/ca-certificates/combined-ca-bundle.pem
+[[ -f ~/.local/ca-certificates/combined-ca-bundle.pem ]] && export CURL_CA_BUNDLE=~/.local/ca-certificates/combined-ca-bundle.pem
 export DELTA_PAGER='less -R'
 export DENO_NO_UPDATE_CHECK=1
 export EDITOR=nvim
