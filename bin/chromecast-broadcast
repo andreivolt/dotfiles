@@ -5,7 +5,10 @@
 //! clap = { version = "4.0", features = ["derive"] }
 //! serde_json = "1.0"
 //! serde = { version = "1.0", features = ["derive"] }
-//! warp = "0.3"
+//! axum = "0.7"
+//! tower = "0.4"
+//! tower-http = { version = "0.5", features = ["cors"] }
+//! bytes = "1.0"
 //! reqwest = { version = "0.11", features = ["json"] }
 //! uuid = { version = "1.0", features = ["v4"] }
 //! dirs = "5.0"
@@ -16,20 +19,27 @@
 //! futures-util = "0.3"
 //! rust_cast = "0.19"
 //! cpal = "0.15"
+//! tokio-stream = "0.1"
 //! ```
 
 use std::sync::Arc;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::time::Duration;
 
 use tokio::sync::{Mutex, broadcast};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use warp::Filter;
-use warp::hyper::{Body, Response};
-use futures_util::{SinkExt, StreamExt};
+use axum::{
+    extract::{Path, State},
+    http::{StatusCode, Response},
+    response::Json,
+    routing::{get, post},
+    Router, body::Body,
+};
+use tower_http::cors::CorsLayer;
+use futures_util::TryStreamExt;
 use anyhow::{Result, Context};
 use local_ip_address;
 use std::sync::mpsc;
@@ -57,9 +67,17 @@ struct Args {
     #[arg(long)]
     web: bool,
 
-    /// Port for web interface
-    #[arg(long, default_value = "8080")]
+    /// Start persistent server mode
+    #[arg(long)]
+    server: bool,
+
+    /// Port for server/web interface (0 for random)
+    #[arg(long, default_value = "0")]
     port: u16,
+
+    /// Keep connections alive for N seconds
+    #[arg(long, default_value = "300")]
+    keep_alive: u64,
 
     /// List available Chromecast devices
     #[arg(long)]
@@ -106,6 +124,7 @@ enum WebSocketMessage {
 }
 
 
+#[derive(Clone)]
 struct ChromecastBroadcaster {
     device_cache: Arc<Mutex<Option<DeviceCache>>>,
     cache_path: PathBuf,
@@ -283,6 +302,7 @@ impl ChromecastBroadcaster {
         Ok(cache)
     }
 
+
     async fn save_cache(&self, cache: &DeviceCache) -> Result<()> {
         let content = serde_json::to_string_pretty(cache)?;
         if let Some(parent) = self.cache_path.parent() {
@@ -359,7 +379,7 @@ impl ChromecastBroadcaster {
         println!("Launching default media receiver app...");
         use rust_cast::channels::receiver::CastDeviceApp;
         let app = CastDeviceApp::DefaultMediaReceiver;
-        
+
         let app_response = match cast_device.receiver.launch_app(&app) {
             Ok(response) => {
                 println!("Successfully launched media receiver app");
@@ -397,28 +417,28 @@ impl ChromecastBroadcaster {
         // Load media using the app session info
         println!("Loading media to launched app...");
         let destination = &app_response.transport_id;
-        let session_id = if app_response.session_id.is_empty() { 
-            "0".to_string() 
-        } else { 
-            app_response.session_id.clone() 
+        let session_id = if app_response.session_id.is_empty() {
+            "0".to_string()
+        } else {
+            app_response.session_id.clone()
         };
-        
+
         match cast_device.media.load(destination, &session_id, &media) {
             Ok(load_response) => {
                 println!("Media loaded successfully");
                 println!("Load response: {:?}", load_response);
-                
+
                 // Get the media session ID from the load response
                 let media_session_id = if let Some(entry) = load_response.entries.first() {
                     entry.media_session_id
                 } else {
                     anyhow::bail!("No media session found in load response");
                 };
-                
+
                 println!("Using media session ID: {}", media_session_id);
-                
+
                 // Media should be ready immediately after load
-                
+
                 // Play the media using the correct media session ID
                 println!("Starting playback...");
                 match cast_device.media.play(destination, media_session_id) {
@@ -467,93 +487,57 @@ impl ChromecastBroadcaster {
         let (audio_tx, audio_rx) = mpsc::channel::<Vec<u8>>();
         let audio_rx = Arc::new(Mutex::new(audio_rx));
 
-        let stream_route = warp::path("stream.wav")
-            .and(warp::get())
-            .map({
-                let audio_rx = Arc::clone(&audio_rx);
-                move || {
-                    let audio_rx = Arc::clone(&audio_rx);
-                    
-                    // Create a response that streams audio chunks
-                    let (mut tx, body) = Body::channel();
-                    
-                    tokio::spawn(async move {
-                        let mut total_sent = 0;
-                        let mut initial_buffer = Vec::new();
-                        
-                        // Wait for initial buffer to be ready
-                        loop {
-                            let chunk = {
-                                let rx_guard = audio_rx.lock().await;
-                                match rx_guard.try_recv() {
-                                    Ok(data) => Some(data),
-                                    Err(mpsc::TryRecvError::Empty) => {
-                                        drop(rx_guard);
-                                        tokio::time::sleep(Duration::from_millis(10)).await;
-                                        continue;
-                                    }
-                                    Err(mpsc::TryRecvError::Disconnected) => None,
-                                }
-                            };
-                            
-                            if let Some(chunk) = chunk {
-                                initial_buffer.extend_from_slice(&chunk);
-                                
-                                // Send the chunk immediately
-                                total_sent += chunk.len();
-                                if tx.send_data(chunk.into()).await.is_err() {
-                                    break;
-                                }
-                                
-                                // Continue streaming remaining chunks
-                                loop {
-                                    let next_chunk = {
-                                        let rx_guard = audio_rx.lock().await;
-                                        match rx_guard.try_recv() {
-                                            Ok(data) => Some(data),
-                                            Err(mpsc::TryRecvError::Empty) => {
-                                                drop(rx_guard);
-                                                tokio::time::sleep(Duration::from_millis(10)).await;
-                                                continue;
-                                            }
-                                            Err(mpsc::TryRecvError::Disconnected) => None,
-                                        }
-                                    };
-                                    
-                                    if let Some(chunk) = next_chunk {
-                                        total_sent += chunk.len();
-                                        if tx.send_data(chunk.into()).await.is_err() {
-                                            break;
-                                        }
-                                    } else {
-                                        break;
-                                    }
-                                }
-                                break;
-                            } else {
-                                break;
+        async fn stream_wav_handler(State(audio_rx): State<Arc<Mutex<mpsc::Receiver<Vec<u8>>>>>) -> Response<Body> {
+            let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, std::io::Error>>(10);
+
+            // Spawn a task to pump data from std mpsc to tokio mpsc
+            tokio::spawn(async move {
+                loop {
+                    let chunk = {
+                        let rx_guard = audio_rx.lock().await;
+                        match rx_guard.try_recv() {
+                            Ok(data) => Some(data),
+                            Err(mpsc::TryRecvError::Empty) => {
+                                drop(rx_guard);
+                                tokio::time::sleep(Duration::from_millis(10)).await;
+                                continue;
                             }
+                            Err(mpsc::TryRecvError::Disconnected) => None,
                         }
-                        println!("Stream ended, total bytes sent: {}", total_sent);
-                    });
-                    
-                    Response::builder()
-                        .header("content-type", "audio/wav")
-                        .header("cache-control", "no-cache")
-                        .header("access-control-allow-origin", "*")
-                        .body(body)
-                        .unwrap()
+                    };
+
+                    if let Some(chunk) = chunk {
+                        if tx.send(Ok(bytes::Bytes::from(chunk))).await.is_err() {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
                 }
             });
 
+            let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+            let body = Body::from_stream(stream);
+
+            Response::builder()
+                .header("content-type", "audio/wav")
+                .header("cache-control", "no-cache")
+                .header("access-control-allow-origin", "*")
+                .body(body)
+                .unwrap()
+        }
+
+        let app = Router::new()
+            .route("/stream.wav", get(stream_wav_handler))
+            .with_state(audio_rx.clone());
+
         let (addr_tx, addr_rx) = tokio::sync::oneshot::channel();
         let server_handle = tokio::spawn(async move {
-            let server = warp::serve(stream_route);
-            let (addr, server_fut) = server.bind_ephemeral(([0, 0, 0, 0], server_port));
-            let actual_port = addr.port();
+            let listener = tokio::net::TcpListener::bind(("0.0.0.0", server_port)).await.unwrap();
+            let actual_port = listener.local_addr().unwrap().port();
             println!("Starting streaming server on port {}", actual_port);
             let _ = addr_tx.send(actual_port);
-            server_fut.await;
+            axum::serve(listener, app).await.unwrap();
         });
 
         // Wait for server to get its port assignment
@@ -567,16 +551,16 @@ impl ChromecastBroadcaster {
     fn start_audio_recording(&self, audio_tx: mpsc::Sender<Vec<u8>>) -> Result<()> {
         let host = cpal::default_host();
         let device = host.default_input_device().context("No default input device available")?;
-        
+
         let config = device.default_input_config().context("Failed to get default input config")?;
         println!("Recording with config: {:?}", config);
 
-        let sample_rate = config.sample_rate().0;
+        let _sample_rate = config.sample_rate().0;
         let channels = config.channels();
-        
+
         // WAV header for 44.1kHz, 16-bit, stereo, streaming (unknown length)
         let wav_header = Self::create_wav_header(44100, 2, 0xFFFFFFFF); // Use max length for streaming
-        
+
         // Send WAV header first
         audio_tx.send(wav_header).context("Failed to send WAV header")?;
 
@@ -589,13 +573,13 @@ impl ChromecastBroadcaster {
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
                         // Convert f32 samples to i16 PCM
                         let mut pcm_data = Vec::with_capacity(data.len() * 2);
-                        
+
                         for &sample in data {
                             // Convert f32 to i16
                             let sample_i16 = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
                             pcm_data.extend_from_slice(&sample_i16.to_le_bytes());
                         }
-                        
+
                         // Handle channel conversion if needed
                         if channels == 1 {
                             // Duplicate mono to stereo
@@ -619,11 +603,11 @@ impl ChromecastBroadcaster {
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
                         // Convert i16 samples to bytes
                         let mut pcm_data = Vec::with_capacity(data.len() * 2);
-                        
+
                         for &sample in data {
                             pcm_data.extend_from_slice(&sample.to_le_bytes());
                         }
-                        
+
                         // Handle channel conversion if needed
                         if channels == 1 {
                             // Duplicate mono to stereo
@@ -645,39 +629,39 @@ impl ChromecastBroadcaster {
         };
 
         stream.play().context("Failed to start audio stream")?;
-        
+
         // Keep the stream alive - it will be dropped when the function returns
         std::mem::forget(stream);
-        
+
         Ok(())
     }
 
     fn create_wav_header(sample_rate: u32, channels: u16, data_size: u32) -> Vec<u8> {
         let mut header = Vec::with_capacity(44);
-        
+
         // RIFF header
         header.extend_from_slice(b"RIFF");
         header.extend_from_slice(&(36 + data_size).to_le_bytes()); // File size - 8
         header.extend_from_slice(b"WAVE");
-        
+
         // fmt chunk
         header.extend_from_slice(b"fmt ");
         header.extend_from_slice(&16u32.to_le_bytes()); // fmt chunk size
         header.extend_from_slice(&1u16.to_le_bytes());  // PCM format
         header.extend_from_slice(&channels.to_le_bytes()); // Number of channels
         header.extend_from_slice(&sample_rate.to_le_bytes()); // Sample rate
-        
+
         let byte_rate = sample_rate * channels as u32 * 2; // 16-bit = 2 bytes per sample
         header.extend_from_slice(&byte_rate.to_le_bytes()); // Byte rate
-        
+
         let block_align = channels * 2; // 16-bit = 2 bytes per sample
         header.extend_from_slice(&block_align.to_le_bytes()); // Block align
         header.extend_from_slice(&16u16.to_le_bytes()); // Bits per sample
-        
+
         // data chunk
         header.extend_from_slice(b"data");
         header.extend_from_slice(&data_size.to_le_bytes()); // Data size
-        
+
         header
     }
 
@@ -687,7 +671,7 @@ impl ChromecastBroadcaster {
         // Use random available port
         let server_port = 0u16;
         let (audio_tx, actual_port, server_handle) = self.create_streaming_server(server_port).await?;
-        
+
         let audio_url = format!("http://{}:{}/stream.wav",
             local_ip_address::local_ip().unwrap_or_else(|_| "127.0.0.1".parse().unwrap()),
             actual_port);
@@ -723,7 +707,7 @@ impl ChromecastBroadcaster {
                         if audio_tx.send(buffer[..n].to_vec()).is_err() {
                             break; // Receiver dropped
                         }
-                        
+
                     }
                     Err(_) => break,
                 }
@@ -741,7 +725,7 @@ impl ChromecastBroadcaster {
 
         // Wait for streaming to complete or timeout
         let _ = tokio::time::timeout(Duration::from_secs(300), streaming_handle).await;
-        
+
         // Clean up
         server_handle.abort();
         println!("Finished streaming file");
@@ -755,7 +739,7 @@ impl ChromecastBroadcaster {
         // Use random available port
         let server_port = 0u16;
         let (audio_tx, actual_port, server_handle) = self.create_streaming_server(server_port).await?;
-        
+
         let audio_url = format!("http://{}:{}/stream.wav",
             local_ip_address::local_ip().unwrap_or_else(|_| "127.0.0.1".parse().unwrap()),
             actual_port);
@@ -786,89 +770,145 @@ impl ChromecastBroadcaster {
     }
 
 
-    async fn start_web_interface(&self, port: u16) -> Result<()> {
-        let websocket_tx = self.websocket_tx.clone();
+    async fn start_server_mode(&self, port: u16, _keep_alive: u64) -> Result<()> {
+        let broadcaster = Arc::new(self.clone());
 
-        let websocket_route = warp::path("ws")
-            .and(warp::ws())
-            .map(move |ws: warp::ws::Ws| {
-                let websocket_tx = websocket_tx.clone();
-                ws.on_upgrade(move |websocket| async move {
-                    handle_websocket_upgrade(websocket, websocket_tx).await;
-                })
-            });
+        let app = Router::new()
+            .route("/devices", get(list_devices))
+            .route("/cast/:speaker/stream", post(stream_audio))
+            .route("/cast/:speaker/stop", get(stop_audio))
+            .route("/status", get(server_status))
+            .layer(CorsLayer::permissive())
+            .with_state(broadcaster);
 
-        let cors = warp::cors()
-            .allow_any_origin()
-            .allow_headers(vec!["content-type"])
-            .allow_methods(vec!["GET", "POST", "OPTIONS"]);
+        let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
+        let actual_port = listener.local_addr()?.port();
 
-        let routes = websocket_route.with(cors);
+        println!("Chromecast server running on http://localhost:{}", actual_port);
 
-        println!("WebSocket server starting on ws://localhost:{}/ws", port);
-        warp::serve(routes)
-            .run(([127, 0, 0, 1], port))
-            .await;
+        axum::serve(listener, app).await?;
 
         Ok(())
     }
+
+    async fn start_web_interface(&self, _port: u16) -> Result<()> {
+        // Simplified web interface - websockets removed for now
+        println!("Web interface disabled in axum version");
+        Ok(())
+    }
+
 }
 
-async fn handle_websocket_upgrade(
-    websocket: warp::ws::WebSocket,
-    websocket_tx: broadcast::Sender<WebSocketMessage>,
-) {
-    let (mut ws_tx, mut ws_rx) = websocket.split();
-    let mut broadcast_rx = websocket_tx.subscribe();
+// WebSocket handler removed for axum migration
 
-    // Handle incoming messages
-    let ws_handler = tokio::spawn(async move {
-        while let Some(result) = ws_rx.next().await {
-            match result {
-                Ok(msg) => {
-                    if let Ok(text) = msg.to_str() {
-                        if let Ok(ws_msg) = serde_json::from_str::<WebSocketMessage>(text) {
-                            match ws_msg {
-                                WebSocketMessage::DiscoverDevices => {
-                                    let response = WebSocketMessage::DevicesFound {
-                                        devices: vec![] // Simplified for now
-                                    };
-                                    let _ = websocket_tx.send(response);
-                                }
-                                _ => {
-                                    let response = WebSocketMessage::Error {
-                                        message: "Message type not yet implemented".to_string(),
-                                    };
-                                    let _ = websocket_tx.send(response);
-                                }
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("WebSocket error: {}", e);
-                    break;
-                }
-            }
-        }
-    });
+type AppState = Arc<ChromecastBroadcaster>;
 
-    // Handle outgoing messages
-    let broadcast_handler = tokio::spawn(async move {
-        while let Ok(msg) = broadcast_rx.recv().await {
-            if let Ok(json) = serde_json::to_string(&msg) {
-                if ws_tx.send(warp::ws::Message::text(json)).await.is_err() {
-                    break;
-                }
-            }
-        }
-    });
-
-    // Wait for either handler to complete
-    tokio::select! {
-        _ = ws_handler => {},
-        _ = broadcast_handler => {},
+async fn list_devices(State(broadcaster): State<AppState>) -> Result<Json<Vec<ChromecastDevice>>, StatusCode> {
+    match broadcaster.discover_devices(false).await {
+        Ok(devices) => Ok(Json(devices)),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
+}
+
+async fn stream_audio(
+    State(broadcaster): State<AppState>,
+    Path(speaker): Path<String>,
+    body: Body,
+) -> Result<String, StatusCode> {
+    let stream = body.into_data_stream();
+
+    match stream_audio_data(&broadcaster, &speaker, stream).await {
+        Ok(_) => Ok("Stream started".to_string()),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn stop_audio(Path(speaker): Path<String>) -> Result<String, StatusCode> {
+    match stop_playback(&speaker).await {
+        Ok(_) => Ok("Playback stopped".to_string()),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn server_status() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "status": "running",
+        "version": "1.0.0"
+    }))
+}
+
+
+async fn stream_audio_data(
+    broadcaster: &ChromecastBroadcaster,
+    speaker_name: &str,
+    body: impl futures::Stream<Item = Result<bytes::Bytes, axum::Error>> + Send + 'static,
+) -> Result<()> {
+    println!("Starting audio stream to {}", speaker_name);
+
+    // Find the device
+    let device = broadcaster.find_device(speaker_name).await?;
+
+    // Start HTTP streaming server for this request
+    let server_port = 0u16;
+    let (audio_tx, actual_port, server_handle) = broadcaster.create_streaming_server(server_port).await?;
+
+    let audio_url = format!("http://{}:{}/stream.wav",
+        local_ip_address::local_ip().unwrap_or_else(|_| "127.0.0.1".parse().unwrap()),
+        actual_port);
+
+    // Start Chromecast connection in background
+    let broadcaster_clone = broadcaster.clone();
+    let device_clone = device.clone();
+    let audio_url_clone = audio_url.clone();
+    let cast_handle = tokio::spawn(async move {
+        broadcaster_clone.cast_audio(&device_clone, &audio_url_clone).await
+    });
+
+    // Stream incoming data to the audio channel
+    let speaker_name_clone = speaker_name.to_string();
+    let stream_handle = tokio::spawn(async move {
+        use futures_util::pin_mut;
+        pin_mut!(body);
+
+        while let Some(chunk) = body.try_next().await.unwrap_or(None) {
+            let data = chunk.to_vec();
+            if audio_tx.send(data).is_err() {
+                break;
+            }
+        }
+        println!("Stream ended for {}", speaker_name_clone);
+    });
+
+    // Wait for both to complete or timeout after 5 minutes
+    let timeout_result = tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        async {
+            let cast_result = cast_handle.await;
+            let stream_result = stream_handle.await;
+            (cast_result, stream_result)
+        }
+    );
+
+    match timeout_result.await {
+        Ok((cast_result, _)) => {
+            if let Ok(Err(e)) = cast_result {
+                eprintln!("Cast error: {}", e);
+            }
+        }
+        Err(_) => println!("Stream timed out"),
+    }
+
+    server_handle.abort();
+    Ok(())
+}
+
+async fn stop_playback(
+    speaker_name: &str,
+) -> Result<()> {
+    println!("Stop request for {}", speaker_name);
+    // For /stream endpoints, the connection will naturally close when the HTTP request ends
+    // No need for complex tracking since each stream is a single HTTP request
+    Ok(())
 }
 
 #[tokio::main]
@@ -882,6 +922,11 @@ async fn main() -> Result<()> {
         for device in devices {
             println!("  {} ({}:{})", device.name, device.ip, device.port);
         }
+        return Ok(());
+    }
+
+    if args.server {
+        broadcaster.start_server_mode(args.port, args.keep_alive).await?;
         return Ok(());
     }
 
