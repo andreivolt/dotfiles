@@ -79,12 +79,59 @@ def extract_video_info(entry: Dict, ydl_opts: Dict) -> Optional[Dict]:
         'uploader': entry.get('uploader', 'Unknown')
     }
 
+def is_channel_query(query: str) -> bool:
+    """Check if query is a channel URL or @username."""
+    if query.startswith('@'):
+        return True
+    if 'youtube.com/channel/' in query:
+        return True
+    if 'youtube.com/c/' in query:
+        return True
+    if 'youtube.com/@' in query:
+        return True
+    if 'youtube.com/user/' in query:
+        return True
+    return False
+
+def extract_channel_identifier(url: str) -> str:
+    """Extract channel identifier from various YouTube URL formats."""
+    import re
+    
+    # If it's just @username, return as is
+    if url.startswith('@') and 'youtube.com' not in url:
+        return url
+    
+    # Pattern to match various YouTube channel URL formats
+    patterns = [
+        r'youtube\.com/@([^/]+)',           # @username format
+        r'youtube\.com/channel/([^/]+)',    # channel ID format
+        r'youtube\.com/c/([^/]+)',          # custom URL format
+        r'youtube\.com/user/([^/]+)',       # legacy user format
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            identifier = match.group(1)
+            # For @username format, include the @
+            if '/@' in url:
+                return f"@{identifier}"
+            # For channel ID format, return full channel URL
+            elif '/channel/' in url:
+                return f"https://www.youtube.com/channel/{identifier}"
+            # For other formats, construct @username URL if possible
+            else:
+                return f"https://www.youtube.com/c/{identifier}"
+    
+    # If no pattern matches, return original URL
+    return url
+
 def search_youtube(query: str, max_results: int = 200, max_threads: int = 0) -> List[Dict]:
     """Search YouTube and return video information using yt-dlp library with parallel processing."""
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
-        'extract_flat': True,
+        'extract_flat': 'in_playlist',
         'force_generic_extractor': False,
         'default_search': 'ytsearch',
         'playlistend': max_results,
@@ -93,12 +140,37 @@ def search_youtube(query: str, max_results: int = 200, max_threads: int = 0) -> 
     videos = []
     entries_to_process = []
 
+    # Check if this is a channel query
+    is_channel = is_channel_query(query)
+    
     # First, get all entries from the search
-    print(f"Searching for videos...", end='', flush=True)
+    if is_channel:
+        print(f"Fetching videos from channel...", end='', flush=True)
+    else:
+        print(f"Searching for videos...", end='', flush=True)
+    
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
-            search_query = f"ytsearch{max_results}:{query}"
-            info = ydl.extract_info(search_query, download=False)
+            if is_channel:
+                # For channel queries, extract the channel videos directly
+                # Extract channel identifier and construct proper URL
+                channel_id = extract_channel_identifier(query)
+                
+                # Convert to proper channel videos URL
+                if channel_id.startswith('@'):
+                    channel_url = f"https://www.youtube.com/{channel_id}/videos"
+                elif channel_id.startswith('https://www.youtube.com/channel/'):
+                    channel_url = f"{channel_id}/videos"
+                elif channel_id.startswith('https://www.youtube.com/c/'):
+                    channel_url = f"{channel_id}/videos"
+                else:
+                    channel_url = f"https://www.youtube.com/{channel_id}/videos"
+                    
+                info = ydl.extract_info(channel_url, download=False)
+            else:
+                # For search queries, use ytsearch
+                search_query = f"ytsearch{max_results}:{query}"
+                info = ydl.extract_info(search_query, download=False)
 
             if 'entries' in info:
                 entries_to_process = list(info['entries'])
@@ -190,6 +262,13 @@ def sanitize_for_playlist(text: str) -> str:
     Note: We're using a simple implementation here. For more complex M3U needs,
     consider using the 'm3u8' library, though it's mainly for HLS playlists.
     """
+    # Handle None values
+    if text is None:
+        return ""
+    
+    # Convert to string if not already
+    text = str(text)
+    
     # Remove newlines, carriage returns, and other problematic characters
     text = text.replace('\n', ' ').replace('\r', ' ')
     text = text.replace('\t', ' ')  # Replace tabs
@@ -356,7 +435,7 @@ def play_with_mpv(videos: List[Dict], query: str, shuffle: bool = True, with_vid
 parser = argparse.ArgumentParser(description='Search YouTube and play videos in random order with mpv'
 , formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-parser.add_argument('query', help='YouTube search query')
+parser.add_argument('query', help='YouTube search query, channel URL, or @username')
 parser.add_argument('-d', '--duration', help='Duration filter in minutes (e.g., "5-10", "<10", ">5")')
 parser.add_argument('-n', '--number', type=int, default=100, help='Max results')
 parser.add_argument('-s', '--no-shuffle', action='store_true', help='Do not shuffle playlist')
@@ -379,7 +458,10 @@ if args.duration:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-print(f"Searching YouTube for: {args.query}")
+if is_channel_query(args.query):
+    print(f"Fetching videos from channel: {args.query}")
+else:
+    print(f"Searching YouTube for: {args.query}")
 if args.duration:
     print(f"Duration filter: {args.duration} minutes")
 
