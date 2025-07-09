@@ -28,31 +28,27 @@ alias -g N="&> /dev/null"
 alias -g NE="2> /dev/null"
 alias -g X='| xargs'
 
-alias eza="eza --icons never"
-alias ls="eza"
-alias l="ls -1"
-alias la="ls -a"
-alias ll="ls -l --classify=auto --git"
-alias lla="ll -a"
-
+alias -- +x='chmod +x'
+alias cat="bat"
 alias cdt='cd $(mktemp -d)'
 alias claude="claude --dangerously-skip-permissions"
 alias diff="diff --color"
 alias edir="edir -r"
-alias fd="fd --follow"
-alias find="find -L"
+alias eza="eza --icons never"
 alias gc='git clone --depth 1'
 alias gron="fastgron"
 alias http="xh"
+alias l="ls -1"
+alias la="ls -a"
+alias ll="ls -l --classify=auto --git"
+alias lla="ll -a"
+alias ls="eza"
 alias path='printf "%s\n" $path'
 alias rg='rg --smart-case --colors match:bg:yellow --colors match:fg:black'
 alias rm="rm --verbose"
-alias cat="bat"
 alias scrcpy="scrcpy --render-driver opengl"
 alias vi="nvim"
 alias yt-dlp="yt-dlp --cookies-from-browser chrome"
-
-alias -- +x='chmod +x'
 
 source ~/.zsh.d/vi.zsh
 
