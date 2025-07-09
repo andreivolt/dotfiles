@@ -2,7 +2,6 @@
 
 set -euo pipefail
 
-export SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt
 export GIT_WORK_TREE=~ GIT_DIR=~/.local/share/dotfiles.git
 
 echo "Decrypting all encrypted dotfiles..."
