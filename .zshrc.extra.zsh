@@ -160,12 +160,11 @@ source ~/.local/share/zsh/plugins/powerlevel10k/powerlevel10k.zsh-theme
 # source ~/.zsh.d/accept-line.zsh
 # zsh-defer source ~/.local/share/zsh/plugins/zummoner/zummoner.plugin.zsh
 
-# Tab at beginning of line opens fzf file selector
+# <tab> at beginning of line opens fzf file selector
 function fzf-file-widget-open() {
   if [[ -z "$BUFFER" ]]; then
     local selected=$(rg --files --sort modified --follow 2>/dev/null | tac | fzf)
     if [[ -n "$selected" ]]; then
-      # Check if file is text using file command
       if file -b --mime-type "$selected" | grep -q '^text/'; then
 	BUFFER="nvim '$selected'"
       else
@@ -185,12 +184,10 @@ zle -N fzf-file-widget-open
 bindkey '^I' fzf-file-widget-open
 bindkey -M vicmd '^I' fzf-file-widget-open
 
-eval "$(xh --generate complete-zsh)"
-compdef http=xh
-
 [[ "$OSTYPE" == darwin* ]] && zsh-defer source ~/.zsh.d/orbstack.zsh
 [[ $TERM == xterm-kitty ]] && zsh-defer source ~/.zsh.d/kitty.zsh
 [[ -n "$TMUX" ]] && zsh-defer source ~/.zsh.d/tmux.zsh
+zsh-defer eval "$(carapace _carapace zsh)"
 zsh-defer eval "$(dircolors -b ~/.dircolors)"
 zsh-defer source ~/.local/share/zsh/plugins/nix-shell/nix-shell.plugin.zsh
 zsh-defer source ~/.zsh.d/autopair.zsh
@@ -201,3 +198,4 @@ zsh-defer source ~/.zsh.d/history-search/history-search.zsh
 zsh-defer source ~/.zsh.d/history-substring-search.zsh
 
 zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
+# zsh-defer source ~/.zsh.d/command-not-found.zsh

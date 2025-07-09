@@ -191,7 +191,7 @@ struct ConversationMessage {
 struct ConversationDetector;
 
 impl ConversationDetector {
-    fn extract_conversation(comment: &Comment, field_map: &FieldMap) -> (Vec<ConversationMessage>, Vec<Comment>) {
+    fn extract_conversation(comment: &Comment, field_map: &FieldMap, is_root: bool) -> (Vec<ConversationMessage>, Vec<Comment>) {
         let mut conversation = Vec::new();
         let mut current = comment.clone();
         let mut remaining_children = Vec::new();
@@ -208,6 +208,10 @@ impl ConversationDetector {
 
             let children = current.get_children(field_map);
             if children.is_empty() {
+                break;
+            } else if is_root {
+                // For root comments, don't merge with children - just treat them as separate comments
+                remaining_children = children;
                 break;
             } else if children.len() == 1 {
                 let child = &children[0];
@@ -337,9 +341,9 @@ impl TreeRenderer {
     }
 
     fn print_comment(&self, comment: &Comment, prefix: &str, is_last: bool, is_root: bool) {
-        let (conversation, remaining_children) = ConversationDetector::extract_conversation(comment, &self.field_map);
+        let (conversation, remaining_children) = ConversationDetector::extract_conversation(comment, &self.field_map, is_root);
 
-        if conversation.len() >= 3 && ConversationDetector::is_alternating_conversation(&conversation) {
+        if !is_root && conversation.len() >= 3 && ConversationDetector::is_alternating_conversation(&conversation) {
             // Render flattened conversation
             let author = if conversation[0].author.is_empty() { "[deleted]".to_string() } else { conversation[0].author.clone() };
             let name = self.color_manager.format_author(&author, &conversation[0].timestamp);

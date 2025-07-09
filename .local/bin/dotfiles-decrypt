@@ -12,9 +12,7 @@ git ls-files -z | grep -z "\.enc\.yaml$" | while IFS= read -r -d '' encrypted_fi
 
     echo "Decrypting $file..."
 
-    sops --output-type binary -d "$encrypted_file" > "$file"
-
-    chmod 644 "$file"
+    sops --decrypt --output-type=binary "$encrypted_file" > "$file"
 
     echo "✓ Decrypted to $file"
 done
