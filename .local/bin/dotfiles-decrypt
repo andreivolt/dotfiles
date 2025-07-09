@@ -7,6 +7,8 @@ export GIT_WORK_TREE=~ GIT_DIR=~/.local/share/dotfiles.git
 
 echo "Decrypting all encrypted dotfiles..."
 
+cd ~
+
 git ls-files -z | grep -z "\.enc\.yaml$" | while IFS= read -r -d '' encrypted_file; do
     file="${encrypted_file%.enc.yaml}"
 
