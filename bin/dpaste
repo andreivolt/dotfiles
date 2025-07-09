@@ -5,6 +5,8 @@
 //! reqwest = { version = "0.11", features = ["json", "multipart"] }
 //! tokio = { version = "1.0", features = ["full"] }
 //! anyhow = "1.0"
+//! 
+//! [target.'cfg(not(target_os = "android"))'.dependencies]
 //! arboard = "3.0"
 //! ```
 
@@ -77,14 +79,48 @@ async fn main() -> Result<()> {
     let raw_url = format!("{}/raw", url.trim().trim_matches('"'));
 
     if args.copy {
-        if let Err(_) = arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&raw_url)) {
-            eprintln!("Warning: Failed to copy to clipboard");
+        let mut clipboard_success = false;
+        
+        // Try native clipboard first if not on Android/Termux
+        #[cfg(not(target_os = "android"))]
+        {
+            if let Ok(mut cb) = arboard::Clipboard::new() {
+                if cb.set_text(&raw_url).is_ok() {
+                    clipboard_success = true;
+                }
+            }
+        }
+        
+        // If native clipboard failed or on Android, try termux-clipboard-set
+        if !clipboard_success {
+            if let Ok(_) = std::process::Command::new("termux-clipboard-set")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .and_then(|mut child| {
+                    use std::io::Write;
+                    if let Some(stdin) = child.stdin.as_mut() {
+                        stdin.write_all(raw_url.as_bytes())?;
+                    }
+                    child.wait()
+                }) {
+                eprintln!("Copied to clipboard using termux-clipboard-set");
+            } else {
+                eprintln!("Warning: Failed to copy to clipboard");
+                eprintln!("On Termux: Install Termux:API app and termux-api package for clipboard support");
+            }
         }
     }
 
     if args.open {
         if let Err(_) = std::process::Command::new("open").arg(&raw_url).spawn() {
-            eprintln!("Warning: Failed to open URL in browser");
+            // Termux fallback: use termux-open-url
+            if let Err(_) = std::process::Command::new("termux-open-url").arg(&raw_url).spawn() {
+                // Try xdg-open as another fallback
+                if let Err(_) = std::process::Command::new("xdg-open").arg(&raw_url).spawn() {
+                    eprintln!("Warning: Failed to open URL in browser");
+                    eprintln!("Fallback: Install termux-tools or manually open: {}", raw_url);
+                }
+            }
         }
     }
 

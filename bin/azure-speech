@@ -28,7 +28,7 @@ use dirs::cache_dir;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::{self, Cursor, Read};
+use std::io::{self, Cursor, Read, Write};
 use tungstenite::{connect, Message};
 use is_terminal::IsTerminal;
 use rodio::{Decoder, OutputStream, Sink};
@@ -710,6 +710,13 @@ xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="{}">
                 // Multiple chunks, concatenate
                 concatenate_audio_chunks(&audio_chunks, path, output_format)?;
             }
+        } else if !play_audio {
+            // Output to stdout if not playing and not saving to file
+            let mut stdout = io::stdout();
+            for chunk in &audio_chunks {
+                stdout.write_all(chunk)?;
+                stdout.flush()?;
+            }
         }
 
         Ok(audio_chunks)
@@ -934,8 +941,8 @@ fn run() -> Result<()> {
         return Err(anyhow!("No text provided"));
     };
 
-    // Play audio unless saving to file
-    let should_play = args.output.is_none();
+    // Play audio unless saving to file or stdout is not a TTY (i.e., piped)
+    let should_play = args.output.is_none() && is_terminal::IsTerminal::is_terminal(&io::stdout());
 
     if text.trim().is_empty() {
         return Err(anyhow!("No text provided"));
