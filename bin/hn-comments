@@ -59,7 +59,7 @@ class CacheManager {
 export class HackerNewsCommentsParser {
   parseComments(html) {
     const comments = [];
-    const commentMatches = html.matchAll(/<tr class='athing comtr'[^>]*id='(\d+)'[\s\S]*?(?=<tr class='athing comtr'|<tr class="morespace"|$)/g);
+    const commentMatches = html.matchAll(/<tr class="athing comtr"[^>]*id="(\d+)"[\s\S]*?(?=<tr class="athing comtr"|<\/table>|$)/g);
 
     for (const match of commentMatches) {
       const commentHtml = match[0];
@@ -75,8 +75,8 @@ export class HackerNewsCommentsParser {
   parseCommentHtml(html, id) {
     try {
       // Extract indentation level
-      const indentMatch = html.match(/<td class='ind'[^>]*><img[^>]*width="(\d+)"/);
-      const indent = indentMatch ? parseInt(indentMatch[1]) / 40 : 0; // HN uses 40px per indent level
+      const indentMatch = html.match(/<td class="ind"[^>]*indent="(\d+)"/);
+      const indent = indentMatch ? parseInt(indentMatch[1]) : 0;
 
       // Extract user
       const userMatch = html.match(/<a[^>]*class="hnuser"[^>]*>([^<]*)</);
@@ -241,7 +241,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { spawn } from 'node:child_process';
 
-if (import.meta.main) {
+if (typeof process !== 'undefined' && process.argv[1] && process.argv[1].endsWith('hn-comments')) {
   const program = new Command();
 
   program
@@ -347,7 +347,7 @@ if (import.meta.main) {
         const printSimple = (comments, depth = 0) => {
           comments.forEach(comment => {
             const indent = '  '.repeat(depth);
-            console.log(indent + chalk.yellow(comment.user) + ' ' + chalk.gray(comment.timeAgo));
+            console.log(indent + chalk.yellow(comment.user) + ' ' + chalk.gray(`(${comment.timeAgo})`));
             const lines = comment.text.split('\n');
             lines.forEach(line => {
               if (line.trim()) {

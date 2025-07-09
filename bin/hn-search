@@ -12,6 +12,7 @@
 //! anyhow = "1.0"
 //! ammonia = "3.3"
 //! regex = "1.10"
+//! derive_more = "0.99"
 //! ```
 
 use clap::{Parser, ValueEnum};
@@ -23,6 +24,28 @@ use chrono::NaiveDate;
 use html_escape::decode_html_entities;
 use console::{style, Term};
 use anyhow::Result;
+use derive_more::{Constructor, Display, From};
+
+#[derive(Debug, Display, From)]
+enum SearchError {
+    #[display(fmt = "API Error: {}", _0)]
+    Api(String),
+    #[display(fmt = "Request failed: {}", _0)]
+    #[from]
+    Request(reqwest::Error),
+    #[display(fmt = "JSON parsing failed: {}", _0)]
+    #[from]
+    Json(serde_json::Error),
+    #[display(fmt = "Date parsing failed: {}", _0)]
+    Date(String),
+}
+
+// Helper type for cleaner code
+#[derive(Constructor)]
+struct PaginationParams {
+    page: u32,
+    hits_per_page: u32,
+}
 
 #[derive(Parser, Clone)]
 #[command(name = "hn-search")]
@@ -77,22 +100,28 @@ struct Args {
 
 }
 
-#[derive(Clone, ValueEnum)]
+#[derive(Clone, ValueEnum, Display)]
 enum SortBy {
+    #[display(fmt = "relevance")]
     Relevance,
+    #[display(fmt = "date")]
     Date,
 }
 
-#[derive(Clone, ValueEnum)]
+#[derive(Clone, ValueEnum, Display)]
 enum TimeRange {
     #[value(name = "24h")]
+    #[display(fmt = "24h")]
     Day,
+    #[display(fmt = "week")]
     Week,
+    #[display(fmt = "month")]
     Month,
+    #[display(fmt = "year")]
     Year,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Constructor)]
 struct SearchResponse {
     hits: Vec<Hit>,
     #[serde(rename = "nbHits")]
@@ -430,12 +459,12 @@ async fn main() -> Result<()> {
         last_response = Some(response);
     }
     
-    let results = SearchResponse {
-        hits: all_hits,
-        nb_hits: last_response.as_ref().map(|r| r.nb_hits).unwrap_or(0),
-        page: 0, // Always show as page 0 since we're doing count-based
-        nb_pages: last_response.as_ref().map(|r| r.nb_pages).unwrap_or(0),
-    };
+    let results = SearchResponse::new(
+        all_hits,
+        last_response.as_ref().map(|r| r.nb_hits).unwrap_or(0),
+        0, // Always show as page 0 since we're doing count-based
+        last_response.as_ref().map(|r| r.nb_pages).unwrap_or(0),
+    );
 
     if args.raw {
         println!("{}", serde_json::to_string_pretty(&results)?);
