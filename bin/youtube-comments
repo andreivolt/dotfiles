@@ -283,6 +283,7 @@ def fetch_comments(video_id: str, api_key: str) -> List[Dict[str, Any]]:
 parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('video_input', nargs='?', help='YouTube video ID or URL')
 parser.add_argument('--json', action='store_true', help='Output comments in JSON format')
+parser.add_argument('--jsonl', action='store_true', help='Output comments in JSONL format (one line per root comment)')
 parser.add_argument('--clear-cache', action='store_true', help='Clear the cache')
 
 args = parser.parse_args()
@@ -315,6 +316,12 @@ try:
         import json
 
         print(json.dumps(comments, indent=2))
+    elif args.jsonl:
+        import json
+        
+        # Output one JSON object per line (JSONL format)
+        for comment in comments:
+            print(json.dumps(comment, separators=(',', ':')))
     else:
         tree_comments = [youtube_to_tree_format(comment) for comment in comments]
         # Use tree-render via sh
