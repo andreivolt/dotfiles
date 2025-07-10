@@ -3,7 +3,7 @@ local wezterm = require 'wezterm'
 local config = {
   font = wezterm.font_with_fallback({
     {
-      family = "IosevkaTerm Nerd Font Mono",
+      family = "PragmataSevka",
       weight = "Light",
     },
     "Noto Color Emoji",
@@ -13,7 +13,7 @@ local config = {
       italic = true,
       font = wezterm.font_with_fallback({
         {
-          family = "IosevkaTerm Nerd Font Mono",
+          family = "PragmataSevka",
           weight = "Light",
           style = "Italic",
         },
@@ -23,7 +23,7 @@ local config = {
       intensity = "Bold",
       font = wezterm.font_with_fallback({
         {
-          family = "IosevkaTerm Nerd Font Mono",
+          family = "PragmataSevka",
           weight = "Regular",
         },
       }),
@@ -33,7 +33,7 @@ local config = {
       intensity = "Bold",
       font = wezterm.font_with_fallback({
         {
-          family = "IosevkaTerm Nerd Font Mono",
+          family = "PragmataSevka",
           weight = "Regular",
           style = "Italic",
         },
