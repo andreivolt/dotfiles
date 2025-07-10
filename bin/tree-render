@@ -39,6 +39,9 @@ struct Args {
 
     #[arg(long, help = "Field name for header/story data")]
     header: Option<String>,
+
+    #[arg(long, help = "Read JSONL input (one JSON object per line)")]
+    jsonl: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -452,12 +455,32 @@ fn main() {
         process::exit(1);
     }
 
-    // Parse JSON
-    let data: Value = match serde_json::from_str(&input) {
-        Ok(data) => data,
-        Err(e) => {
-            eprintln!("Error: Invalid JSON - {}", e);
-            process::exit(1);
+    // Parse JSON or JSONL
+    let data: Value = if args.jsonl {
+        // Parse JSONL - each line is a separate JSON object
+        let mut comments = Vec::new();
+        for line in input.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<Value>(line) {
+                Ok(comment) => comments.push(comment),
+                Err(e) => {
+                    eprintln!("Error: Invalid JSON on line - {}", e);
+                    process::exit(1);
+                }
+            }
+        }
+        Value::Array(comments)
+    } else {
+        // Parse regular JSON
+        match serde_json::from_str(&input) {
+            Ok(data) => data,
+            Err(e) => {
+                eprintln!("Error: Invalid JSON - {}", e);
+                process::exit(1);
+            }
         }
     };
 
