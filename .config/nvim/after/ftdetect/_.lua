@@ -41,7 +41,7 @@ vim.filetype.add({
         end
         local shebang = lines[1]:match("^#!(.*)")
         if shebang then
-          if shebang:match("env%s+%-S%s+deno%s+run") then
+          if shebang:match("env%s+%-?S?%s*deno%s+run") then
             local ext = shebang:match("%-%-ext%s+(%w+)")
             if ext then
               if ext == "ts" or ext == "tsx" then
