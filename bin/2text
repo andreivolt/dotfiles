@@ -12,16 +12,19 @@ use anyhow::Result;
 use clap::Parser;
 use mime_guess::mime;
 use sha2::{Sha256, Digest};
-use std::{fs, path::Path, process::Command};
+use std::{fs, io::{self, Read}, path::Path, process::{Command, Stdio}};
 
 #[derive(Parser)]
 #[command(about = "Convert files to plain text")]
 struct Args {
-    #[arg(required = true)]
+    #[arg(help = "Input files (reads from stdin if not provided)")]
     files: Vec<String>,
     
     #[arg(short = 'o', long = "output", help = "Output file (default: stdout)")]
     output: Option<String>,
+    
+    #[arg(short = 'n', long = "no-cache", help = "Disable caching")]
+    no_cache: bool,
 }
 
 fn pandoc_convert(path: &Path, from: &str) -> Result<String> {
@@ -64,7 +67,11 @@ fn file_hash(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hash))
 }
 
-fn convert(path: &Path) -> Result<String> {
+fn convert(path: &Path, use_cache: bool) -> Result<String> {
+    if !use_cache {
+        return convert_impl(path);
+    }
+
     let hash = file_hash(path)?;
     let cache_path = path.with_extension(format!("{}.{}.2text",
         path.extension().unwrap_or_default().to_str().unwrap_or(""),
@@ -109,23 +116,65 @@ fn convert_impl(path: &Path) -> Result<String> {
     }
 }
 
+fn convert_stdin() -> Result<String> {
+    let mut stdin = io::stdin();
+    let mut buffer = Vec::new();
+    stdin.read_to_end(&mut buffer)?;
+    
+    // Try pdftotext with stdin first (it can handle PDF from stdin)
+    let mut child = Command::new("pdftotext")
+        .args(["-layout", "-", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+    
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin.write_all(&buffer)?;
+    }
+    
+    let output = child.wait_with_output()?;
+    
+    if output.status.success() && !output.stdout.is_empty() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        // Fallback: write to temp file and try to detect type
+        let temp_path = std::env::temp_dir().join(format!("2text_stdin_{}.tmp", std::process::id()));
+        fs::write(&temp_path, &buffer)?;
+        let result = convert_impl(&temp_path);
+        let _ = fs::remove_file(&temp_path);
+        result
+    }
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
-    let paths: Vec<_> = args.files.iter().map(Path::new).collect();
+    
+    if args.files.is_empty() {
+        // Read from stdin
+        let result = convert_stdin()?;
+        match args.output {
+            Some(output_path) => fs::write(output_path, result)?,
+            None => print!("{}", result),
+        }
+    } else {
+        let paths: Vec<_> = args.files.iter().map(Path::new).collect();
+        let use_cache = !args.no_cache;
 
-    match args.output {
-        Some(output_path) => {
-            let mut output = String::new();
-            for path in &paths {
-                output.push_str(&convert(path)?);
-            }
-            fs::write(output_path, output)?;
-        },
-        None => {
-            for path in &paths {
-                print!("{}", convert(path)?);
-            }
-        },
+        match args.output {
+            Some(output_path) => {
+                let mut output = String::new();
+                for path in &paths {
+                    output.push_str(&convert(path, use_cache)?);
+                }
+                fs::write(output_path, output)?;
+            },
+            None => {
+                for path in &paths {
+                    print!("{}", convert(path, use_cache)?);
+                }
+            },
+        }
     }
 
     Ok(())
