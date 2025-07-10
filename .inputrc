@@ -10,6 +10,7 @@ set editing-mode vi
 
 $if mode=vi
 set keymap vi-command
+
 Control-l: clear-screen
 ".": "i !*\r"
 "/": forward-search-history
@@ -17,6 +18,9 @@ Control-l: clear-screen
 "C": "Da"
 "D": kill-line
 "G": end-of-history
+"gg": beginning-of-history
+"v": rlwrap-call-editor
+
 "ca'": "da'i"
 "ca(": "da(i"
 "ca)": "da(i"
@@ -31,8 +35,11 @@ Control-l: clear-screen
 "caw": "lbcW"
 "ca{": "da{i"
 "ca}": "da}i"
+
 "cb": "dbi"
 "cc": "ddi"
+"cw": "dwi"
+
 "ci'": "di'i"
 "ci(": "di(i"
 "ci)": "di(i"
@@ -47,7 +54,7 @@ Control-l: clear-screen
 "ciw": "lbcw"
 "ci{": "di{i"
 "ci}": "di}i"
-"cw": "dwi"
+
 "da'": "lF'df'"
 "da(": "lF(df)"
 "da)": "lF(df)"
@@ -62,8 +69,11 @@ Control-l: clear-screen
 "daw": "lbdW"
 "da{": "lF{df}"
 "da}": "lF{df}"
+
 "db": backward-kill-word
 "dd": kill-whole-line
+"dw": kill-word
+
 "di'": "lF'lmtf'd`t"
 "di(": "lF(lmtf)d`t"
 "di)": "lF(lmtf)d`t"
@@ -78,9 +88,7 @@ Control-l: clear-screen
 "diw": "lbdw"
 "di{": "lF{lmtf}d`t"
 "di}": "lF{lmtf}d`t"
-"dw": kill-word
-"gg": beginning-of-history
-"v": rlwrap-call-editor
+
 "yaw": "lbyW"
 "yiw": "lbyw"
 
