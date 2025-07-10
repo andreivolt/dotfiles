@@ -1,26 +1,13 @@
-Layout/AccessModifierIndentation:
-  EnforcedStyle: outdent
-Layout/CommentIndentation:
-  enabled: false
-Lint/Debugger:
-  enabled: false
-Lint/ElseLayout:
-  Enabled: false
-Metrics/LineLength:
-  enabled: false
-Metrics/MethodLength:
-  enabled: false
-Style/CommentAnnotation:
-  enabled: false
-Style/FrozenStringLiteralComment:
-  enabled: false
-Style/MultilineBlockChain:
-  enabled: false
-Style/NumericLiterals:
-  enabled: false
-Style/StringLiterals:
-  Enabled: false
-Layout/ArgumentAlignment:
-  EnforcedStyle: with_fixed_indentation
-Layout/FirstArgumentIndentation:
-  EnforcedStyle: consistent
+Layout/AccessModifierIndentation: {EnforcedStyle: outdent}
+Layout/ArgumentAlignment: {EnforcedStyle: with_fixed_indentation}
+Layout/CommentIndentation: {enabled: false}
+Layout/FirstArgumentIndentation: {EnforcedStyle: consistent}
+Lint/Debugger: {enabled: false}
+Lint/ElseLayout: {enabled: false}
+Metrics/LineLength: {enabled: false}
+Metrics/MethodLength: {enabled: false}
+Style/CommentAnnotation: {enabled: false}
+Style/FrozenStringLiteralComment: {enabled: false}
+Style/MultilineBlockChain: {enabled: false}
+Style/NumericLiterals: {enabled: false}
+Style/StringLiterals: {enabled: false}
