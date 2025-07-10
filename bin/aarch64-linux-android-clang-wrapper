@@ -1,0 +1,12 @@
+#!/bin/bash
+# Wrapper to replace -lc++_static with -lc++_shared
+args=()
+for arg in "$@"; do
+  if [[ "$arg" == "-lc++_static" ]]; then
+    args+=("-lc++_shared")
+  else
+    args+=("$arg")
+  fi
+done
+
+exec /data/data/com.termux/files/usr/bin/aarch64-linux-android-clang "${args[@]}"
