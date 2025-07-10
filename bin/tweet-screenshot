@@ -1,6 +1,5 @@
-#!/usr/bin/env bun
-// @bun
-// dependencies: playwright@^1 commander@^10
+#!/usr/bin/env -S bun run --script
+// @deps playwright@^1 commander@^10
 
 import { chromium, devices } from 'playwright';
 import { writeFileSync, mkdirSync } from 'fs';
