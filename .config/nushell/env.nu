@@ -106,7 +106,6 @@ $env.MANWIDTH = "100"
 
 $env.READNULLCMD = $env.PAGER
 
-# Add custom paths to PATH
 $env.PATH = ($env.PATH | split row (char esep) | prepend [
     "~/bin"
     "~/.local/bin"

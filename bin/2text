@@ -19,6 +19,9 @@ use std::{fs, path::Path, process::Command};
 struct Args {
     #[arg(required = true)]
     files: Vec<String>,
+    
+    #[arg(short = 'o', long = "output", help = "Output file (default: stdout)")]
+    output: Option<String>,
 }
 
 fn pandoc_convert(path: &Path, from: &str) -> Result<String> {
@@ -110,8 +113,19 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let paths: Vec<_> = args.files.iter().map(Path::new).collect();
 
-    for path in &paths {
-        print!("{}", convert(path)?);
+    match args.output {
+        Some(output_path) => {
+            let mut output = String::new();
+            for path in &paths {
+                output.push_str(&convert(path)?);
+            }
+            fs::write(output_path, output)?;
+        },
+        None => {
+            for path in &paths {
+                print!("{}", convert(path)?);
+            }
+        },
     }
 
     Ok(())
