@@ -5,6 +5,7 @@
 //! [dependencies]
 //! lifx-core = "0.4.0"
 //! clap = { version = "4.0", features = ["derive"] }
+//! clap_complete = "4.0"
 //! tokio = { version = "1.0", features = ["full"] }
 //! serde = { version = "1.0", features = ["derive"] }
 //! serde_json = "1.0"
@@ -16,7 +17,8 @@
 //! ```
 
 use anyhow::{anyhow, Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use lifx_core::{BuildOptions, Message, RawMessage, HSBK};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -131,6 +133,12 @@ enum Commands {
     },
     /// Clear device cache
     ClearCache,
+    /// Generate shell completion script
+    Completion {
+        /// Shell to generate completion for
+        #[arg(value_enum)]
+        shell: Shell,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -920,6 +928,12 @@ async fn main() -> Result<()> {
             } else {
                 println!("Cleared: {}", removed.join(", "));
             }
+        }
+
+        Some(Commands::Completion { shell }) => {
+            let mut cmd = Cli::command();
+            let name = cmd.get_name().to_string();
+            generate(shell, &mut cmd, name, &mut std::io::stdout());
         }
 
         _ => {
