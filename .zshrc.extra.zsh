@@ -159,10 +159,11 @@ source ~/.local/share/zsh/plugins/powerlevel10k/powerlevel10k.zsh-theme
 # <tab> at beginning of line opens fzf file selector
 function fzf-file-widget-open() {
   if [[ -z "$BUFFER" ]]; then
-    local selected=$(rg --files --sort modified --follow 2>/dev/null | tac | fzf --preview 'output=$(bat --color=always --style=numbers --line-range=:500 {} 2>&1); if echo "$output" | grep -q "^\[bat warning\]: Binary content"; then /bin/cat {} | 2text 2>/dev/null || echo "Cannot preview file"; else echo "$output"; fi')
+    local selected=$(rg --files --sort modified --follow 2>/dev/null | tac | fzf --preview 'mime_type=$(file -b --mime-type {}); if [[ ! "$mime_type" =~ ^text/ ]] && [[ ! "$mime_type" =~ application/(json|javascript|xml|yaml) ]] && [[ ! {} =~ \.(sh|bash|zsh|py|rb|pl|js|ts|jsx|tsx|vue|svelte|css|scss|sass|less|html|htm|xml|svg|md|rst|txt|conf|cfg|ini|yaml|yml|json|toml|env|gitignore|dockerfile)$ ]]; then (2text {} || mediainfo {}) 2>/dev/null || echo "Cannot preview file"; else bat --color=always --style=numbers --line-range=:500 {}; fi')
     if [[ -n "$selected" ]]; then
-      # Check if bat can handle the file (no binary content warning)
-      if bat "$selected" 2>&1 | grep -q "^\[bat warning\]: Binary content"; then
+      # Check if bat can handle the file (based on mime type and extensions)
+      local mime_type=$(file -b --mime-type "$selected")
+      if [[ ! "$mime_type" =~ ^text/ ]] && [[ ! "$mime_type" =~ application/(json|javascript|xml|yaml) ]] && [[ ! "$selected" =~ \.(sh|bash|zsh|py|rb|pl|js|ts|jsx|tsx|vue|svelte|css|scss|sass|less|html|htm|xml|svg|md|rst|txt|conf|cfg|ini|yaml|yml|json|toml|env|gitignore|dockerfile)$ ]]; then
 	# Binary file - use system opener
 	if [[ -n "$TERMUX_VERSION" ]]; then
 	  BUFFER="termux-open '$selected'"
