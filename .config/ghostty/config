@@ -24,7 +24,6 @@ macos-non-native-fullscreen = true
 macos-window-shadow = false
 
 cursor-style = bar
-cursor-style-blink = true
 
 mouse-hide-while-typing = true
 
