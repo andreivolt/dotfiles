@@ -38,6 +38,7 @@ alias eza="eza --icons never"
 alias gc='git clone --depth 1'
 alias gron="fastgron"
 alias http="xh"
+alias jq="gojq"
 alias l="ls -1"
 alias la="ls -a"
 alias ll="ls -l --classify=auto --git"
