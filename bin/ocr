@@ -115,7 +115,7 @@ async fn run_ocr(
     // Read and encode image
     let image_data = fs::read(image_path)?;
     let base64_image = general_purpose::STANDARD.encode(&image_data);
-    
+
     // Create chat request with image using base64 method
     let parts = vec![
         ContentPart::from_text(prompt),
@@ -201,7 +201,7 @@ async fn main() -> Result<()> {
             // Default to PNG as it's most common for screenshots
             ".png"
         };
-        
+
         let temp_file = NamedTempFile::with_suffix(suffix)?;
         fs::write(temp_file.path(), data)?;
         let temp_path = temp_file.path().to_path_buf();

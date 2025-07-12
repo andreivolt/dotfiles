@@ -49,7 +49,7 @@ fn get_maccy_data() -> Result<Vec<String>> {
     }
 
     let conn = Connection::open(&maccy_db)?;
-    
+
     let mut stmt = conn.prepare("SELECT CAST(hic.ZVALUE AS TEXT) FROM ZHISTORYITEM hi JOIN ZHISTORYITEMCONTENT hic ON hi.Z_PK = hic.ZITEM WHERE hic.ZTYPE = 'public.utf8-plain-text' GROUP BY hi.Z_PK ORDER BY hi.ZLASTCOPIEDAT DESC")?;
     let items: Vec<String> = stmt.query_map([], |row| {
         let value: String = row.get(0)?;

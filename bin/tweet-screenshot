@@ -39,7 +39,7 @@ async function screenshotTweet(tweetInput, outputPath) {
   });
   const device = devices['Desktop Chrome HiDPI'];
   const context = await browser.newContext(device);
-  
+
   const page = await context.newPage();
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto(`https://twitter.com/i/web/status/${tweetId}`);
@@ -75,7 +75,7 @@ async function screenshotTweet(tweetInput, outputPath) {
   } else {
     let screenshotPath;
     if (outputPath) {
-      screenshotPath = outputPath.endsWith('/') ? 
+      screenshotPath = outputPath.endsWith('/') ?
         join(outputPath, `${tweetId}.png`) : outputPath;
     } else {
       screenshotPath = join(SCREENSHOT_DIR, `${tweetId}.png`);

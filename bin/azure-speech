@@ -347,7 +347,7 @@ impl AzureSpeechSynthesizer {
     fn expand_language_code(lang_code: &str) -> String {
         match lang_code.to_lowercase().as_str() {
             "en" => "en-US".to_string(),
-            "fr" => "fr-FR".to_string(), 
+            "fr" => "fr-FR".to_string(),
             "es" => "es-ES".to_string(),
             "de" => "de-DE".to_string(),
             "it" => "it-IT".to_string(),
@@ -573,7 +573,7 @@ xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="{}">
 
         let mut audio_data = Vec::new();
         response.into_reader().read_to_end(&mut audio_data)?;
-        
+
 
         if let Some(path) = output_file {
             let final_data = if output_format.starts_with("raw-") {
@@ -727,7 +727,7 @@ fn play_audio_data(audio_data: &[u8], format: &str, tempo: Option<f32>) -> Resul
     // Get the default output device
     let (_stream, stream_handle) = OutputStream::try_default()
         .map_err(|e| anyhow!("Failed to get audio output device: {}", e))?;
-    
+
     // Create a sink for audio playback
     let sink = Sink::try_new(&stream_handle)
         .map_err(|e| anyhow!("Failed to create audio sink: {}", e))?;
@@ -759,32 +759,32 @@ fn play_audio_data(audio_data: &[u8], format: &str, tempo: Option<f32>) -> Resul
 
 fn create_wav_from_pcm(pcm_data: &[u8], sample_rate: u32, channels: u16, bits_per_sample: u16) -> Result<Vec<u8>> {
     let mut wav_data = Vec::new();
-    
+
     // WAV header
     wav_data.extend_from_slice(b"RIFF");
     let file_size = 36 + pcm_data.len() as u32;
     wav_data.extend_from_slice(&file_size.to_le_bytes());
     wav_data.extend_from_slice(b"WAVE");
-    
+
     // Format chunk
     wav_data.extend_from_slice(b"fmt ");
     wav_data.extend_from_slice(&16u32.to_le_bytes()); // Chunk size
     wav_data.extend_from_slice(&1u16.to_le_bytes()); // Audio format (PCM)
     wav_data.extend_from_slice(&channels.to_le_bytes());
     wav_data.extend_from_slice(&sample_rate.to_le_bytes());
-    
+
     let byte_rate = sample_rate * channels as u32 * bits_per_sample as u32 / 8;
     wav_data.extend_from_slice(&byte_rate.to_le_bytes());
-    
+
     let block_align = channels * bits_per_sample / 8;
     wav_data.extend_from_slice(&block_align.to_le_bytes());
     wav_data.extend_from_slice(&bits_per_sample.to_le_bytes());
-    
+
     // Data chunk
     wav_data.extend_from_slice(b"data");
     wav_data.extend_from_slice(&(pcm_data.len() as u32).to_le_bytes());
     wav_data.extend_from_slice(pcm_data);
-    
+
     Ok(wav_data)
 }
 
@@ -805,7 +805,7 @@ fn concatenate_audio_chunks(audio_chunks: &[Vec<u8>], output_path: &Path, format
         }
         combined_audio
     };
-    
+
     fs::write(output_path, combined_audio)?;
     println!("Audio saved to: {}", output_path.display());
     Ok(())
@@ -817,12 +817,12 @@ fn get_audio_formats() -> std::collections::HashMap<&'static str, Vec<&'static s
         "high_quality",
         vec![
             "raw-48khz-16bit-mono-pcm",
-            "audio-48khz-192kbitrate-mono-mp3", 
+            "audio-48khz-192kbitrate-mono-mp3",
             "audio-48khz-96kbitrate-mono-mp3",
         ],
     );
     formats.insert(
-        "standard", 
+        "standard",
         vec![
             "raw-24khz-16bit-mono-pcm",
             "audio-24khz-160kbitrate-mono-mp3",
@@ -952,7 +952,7 @@ fn run() -> Result<()> {
     let (selected_voice, selected_locale) = if args.lang.is_some() || args.gender.is_some() || args.voice_type.is_some() {
         // User wants smart selection
         let voices = synthesizer.get_voices(false)?;
-        
+
         let target_locale = if let Some(lang) = &args.lang {
             AzureSpeechSynthesizer::expand_language_code(lang)
         } else {
@@ -977,7 +977,7 @@ fn run() -> Result<()> {
         let quality_key = format!("{}_quality", quality);
         let quality_key = match quality_key.as_str() {
             "high_quality" => "high_quality",
-            "standard_quality" => "standard", 
+            "standard_quality" => "standard",
             "low_quality" => "low_bandwidth",
             _ => "standard",
         };

@@ -318,7 +318,7 @@ try:
         print(json.dumps(comments, indent=2))
     elif args.jsonl:
         import json
-        
+
         # Output one JSON object per line (JSONL format)
         for comment in comments:
             print(json.dumps(comment, separators=(',', ':')))
