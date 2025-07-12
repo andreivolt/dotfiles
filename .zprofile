@@ -40,5 +40,3 @@ path=(
 [[ "$OSTYPE" == darwin* ]] && source ~/.zsh.d/homebrew.sh
 
 source ~/.config/env
-
-rm -f ~/"Google Drive"
