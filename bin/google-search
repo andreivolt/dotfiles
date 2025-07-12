@@ -60,19 +60,19 @@ fn get_language_code(input: &str) -> Option<String> {
     ].iter().cloned().collect();
 
     let input_lower = input.to_lowercase();
-    
+
     // Check if input matches a language code
     if languages.contains_key(input_lower.as_str()) {
         return Some(format!("lang_{}", input_lower));
     }
-    
+
     // Check if input matches a language name
     for (code, name) in &languages {
         if input_lower == *name {
             return Some(format!("lang_{}", code));
         }
     }
-    
+
     None
 }
 
@@ -325,17 +325,17 @@ fn get_country_code(input: &str) -> Option<String> {
     ].iter().cloned().collect();
 
     let input_lower = input.to_lowercase();
-    
+
     if countries.contains_key(input_lower.as_str()) {
         return Some(format!("country{}", input_lower.to_uppercase()));
     }
-    
+
     for (code, name) in &countries {
         if input_lower == *name {
             return Some(format!("country{}", code.to_uppercase()));
         }
     }
-    
+
     None
 }
 
@@ -487,77 +487,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .get_matches();
 
     let query = matches.get_one::<String>("query").unwrap();
-    
+
     let api_key = env::var("SERPAPI_API_KEY")
         .map_err(|_| "SERPAPI_API_KEY environment variable is required")?;
 
     println!("Searching for: {}", query);
-    
+
     let mut params = HashMap::<String, String>::new();
     params.insert("q".to_string(), query.clone());
-    
+
     // Add all optional parameters if provided, mapping readable flags to API parameters
     if let Some(location) = matches.get_one::<String>("location") {
         params.insert("location".to_string(), location.clone());
         println!("Location: {}", location);
     }
-    
+
     if let Some(uule) = matches.get_one::<String>("encoded-location") {
         params.insert("uule".to_string(), uule.clone());
         println!("Encoded Location: {}", uule);
     }
-    
+
     if let Some(ludocid) = matches.get_one::<String>("place-id") {
         params.insert("ludocid".to_string(), ludocid.clone());
         println!("Place ID: {}", ludocid);
     }
-    
+
     if let Some(lsig) = matches.get_one::<String>("location-signature") {
         params.insert("lsig".to_string(), lsig.clone());
         println!("Location Signature: {}", lsig);
     }
-    
+
     if let Some(kgmid) = matches.get_one::<String>("knowledge-graph-id") {
         params.insert("kgmid".to_string(), kgmid.clone());
         println!("Knowledge Graph ID: {}", kgmid);
     }
-    
+
     if let Some(si) = matches.get_one::<String>("search-info") {
         params.insert("si".to_string(), si.clone());
         println!("Search Info: {}", si);
     }
-    
+
     if let Some(ibp) = matches.get_one::<String>("layout-params") {
         params.insert("ibp".to_string(), ibp.clone());
         println!("Layout Params: {}", ibp);
     }
-    
+
     if let Some(uds) = matches.get_one::<String>("filter-string") {
         params.insert("uds".to_string(), uds.clone());
         println!("Filter String: {}", uds);
     }
-    
+
     if let Some(google_domain) = matches.get_one::<String>("domain") {
         params.insert("google_domain".to_string(), google_domain.clone());
         println!("Google Domain: {}", google_domain);
     }
-    
+
     if let Some(gl) = matches.get_one::<String>("country") {
         params.insert("gl".to_string(), gl.clone());
         println!("Country: {}", gl);
     }
-    
+
     if let Some(hl) = matches.get_one::<String>("language") {
         params.insert("hl".to_string(), hl.clone());
         println!("Language: {}", hl);
     }
-    
+
     if let Some(cr_input) = matches.get_one::<String>("country-restrict") {
         let countries: Vec<String> = cr_input
             .split(',')
             .filter_map(|country| get_country_code(country.trim()))
             .collect();
-        
+
         if !countries.is_empty() {
             let cr_value = countries.join("|");
             params.insert("cr".to_string(), cr_value.clone());
@@ -566,13 +566,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Warning: No valid countries found in '{}'", cr_input);
         }
     }
-    
+
     if let Some(lr_input) = matches.get_one::<String>("language-restrict") {
         let languages: Vec<String> = lr_input
             .split(',')
             .filter_map(|lang| get_language_code(lang.trim()))
             .collect();
-        
+
         if !languages.is_empty() {
             let lr_value = languages.join("|");
             params.insert("lr".to_string(), lr_value.clone());
@@ -581,18 +581,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Warning: No valid languages found in '{}'", lr_input);
         }
     }
-    
+
     if let Some(tbs) = matches.get_one::<String>("advanced-search") {
         params.insert("tbs".to_string(), tbs.clone());
         println!("Advanced Search: {}", tbs);
     }
-    
+
     // Handle no-autocorrect flag
     if matches.get_flag("no-autocorrect") {
         params.insert("nfpr".to_string(), "1".to_string());
         println!("No Auto-correct: enabled");
     }
-    
+
     // Handle filter flags
     if matches.get_flag("no-filter") {
         params.insert("filter".to_string(), "0".to_string());
@@ -604,7 +604,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Default to enabled
         params.insert("filter".to_string(), "1".to_string());
     }
-    
+
     if let Some(search_type) = matches.get_one::<String>("search-type") {
         let tbm_value = match search_type.as_str() {
             "images" => "isch",
@@ -618,22 +618,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         params.insert("tbm".to_string(), tbm_value.to_string());
         println!("Search Type: {} ({})", search_type, tbm_value);
     }
-    
+
     if let Some(start) = matches.get_one::<String>("start") {
         params.insert("start".to_string(), start.clone());
         println!("Start: {}", start);
     }
-    
+
     if let Some(count) = matches.get_one::<String>("count") {
         params.insert("num".to_string(), count.clone());
         println!("Count: {}", count);
     }
-    
+
     if matches.get_flag("no-cache") {
         params.insert("no_cache".to_string(), "true".to_string());
         println!("No Cache: true");
     }
-    
+
     println!("---");
 
     let search = SerpApiSearch::google(params, api_key);
@@ -643,7 +643,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(organic_results) = results.get("organic_results") {
                 if let Some(organic_array) = organic_results.as_array() {
                     println!("Found {} organic results:\n", organic_array.len());
-                    
+
                     for (i, result) in organic_array.iter().enumerate() {
                         if let (Some(title), Some(link), Some(snippet)) = (
                             result.get("title").and_then(|t| t.as_str()),
@@ -685,7 +685,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            
+
             if let Some(knowledge_graph) = results.get("knowledge_graph") {
                 if let Some(title) = knowledge_graph.get("title").and_then(|t| t.as_str()) {
                     println!("Knowledge Graph:");
@@ -696,7 +696,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!();
                 }
             }
-            
+
             if let Some(related_questions) = results.get("related_questions") {
                 if let Some(questions_array) = related_questions.as_array() {
                     if !questions_array.is_empty() {

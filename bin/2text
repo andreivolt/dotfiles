@@ -20,10 +20,10 @@ use std::{fs, io::{self, Read}, path::Path, process::{Command, Stdio}};
 struct Args {
     #[arg(help = "Input files (reads from stdin if not provided)")]
     files: Vec<String>,
-    
+
     #[arg(short = 'o', long = "output", help = "Output file (default: stdout)")]
     output: Option<String>,
-    
+
     #[arg(short = 'n', long = "no-cache", help = "Disable caching")]
     no_cache: bool,
 }
@@ -72,7 +72,7 @@ fn get_cache_dir() -> Result<std::path::PathBuf> {
     let cache_dir = dirs::cache_dir()
         .ok_or_else(|| anyhow::anyhow!("Could not determine cache directory"))?
         .join("2text");
-    
+
     // Create cache directory if it doesn't exist
     fs::create_dir_all(&cache_dir)?;
     Ok(cache_dir)
@@ -80,13 +80,13 @@ fn get_cache_dir() -> Result<std::path::PathBuf> {
 
 fn get_cache_path(file_path: &Path, hash: &str) -> Result<std::path::PathBuf> {
     let cache_dir = get_cache_dir()?;
-    
+
     // Create a cache filename that includes the original filename and hash
     let filename = file_path.file_name()
         .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("Invalid filename"))?;
-    
+
     let cache_filename = format!("{}-{}.txt", filename, &hash[..8]);
     Ok(cache_dir.join(cache_filename))
 }
@@ -142,21 +142,21 @@ fn convert_stdin() -> Result<String> {
     let mut stdin = io::stdin();
     let mut buffer = Vec::new();
     stdin.read_to_end(&mut buffer)?;
-    
+
     // Try pdftotext with stdin first (it can handle PDF from stdin)
     let mut child = Command::new("pdftotext")
         .args(["-layout", "-", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()?;
-    
+
     if let Some(mut stdin) = child.stdin.take() {
         use std::io::Write;
         stdin.write_all(&buffer)?;
     }
-    
+
     let output = child.wait_with_output()?;
-    
+
     if output.status.success() && !output.stdout.is_empty() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
@@ -171,7 +171,7 @@ fn convert_stdin() -> Result<String> {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    
+
     if args.files.is_empty() {
         // Read from stdin
         let result = convert_stdin()?;

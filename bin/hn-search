@@ -248,13 +248,13 @@ fn build_query_params(args: &Args, page: u32, hits_per_page: u32) -> HashMap<Str
 
 fn strip_html_tags(text: &str) -> String {
     let mut result = text.to_string();
-    
+
     // First, protect code blocks by marking them specially
     // Use (?s) flag to make . match newlines
     let re_pre = regex::Regex::new(r"(?s)<pre><code>(.*?)</code></pre>").unwrap();
     let mut code_blocks = Vec::new();
     let mut code_idx = 0;
-    
+
     // Extract code blocks and replace with placeholders
     for cap in re_pre.captures_iter(&result.clone()) {
         if let Some(code) = cap.get(1) {
@@ -264,25 +264,25 @@ fn strip_html_tags(text: &str) -> String {
             code_idx += 1;
         }
     }
-    
+
     // Handle inline code
     let re_code = regex::Regex::new(r"<code>(.*?)</code>").unwrap();
     result = re_code.replace_all(&result, "`$1`").to_string();
-    
+
     // Replace paragraph and break tags with newlines
     result = result.replace("<p>", "\n\n");
     result = result.replace("</p>", "");
     result = result.replace("<br>", "\n");
     result = result.replace("<br/>", "\n");
     result = result.replace("<br />", "\n");
-    
+
     // Use ammonia to safely strip remaining HTML tags
     let mut builder = ammonia::Builder::new();
     builder.tags(std::collections::HashSet::new());
     builder.clean_content_tags(std::collections::HashSet::new());
-    
+
     result = builder.clean(&result).to_string();
-    
+
     // Restore code blocks with proper indentation
     for (idx, code) in code_blocks.iter().enumerate() {
         let placeholder = format!("__CODE_BLOCK_{}__", idx);
@@ -295,12 +295,12 @@ fn strip_html_tags(text: &str) -> String {
             .join("\n");
         result = result.replace(&placeholder, &indented);
     }
-    
+
     // Clean up excessive whitespace while preserving structure
     let lines: Vec<&str> = result.trim().split('\n').collect();
     let mut cleaned_lines = Vec::new();
     let mut prev_empty = false;
-    
+
     for line in lines {
         let trimmed = line.trim_end(); // Only trim end to preserve code indentation
         if trimmed.is_empty() {
@@ -318,7 +318,7 @@ fn strip_html_tags(text: &str) -> String {
             prev_empty = false;
         }
     }
-    
+
     cleaned_lines.join("\n")
 }
 
@@ -417,48 +417,48 @@ async fn search_hn(args: &Args, page: u32, hits_per_page: u32) -> Result<SearchR
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    
+
     // Calculate optimal pagination strategy
     let requested_limit = args.limit;
     let max_hits_per_page = 1000u32;
-    
+
     let mut all_hits = Vec::new();
     let mut total_fetched = 0u32;
     let mut current_page = 0u32;
     let mut last_response: Option<SearchResponse> = None;
-    
+
     while total_fetched < requested_limit {
         // Calculate optimal hits_per_page for this request
         let remaining = requested_limit - total_fetched;
         let hits_per_page = remaining.min(max_hits_per_page);
-        
+
         let response = search_hn(&args, current_page, hits_per_page).await?;
         let hits = &response.hits;
-        
+
         if hits.is_empty() {
             break;
         }
-        
+
         // Take only what we need (shouldn't exceed but be safe)
         let hits_to_take = (hits.len() as u32).min(remaining);
-        
+
         for hit in hits.iter().take(hits_to_take as usize) {
             all_hits.push(hit.clone());
         }
         total_fetched += hits_to_take;
-        
+
         // Stop if we've got everything we need or hit API limits
-        if total_fetched >= requested_limit || 
-           hits.len() < hits_per_page as usize || 
+        if total_fetched >= requested_limit ||
+           hits.len() < hits_per_page as usize ||
            total_fetched >= response.nb_hits {
             last_response = Some(response);
             break;
         }
-        
+
         current_page += 1;
         last_response = Some(response);
     }
-    
+
     let results = SearchResponse::new(
         all_hits,
         last_response.as_ref().map(|r| r.nb_hits).unwrap_or(0),

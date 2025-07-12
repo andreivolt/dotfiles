@@ -47,8 +47,8 @@ const CHANNELS: u16 = 1;
 
 // Model choices - matching Python version
 const NOVA_MODELS: &[&str] = &[
-    "nova-2", "nova-2-meeting", "nova-2-phonecall", "nova-2-voicemail", 
-    "nova-2-finance", "nova-2-conversationalai", "nova-2-video", 
+    "nova-2", "nova-2-meeting", "nova-2-phonecall", "nova-2-voicemail",
+    "nova-2-finance", "nova-2-conversationalai", "nova-2-video",
     "nova-2-medical", "nova-2-drivethru", "nova-2-automotive", "nova-3"
 ];
 
@@ -207,7 +207,7 @@ struct Args {
 
     /// Redact sensitive info
     /// Available options: true, false, pci, pii, numbers, aggressive_numbers, ssn,
-    /// account_number, address, banking_information, blood_type, credit_card, 
+    /// account_number, address, banking_information, blood_type, credit_card,
     /// credit_card_cvv, credit_card_expiration, date, date_interval, date_of_birth,
     /// drivers_license, drug, duration, email_address, event, filename, gender_sexuality,
     /// healthcare_number, injury, ip_address, language, location, marital_status,
@@ -397,8 +397,8 @@ struct LiveResponse {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 enum LiveContent {
-    Results { 
-        channel: LiveChannel 
+    Results {
+        channel: LiveChannel
     },
     Event {
         channel: Option<Vec<u32>>,
@@ -608,7 +608,7 @@ async fn transcribe_chunk(client: &reqwest::Client, chunk_path: &str, chunk_inde
 
             // Adjust timestamps for chunk offset (matching Python logic)
             let time_offset_seconds = (chunk_index as u32 * args.chunk_minutes * 60) as f64;
-            
+
             // Adjust word timestamps if present
             for channel in &mut result.results.channels {
                 for alternative in &mut channel.alternatives {
@@ -1169,7 +1169,7 @@ fn handle_live_response(response: serde_json::Value) {
                 Some("Results") => {
                     if let Some(transcript) = extract_transcript_from_response(&live_response) {
                         let is_final = live_response.is_final.unwrap_or(false);
-                        
+
                         if is_final {
                             // Final transcript - print in green
                             print!("\r\x1b[92m{}\x1b[0m\n", transcript);
@@ -1196,7 +1196,7 @@ fn handle_live_response(response: serde_json::Value) {
                     // Handle legacy format or unknown types
                     if let Some(transcript) = extract_transcript_from_response(&live_response) {
                         let is_final = live_response.is_final.unwrap_or(false);
-                        
+
                         if is_final {
                             print!("\r\x1b[92m{}\x1b[0m\n", transcript);
                         } else {
@@ -1240,11 +1240,11 @@ fn validate_args(mut args: Args) -> Result<Args> {
         .chain(NOVA_3_MODELS.iter())
         .copied()
         .collect();
-    
+
     if !all_models.contains(&args.model.as_str()) {
         return Err(anyhow::anyhow!(
-            "Invalid model '{}'. Available models: {}", 
-            args.model, 
+            "Invalid model '{}'. Available models: {}",
+            args.model,
             all_models.join(", ")
         ));
     }
@@ -1253,8 +1253,8 @@ fn validate_args(mut args: Args) -> Result<Args> {
     for redact_item in &args.redact {
         if !REDACT_CHOICES.contains(&redact_item.as_str()) {
             return Err(anyhow::anyhow!(
-                "Invalid redaction category '{}'. Available options: {}", 
-                redact_item, 
+                "Invalid redaction category '{}'. Available options: {}",
+                redact_item,
                 REDACT_CHOICES.join(", ")
             ));
         }
@@ -1264,7 +1264,7 @@ fn validate_args(mut args: Args) -> Result<Args> {
     for keyword in &args.keywords {
         if !keyword.contains(':') {
             return Err(anyhow::anyhow!(
-                "Keywords must be in 'word:boost' format, got: {}", 
+                "Keywords must be in 'word:boost' format, got: {}",
                 keyword
             ));
         }
@@ -1274,7 +1274,7 @@ fn validate_args(mut args: Args) -> Result<Args> {
     for keyterm in &args.keyterms {
         if !keyterm.contains(':') {
             return Err(anyhow::anyhow!(
-                "Keyterms must be in 'word:boost' format, got: {}", 
+                "Keyterms must be in 'word:boost' format, got: {}",
                 keyterm
             ));
         }
@@ -1284,7 +1284,7 @@ fn validate_args(mut args: Args) -> Result<Args> {
     for replace_item in &args.replace {
         if !replace_item.contains(':') {
             return Err(anyhow::anyhow!(
-                "Replace must be in 'from:to' format, got: {}", 
+                "Replace must be in 'from:to' format, got: {}",
                 replace_item
             ));
         }
@@ -1294,17 +1294,17 @@ fn validate_args(mut args: Args) -> Result<Args> {
     for extra_item in &args.extra {
         if !extra_item.contains('=') {
             return Err(anyhow::anyhow!(
-                "Extra must be in 'key=value' format, got: {}", 
+                "Extra must be in 'key=value' format, got: {}",
                 extra_item
             ));
         }
     }
 
     // Feature dependencies validation (matching Python logic)
-    if !args.no_paragraphs && 
-       !args.punctuate && 
-       args.no_diarize && 
-       !args.multichannel && 
+    if !args.no_paragraphs &&
+       !args.punctuate &&
+       args.no_diarize &&
+       !args.multichannel &&
        args.no_smart_format {
         return Err(anyhow::anyhow!(
             "--paragraphs requires --punctuate, --diarize, --multichannel, or --smart-format"

@@ -5,7 +5,7 @@
 //! reqwest = { version = "0.11", features = ["json", "multipart"] }
 //! tokio = { version = "1.0", features = ["full"] }
 //! anyhow = "1.0"
-//! 
+//!
 //! [target.'cfg(not(target_os = "android"))'.dependencies]
 //! arboard = "3.0"
 //! ```
@@ -79,7 +79,7 @@ async fn main() -> Result<()> {
 
     if args.copy {
         let mut clipboard_success = false;
-        
+
         // Try native clipboard first if not on Android/Termux
         #[cfg(not(target_os = "android"))]
         {
@@ -89,7 +89,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        
+
         // If native clipboard failed or on Android, try termux-clipboard-set
         if !clipboard_success {
             if let Ok(_) = std::process::Command::new("termux-clipboard-set")
