@@ -96,11 +96,11 @@ def is_channel_query(query: str) -> bool:
 def extract_channel_identifier(url: str) -> str:
     """Extract channel identifier from various YouTube URL formats."""
     import re
-    
+
     # If it's just @username, return as is
     if url.startswith('@') and 'youtube.com' not in url:
         return url
-    
+
     # Pattern to match various YouTube channel URL formats
     patterns = [
         r'youtube\.com/@([^/]+)',           # @username format
@@ -108,7 +108,7 @@ def extract_channel_identifier(url: str) -> str:
         r'youtube\.com/c/([^/]+)',          # custom URL format
         r'youtube\.com/user/([^/]+)',       # legacy user format
     ]
-    
+
     for pattern in patterns:
         match = re.search(pattern, url)
         if match:
@@ -122,7 +122,7 @@ def extract_channel_identifier(url: str) -> str:
             # For other formats, construct @username URL if possible
             else:
                 return f"https://www.youtube.com/c/{identifier}"
-    
+
     # If no pattern matches, return original URL
     return url
 
@@ -142,20 +142,20 @@ def search_youtube(query: str, max_results: int = 200, max_threads: int = 0) -> 
 
     # Check if this is a channel query
     is_channel = is_channel_query(query)
-    
+
     # First, get all entries from the search
     if is_channel:
         print(f"Fetching videos from channel...", end='', flush=True)
     else:
         print(f"Searching for videos...", end='', flush=True)
-    
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             if is_channel:
                 # For channel queries, extract the channel videos directly
                 # Extract channel identifier and construct proper URL
                 channel_id = extract_channel_identifier(query)
-                
+
                 # Convert to proper channel videos URL
                 if channel_id.startswith('@'):
                     channel_url = f"https://www.youtube.com/{channel_id}/videos"
@@ -165,7 +165,7 @@ def search_youtube(query: str, max_results: int = 200, max_threads: int = 0) -> 
                     channel_url = f"{channel_id}/videos"
                 else:
                     channel_url = f"https://www.youtube.com/{channel_id}/videos"
-                    
+
                 info = ydl.extract_info(channel_url, download=False)
             else:
                 # For search queries, use ytsearch
@@ -265,10 +265,10 @@ def sanitize_for_playlist(text: str) -> str:
     # Handle None values
     if text is None:
         return ""
-    
+
     # Convert to string if not already
     text = str(text)
-    
+
     # Remove newlines, carriage returns, and other problematic characters
     text = text.replace('\n', ' ').replace('\r', ' ')
     text = text.replace('\t', ' ')  # Replace tabs

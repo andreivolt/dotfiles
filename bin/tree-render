@@ -327,7 +327,7 @@ impl TreeRenderer {
             if self.color_manager.no_color {
                 println!("{} points by {}", points, user);
             } else {
-                println!("{} points by {}", 
+                println!("{} points by {}",
                     crossterm::style::style(points).with(crossterm::style::Color::Green),
                     crossterm::style::style(user).with(crossterm::style::Color::Blue)
                 );

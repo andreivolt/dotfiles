@@ -379,7 +379,7 @@ impl ChromecastBroadcaster {
         println!("Launching default media receiver app...");
         use rust_cast::channels::receiver::CastDeviceApp;
         let app = CastDeviceApp::DefaultMediaReceiver;
-        
+
         let app_response = match cast_device.receiver.launch_app(&app) {
             Ok(response) => {
                 println!("Successfully launched media receiver app");
@@ -417,28 +417,28 @@ impl ChromecastBroadcaster {
         // Load media using the app session info
         println!("Loading media to launched app...");
         let destination = &app_response.transport_id;
-        let session_id = if app_response.session_id.is_empty() { 
-            "0".to_string() 
-        } else { 
-            app_response.session_id.clone() 
+        let session_id = if app_response.session_id.is_empty() {
+            "0".to_string()
+        } else {
+            app_response.session_id.clone()
         };
-        
+
         match cast_device.media.load(destination, &session_id, &media) {
             Ok(load_response) => {
                 println!("Media loaded successfully");
                 println!("Load response: {:?}", load_response);
-                
+
                 // Get the media session ID from the load response
                 let media_session_id = if let Some(entry) = load_response.entries.first() {
                     entry.media_session_id
                 } else {
                     anyhow::bail!("No media session found in load response");
                 };
-                
+
                 println!("Using media session ID: {}", media_session_id);
-                
+
                 // Media should be ready immediately after load
-                
+
                 // Play the media using the correct media session ID
                 println!("Starting playback...");
                 match cast_device.media.play(destination, media_session_id) {
@@ -489,7 +489,7 @@ impl ChromecastBroadcaster {
 
         async fn stream_wav_handler(State(audio_rx): State<Arc<Mutex<mpsc::Receiver<Vec<u8>>>>>) -> Response<Body> {
             let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, std::io::Error>>(10);
-            
+
             // Spawn a task to pump data from std mpsc to tokio mpsc
             tokio::spawn(async move {
                 loop {
@@ -505,7 +505,7 @@ impl ChromecastBroadcaster {
                             Err(mpsc::TryRecvError::Disconnected) => None,
                         }
                     };
-                    
+
                     if let Some(chunk) = chunk {
                         if tx.send(Ok(bytes::Bytes::from(chunk))).await.is_err() {
                             break;
@@ -515,10 +515,10 @@ impl ChromecastBroadcaster {
                     }
                 }
             });
-            
+
             let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
             let body = Body::from_stream(stream);
-            
+
             Response::builder()
                 .header("content-type", "audio/wav")
                 .header("cache-control", "no-cache")
@@ -551,16 +551,16 @@ impl ChromecastBroadcaster {
     fn start_audio_recording(&self, audio_tx: mpsc::Sender<Vec<u8>>) -> Result<()> {
         let host = cpal::default_host();
         let device = host.default_input_device().context("No default input device available")?;
-        
+
         let config = device.default_input_config().context("Failed to get default input config")?;
         println!("Recording with config: {:?}", config);
 
         let _sample_rate = config.sample_rate().0;
         let channels = config.channels();
-        
+
         // WAV header for 44.1kHz, 16-bit, stereo, streaming (unknown length)
         let wav_header = Self::create_wav_header(44100, 2, 0xFFFFFFFF); // Use max length for streaming
-        
+
         // Send WAV header first
         audio_tx.send(wav_header).context("Failed to send WAV header")?;
 
@@ -573,13 +573,13 @@ impl ChromecastBroadcaster {
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
                         // Convert f32 samples to i16 PCM
                         let mut pcm_data = Vec::with_capacity(data.len() * 2);
-                        
+
                         for &sample in data {
                             // Convert f32 to i16
                             let sample_i16 = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
                             pcm_data.extend_from_slice(&sample_i16.to_le_bytes());
                         }
-                        
+
                         // Handle channel conversion if needed
                         if channels == 1 {
                             // Duplicate mono to stereo
@@ -603,11 +603,11 @@ impl ChromecastBroadcaster {
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
                         // Convert i16 samples to bytes
                         let mut pcm_data = Vec::with_capacity(data.len() * 2);
-                        
+
                         for &sample in data {
                             pcm_data.extend_from_slice(&sample.to_le_bytes());
                         }
-                        
+
                         // Handle channel conversion if needed
                         if channels == 1 {
                             // Duplicate mono to stereo
@@ -629,39 +629,39 @@ impl ChromecastBroadcaster {
         };
 
         stream.play().context("Failed to start audio stream")?;
-        
+
         // Keep the stream alive - it will be dropped when the function returns
         std::mem::forget(stream);
-        
+
         Ok(())
     }
 
     fn create_wav_header(sample_rate: u32, channels: u16, data_size: u32) -> Vec<u8> {
         let mut header = Vec::with_capacity(44);
-        
+
         // RIFF header
         header.extend_from_slice(b"RIFF");
         header.extend_from_slice(&(36 + data_size).to_le_bytes()); // File size - 8
         header.extend_from_slice(b"WAVE");
-        
+
         // fmt chunk
         header.extend_from_slice(b"fmt ");
         header.extend_from_slice(&16u32.to_le_bytes()); // fmt chunk size
         header.extend_from_slice(&1u16.to_le_bytes());  // PCM format
         header.extend_from_slice(&channels.to_le_bytes()); // Number of channels
         header.extend_from_slice(&sample_rate.to_le_bytes()); // Sample rate
-        
+
         let byte_rate = sample_rate * channels as u32 * 2; // 16-bit = 2 bytes per sample
         header.extend_from_slice(&byte_rate.to_le_bytes()); // Byte rate
-        
+
         let block_align = channels * 2; // 16-bit = 2 bytes per sample
         header.extend_from_slice(&block_align.to_le_bytes()); // Block align
         header.extend_from_slice(&16u16.to_le_bytes()); // Bits per sample
-        
+
         // data chunk
         header.extend_from_slice(b"data");
         header.extend_from_slice(&data_size.to_le_bytes()); // Data size
-        
+
         header
     }
 
@@ -671,7 +671,7 @@ impl ChromecastBroadcaster {
         // Use random available port
         let server_port = 0u16;
         let (audio_tx, actual_port, server_handle) = self.create_streaming_server(server_port).await?;
-        
+
         let audio_url = format!("http://{}:{}/stream.wav",
             local_ip_address::local_ip().unwrap_or_else(|_| "127.0.0.1".parse().unwrap()),
             actual_port);
@@ -707,7 +707,7 @@ impl ChromecastBroadcaster {
                         if audio_tx.send(buffer[..n].to_vec()).is_err() {
                             break; // Receiver dropped
                         }
-                        
+
                     }
                     Err(_) => break,
                 }
@@ -725,7 +725,7 @@ impl ChromecastBroadcaster {
 
         // Wait for streaming to complete or timeout
         let _ = tokio::time::timeout(Duration::from_secs(300), streaming_handle).await;
-        
+
         // Clean up
         server_handle.abort();
         println!("Finished streaming file");
@@ -739,7 +739,7 @@ impl ChromecastBroadcaster {
         // Use random available port
         let server_port = 0u16;
         let (audio_tx, actual_port, server_handle) = self.create_streaming_server(server_port).await?;
-        
+
         let audio_url = format!("http://{}:{}/stream.wav",
             local_ip_address::local_ip().unwrap_or_else(|_| "127.0.0.1".parse().unwrap()),
             actual_port);
@@ -783,11 +783,11 @@ impl ChromecastBroadcaster {
 
         let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
         let actual_port = listener.local_addr()?.port();
-        
+
         println!("Chromecast server running on http://localhost:{}", actual_port);
-        
+
         axum::serve(listener, app).await?;
-        
+
         Ok(())
     }
 
@@ -816,7 +816,7 @@ async fn stream_audio(
     body: Body,
 ) -> Result<String, StatusCode> {
     let stream = body.into_data_stream();
-    
+
     match stream_audio_data(&broadcaster, &speaker, stream).await {
         Ok(_) => Ok("Stream started".to_string()),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
@@ -844,18 +844,18 @@ async fn stream_audio_data(
     body: impl futures::Stream<Item = Result<bytes::Bytes, axum::Error>> + Send + 'static,
 ) -> Result<()> {
     println!("Starting audio stream to {}", speaker_name);
-    
+
     // Find the device
     let device = broadcaster.find_device(speaker_name).await?;
-    
+
     // Start HTTP streaming server for this request
     let server_port = 0u16;
     let (audio_tx, actual_port, server_handle) = broadcaster.create_streaming_server(server_port).await?;
-    
+
     let audio_url = format!("http://{}:{}/stream.wav",
         local_ip_address::local_ip().unwrap_or_else(|_| "127.0.0.1".parse().unwrap()),
         actual_port);
-    
+
     // Start Chromecast connection in background
     let broadcaster_clone = broadcaster.clone();
     let device_clone = device.clone();
@@ -863,13 +863,13 @@ async fn stream_audio_data(
     let cast_handle = tokio::spawn(async move {
         broadcaster_clone.cast_audio(&device_clone, &audio_url_clone).await
     });
-    
+
     // Stream incoming data to the audio channel
     let speaker_name_clone = speaker_name.to_string();
     let stream_handle = tokio::spawn(async move {
         use futures_util::pin_mut;
         pin_mut!(body);
-        
+
         while let Some(chunk) = body.try_next().await.unwrap_or(None) {
             let data = chunk.to_vec();
             if audio_tx.send(data).is_err() {
@@ -878,7 +878,7 @@ async fn stream_audio_data(
         }
         println!("Stream ended for {}", speaker_name_clone);
     });
-    
+
     // Wait for both to complete or timeout after 5 minutes
     let timeout_result = tokio::time::timeout(
         std::time::Duration::from_secs(300),
@@ -888,7 +888,7 @@ async fn stream_audio_data(
             (cast_result, stream_result)
         }
     );
-    
+
     match timeout_result.await {
         Ok((cast_result, _)) => {
             if let Ok(Err(e)) = cast_result {
@@ -897,7 +897,7 @@ async fn stream_audio_data(
         }
         Err(_) => println!("Stream timed out"),
     }
-    
+
     server_handle.abort();
     Ok(())
 }
