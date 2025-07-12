@@ -12,6 +12,7 @@ foreground = #dddddd
 background = #000000
 background-opacity = 0.75
 background-blur-radius = 18
+minimum-contrast = 1
 
 window-decoration = false
 window-vsync = false
