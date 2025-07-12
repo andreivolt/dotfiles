@@ -5,6 +5,7 @@
 .envrc
 .nrepl-history
 .rebel_readline_history
+.yarn
 __pycache__
 node_modules
 Session.vim
