@@ -64,6 +64,7 @@ return {
     if not is_termux then
       config.ensure_installed = {
         'bashls',
+        'biome',
         'clojure_lsp',
         'lua_ls',
         -- 'nil_ls',

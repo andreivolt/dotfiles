@@ -20,7 +20,7 @@ return {
       })
 
       vim.cmd("command! LspDef lua vim.lsp.buf.definition()")
-      vim.cmd("command! LspFormatting lua vim.lsp.buf.formatting()")
+      vim.cmd("command! LspFormatting lua vim.lsp.buf.format()")
       vim.cmd("command! LspCodeAction lua vim.lsp.buf.code_action()")
       vim.cmd("command! LspHover lua vim.lsp.buf.hover()")
       vim.cmd("command! LspRename lua vim.lsp.buf.rename()")
@@ -41,17 +41,18 @@ return {
       buf_map(bufnr, "n", "<Leader>a", ":LspDiagLine<CR>")
       buf_map(bufnr, "i", "<C-x><C-x>", "<cmd> LspSignatureHelp<CR>")
 
-      -- -- format on save
-      -- if client.resolved_capabilities.document_formatting then
-      --     vim.cmd("autocmd BufWritePre <buffer> lua vim.lsp.buf.formatting_sync()")
-      -- end
+      -- format on save
+      vim.api.nvim_create_autocmd("BufWritePre", {
+        buffer = bufnr,
+        callback = function()
+          vim.lsp.buf.format({ async = false })
+        end,
+      })
     end
 
     null_ls.setup({
       sources = {
-        -- Only include eslint sources if eslint is installed and found in the path
-        -- This prevents the startup error when eslint is not available
-        null_ls.builtins.formatting.prettier,
+        null_ls.builtins.formatting.biome,
         null_ls.builtins.code_actions.gitsigns
       },
       on_attach = on_attach
