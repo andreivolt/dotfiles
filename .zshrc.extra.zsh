@@ -1,8 +1,8 @@
-HISTSIZE="999999"
-SAVEHIST="999999"
-zsh_state_path=${XDG_STATE_HOME:-$HOME/.local/state}/zsh
-HISTFILE="$zsh_state_path/history"
-[[ -d $zsh_state_path ]] || mkdir $zsh_state_path
+HISTSIZE="999999" SAVEHIST=$HISTSIZE
+
+HISTFILE=${XDG_STATE_HOME:-$HOME/.local/state}/zsh/history
+[[ -f $HISTFILE ]] || mkdir $HISTFILE:h
+
 setopt append_history
 setopt extended_history
 setopt share_history
