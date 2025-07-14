@@ -149,7 +149,7 @@ zsh-defer source ~/.zsh.d/autopair.zsh
 zsh-defer source ~/.zsh.d/autosuggestions.zsh
 zsh-defer source ~/.zsh.d/direnv.zsh
 zsh-defer source ~/.zsh.d/fzf.zsh
-zsh-defer source ~/.zsh.d/history-search/history-search.zsh
+zsh-defer source ~/.zsh.d/history-search/history-search.zsh; export ZSH_HISTORY_RELATIVE_DATES=1
 zsh-defer source ~/.zsh.d/history-substring-search.zsh
 
 zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
