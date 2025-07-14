@@ -1,6 +1,6 @@
 HISTSIZE="999999" SAVEHIST=$HISTSIZE
 
-HISTFILE=${XDG_STATE_HOME:-$HOME/.local/state}/zsh/history
+HISTFILE=$XDG_STATE_HOME/zsh/history
 [[ -f $HISTFILE ]] || mkdir $HISTFILE:h
 
 setopt append_history
@@ -54,11 +54,9 @@ alias yt-dlp="yt-dlp --cookies-from-browser chrome"
 source ~/.zsh.d/vi.zsh
 
 autoload -Uz compinit
-[[ -d ~/.cache/zsh ]] || mkdir ~/.cache/zsh
-[[ -f ~/.cache/zsh/zcompdump(#qN.mh+24) ]] && {
-	compinit -d ~/.cache/zsh/zcompdump
-	zcompile ~/.cache/zsh/zcompdump
-} || compinit -C -d ~/.cache/zsh/zcompdump
+zcompdump=$XDG_CACHE_HOME/zsh/zcompdump
+[[ -f $zcompdump ]] || mkdir $zcompdump:h
+[[ -f $zcompdump(#qN.mh+24) ]] && { compinit -d $zcompdump && zcompile $zcompdump } || compinit -C -d $zcompdump
 
 (( ${+commands[brew]} )) && fpath=(/opt/homebrew/share/zsh/site-functions $fpath)
 
