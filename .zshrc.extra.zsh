@@ -73,9 +73,6 @@ bindkey -M menuselect "+" accept-and-menu-complete
 zstyle ':completion:*' use-cache on
 zstyle ':completion:*' cache-path "$XDG_CACHE_HOME/zsh/.zcompcache"
 
-zcompcache_path="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/.zcompcache"
-[[ -d $zcompcache_path ]] || mkdir $zcompcache_path
-
 zstyle ':completion:*' accept-exact '*(N)'
 zstyle ':completion:*' rehash true
 zstyle ':completion:*' squeeze-slashes yes
@@ -103,37 +100,37 @@ zstyle -e ':completion:*' completer '
 			_last_try="$HISTNO$BUFFER${CURSOR}x"
 			;;
 		$HISTNO$BUFFER${CURSOR}x)
-			reply=(_approximate:-extreme _complete)
-		;;
+			;;
 		*)
 			_last_try="$HISTNO$BUFFER$CURSOR"
 			reply=(_complete _expand_alias _prefix)
-		;;
+			;;
 	esac
-'
+	'
 
-zstyle ':completion:*:approximate:*' max-errors '(( reply=($#PREFIX+$#SUFFIX)/3 ))'
-zstyle -e ':completion:*:approximate-extreme:*' max-errors '(( reply=($#PREFIX+$#SUFFIX)/1.2 ))'
-zstyle ':completion:*:(correct|approximate[^:]#):*' original false
-zstyle ':completion:*:(correct|approximate[^:]#):*' tag-order '! original'
+	zstyle ':completion:*:approximate:*' max-errors '(( reply=($#PREFIX+$#SUFFIX)/3 ))'
+	zstyle -e ':completion:*:approximate-extreme:*' max-errors '(( reply=($#PREFIX+$#SUFFIX)/1.2 ))'
+	zstyle ':completion:*:(correct|approximate[^:]#):*' original false
+	zstyle ':completion:*:(correct|approximate[^:]#):*' tag-order '! original'
 
-zstyle ':completion::(^approximate*):*:functions' ignored-patterns '_*'
-zstyle ':completion::*:(bindkey|zle):*:widgets' ignored-patterns '.*'
-zstyle ':completion::*:(mv|cp|rm|chmod|chown|vi):*' ignore-line true
-zstyle ':completion::*:(scp|rsync):*' list-colors "=(#b)(*)/=0="${${${(s.:.)LS_COLORS}[(r)di=<->]}/di=/} '='${^${(M)${(s.:.)LS_COLORS}:#\**}}
+	zstyle ':completion::(^approximate*):*:functions' ignored-patterns '_*'
+	zstyle ':completion::*:(bindkey|zle):*:widgets' ignored-patterns '.*'
+	zstyle ':completion::*:(mv|cp|rm|chmod|chown|vi):*' ignore-line true
+	zstyle ':completion::*:(scp|rsync):*' list-colors "=(#b)(*)/=0="${${${(s.:.)LS_COLORS}[(r)di=<->]}/di=/} '='${^${(M)${(s.:.)LS_COLORS}:#\**}}
 
-zstyle ':completion:*:man:*' menu yes select
-zstyle ':completion:*:manuals' separate-sections true
-zstyle ':completion:*:manuals.*' insert-sections true
+		zstyle ':completion:*:man:*' menu yes select
+		zstyle ':completion:*:manuals' separate-sections true
+		zstyle ':completion:*:manuals.*' insert-sections true
 
-zstyle ':completion:*:processes' command 'ps -au $USER'
-zstyle ':completion:*:processes-names' command 'ps c -u ${USER} -o command | uniq'
+		zstyle ':completion:*:processes' command 'ps -au $USER'
+		zstyle ':completion:*:processes-names' command 'ps c -u ${USER} -o command | uniq'
 
-zstyle ':completion:*:expand:*' tag-order all-expansions
-zstyle ':completion:*:expand-alias:*' global true
-zstyle ':completion:*:history-words' list false
+		zstyle ':completion:*:expand:*' tag-order all-expansions
+		zstyle ':completion:*:expand-alias:*' global true
+		zstyle ':completion:*:history-words' list false
 
-zstyle ':completion:*:*:-subscript-:*' tag-order indexes parameters
+		zstyle ':completion:*:*:-subscript-:*' tag-order indexes parameters
+			reply=(_approximate:-extreme _complete)
 
 # history expansion
 bindkey ' ' magic-space
