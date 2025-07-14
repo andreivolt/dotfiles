@@ -125,6 +125,7 @@ fn main() {
 
     // Use fzf with just the history-specific options, inherit FZF_DEFAULT_OPTS from environment
     let mut fzf = Command::new("fzf")
+        .arg("--ansi")  // Enable ANSI color codes
         .arg("--nth=2..")
         .arg("--no-multi")
         .arg("--scheme=history")
@@ -145,12 +146,39 @@ fn main() {
 
     if output.status.success() {
         let selected_line = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        
         // Extract just the command part (skip the date prefix)
-        let command = if let Some(space_pos) = selected_line.find(' ') {
-            &selected_line[space_pos + 1..]
+        // When --ansi is used, fzf may strip ANSI codes from output
+        // So we need to handle both cases: with and without ANSI codes
+        
+        let command = if let Some(reset_pos) = selected_line.find("\x1b[0m ") {
+            // Found the ANSI reset sequence followed by space
+            selected_line[reset_pos + 5..].to_string()
+        } else if args.relative {
+            // No ANSI codes, but we know relative dates format
+            // Look for patterns like "2 hours ago", "5 minutes ago", "now"
+            if let Some(ago_pos) = selected_line.find(" ago ") {
+                selected_line[ago_pos + 5..].to_string()
+            } else if selected_line.starts_with("now ") {
+                selected_line[4..].to_string()
+            } else {
+                // Try to find the first occurrence of double space which often separates date from command
+                if let Some(double_space) = selected_line.find("  ") {
+                    selected_line[double_space..].trim().to_string()
+                } else {
+                    selected_line
+                }
+            }
         } else {
-            &selected_line
+            // No ANSI codes, absolute date format (YYYY-MM-DD HH:MM)
+            // Date is 16 characters long
+            if selected_line.len() > 17 && selected_line.chars().nth(4) == Some('-') && selected_line.chars().nth(7) == Some('-') {
+                selected_line[17..].to_string()
+            } else {
+                selected_line
+            }
         };
+        
         println!("{}", command);
     }
 }
