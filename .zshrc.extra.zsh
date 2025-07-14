@@ -137,12 +137,6 @@ zstyle ':completion:*:history-words' list false
 
 zstyle ':completion:*:*:-subscript-:*' tag-order indexes parameters
 
-# # run rehash on completion so new installed program are found automatically:
-# _force_rehash() {
-#   (( CURRENT == 1 )) && rehash
-#   return 1
-# }
-
 # history expansion
 bindkey ' ' magic-space
 
@@ -153,9 +147,6 @@ if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]
 fi
 source ~/.local/share/zsh/plugins/powerlevel10k/powerlevel10k.zsh-theme
 [[ -f ~/.zsh.d/p10k.zsh ]] && source ~/.zsh.d/p10k.zsh
-
-# source ~/.zsh.d/accept-line.zsh
-# zsh-defer source ~/.local/share/zsh/plugins/zummoner/zummoner.plugin.zsh
 
 [[ "$OSTYPE" == darwin* ]] && zsh-defer source ~/.zsh.d/orbstack.zsh
 [[ $TERM == xterm-kitty ]] && zsh-defer source ~/.zsh.d/kitty.zsh
@@ -171,4 +162,3 @@ zsh-defer source ~/.zsh.d/history-search/history-search.zsh
 zsh-defer source ~/.zsh.d/history-substring-search.zsh
 
 zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
-# zsh-defer source ~/.zsh.d/command-not-found.zsh
