@@ -6,6 +6,7 @@
 //! regex = "1.0"
 //! serde = { version = "1.0", features = ["derive"] }
 //! bincode = "1.3"
+//! timeago = "0.4"
 //! ```
 
 use chrono::{Local, TimeZone};
@@ -19,8 +20,8 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::SystemTime;
+use timeago::Formatter;
 
-const DATE_PREFIX_LEN: usize = 17; // "YYYY-MM-DD HH:MM "
 const EXTENDED_HISTORY_REGEX: &str = r"^: (\d+):\d+;(.*)$";
 
 #[derive(Parser)]
@@ -32,6 +33,9 @@ struct Args {
 
     #[arg(short, long, help = "Maximum number of entries to show")]
     limit: Option<usize>,
+
+    #[arg(short, long, help = "Show relative dates (e.g., '2 hours ago')")]
+    relative: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,8 +52,20 @@ struct HistoryCache {
     line_count: usize,
 }
 
+fn format_relative_time(timestamp: i64) -> String {
+    let formatter = Formatter::new();
+    let now = Local::now();
+    let then = Local.timestamp_opt(timestamp, 0).single().unwrap_or(now);
+    formatter.convert_chrono(then, now)
+}
+
 fn main() {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    
+    // Check if relative dates should be enabled by default via environment variable
+    if !args.relative && env::var("ZSH_HISTORY_RELATIVE_DATES").is_ok() {
+        args.relative = true;
+    }
 
     let history_file = args.file.unwrap_or_else(|| {
         env::var("HISTFILE")
@@ -94,7 +110,11 @@ fn main() {
             entry.timestamp
                 .and_then(|timestamp| Local.timestamp_opt(timestamp, 0).single())
                 .map(|dt| {
-                    let formatted_date = dt.format("%Y-%m-%d %H:%M");
+                    let formatted_date = if args.relative {
+                        format!("{:>15}", format_relative_time(dt.timestamp()))
+                    } else {
+                        dt.format("%Y-%m-%d %H:%M").to_string()
+                    };
                     format!("\x1b[90m{}\x1b[0m {}", formatted_date, entry.command)
                 })
                 .unwrap_or_else(|| entry.command.clone())
@@ -126,8 +146,8 @@ fn main() {
     if output.status.success() {
         let selected_line = String::from_utf8_lossy(&output.stdout).trim().to_string();
         // Extract just the command part (skip the date prefix)
-        let command = if selected_line.len() > DATE_PREFIX_LEN && selected_line.chars().nth(DATE_PREFIX_LEN - 1) == Some(' ') {
-            &selected_line[DATE_PREFIX_LEN..]
+        let command = if let Some(space_pos) = selected_line.find(' ') {
+            &selected_line[space_pos + 1..]
         } else {
             &selected_line
         };
