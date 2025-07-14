@@ -11,7 +11,7 @@ theme = aurora
 foreground = #dddddd
 background = #000000
 background-opacity = 0.75
-background-blur-radius = 18
+background-blur-radius = 12
 minimum-contrast = 1
 
 window-decoration = false
