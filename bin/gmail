@@ -36,6 +36,7 @@ import dominate
 from dominate.tags import *
 from dominate.util import text, raw
 from platformdirs import user_cache_dir, user_config_dir
+from pathlib import Path
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 TOKEN_FILE = user_cache_dir("gmail") + "/gmail-token.pickle"
@@ -85,6 +86,7 @@ def get_gmail_service():
 def get_message_parts(payload):
     text_part = None
     html_part = None
+    attachments = []
 
     if "parts" in payload:
         for part in payload["parts"]:
@@ -92,19 +94,23 @@ def get_message_parts(payload):
                 text_part = part
             elif part["mimeType"] == "text/html" and not html_part:
                 html_part = part
+            elif "filename" in part and part["filename"]:
+                # This is an attachment
+                attachments.append(part)
             elif "parts" in part:
-                sub_text, sub_html = get_message_parts(part)
+                sub_text, sub_html, sub_attachments = get_message_parts(part)
                 if sub_text and not text_part:
                     text_part = sub_text
                 if sub_html and not html_part:
                     html_part = sub_html
+                attachments.extend(sub_attachments)
     else:
         if payload["mimeType"] == "text/plain":
             text_part = payload
         elif payload["mimeType"] == "text/html":
             html_part = payload
 
-    return text_part, html_part
+    return text_part, html_part, attachments
 
 
 def decode_part(part):
@@ -113,7 +119,30 @@ def decode_part(part):
     return ""
 
 
-def format_as_markdown(msg):
+def process_attachment_to_text(attachment_data, filename, mime_type):
+    """Convert attachment to text using 2text tool"""
+    try:
+        # Create a temporary file to save the attachment
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(filename).suffix) as tmp_file:
+            tmp_file.write(attachment_data)
+            tmp_path = tmp_file.name
+        
+        # Use 2text to convert the file
+        try:
+            two_text = Command("2text")
+            result = two_text(tmp_path).stdout.decode("utf-8")
+            return result
+        except (ErrorReturnCode, FileNotFoundError):
+            # If 2text fails or is not available, return basic info
+            return f"[Attachment: {filename} ({mime_type}) - {len(attachment_data):,} bytes]"
+        finally:
+            # Clean up temporary file
+            os.unlink(tmp_path)
+    except Exception as e:
+        return f"[Error processing attachment {filename}: {str(e)}]"
+
+
+def format_as_markdown(msg, service=None, include_attachments=True):
     payload = msg["payload"]
     headers = payload.get("headers", [])
 
@@ -125,7 +154,7 @@ def format_as_markdown(msg):
     markdown += f"**Date:** {header_dict.get('Date', 'Unknown')}\n\n"
     markdown += "---\n\n"
 
-    text_part, html_part = get_message_parts(payload)
+    text_part, html_part, attachments = get_message_parts(payload)
 
     if html_part:
         html_content = decode_part(html_part)
@@ -137,6 +166,37 @@ def format_as_markdown(msg):
         markdown += text_content
     else:
         markdown += "*No content found*"
+
+    # Process attachments if present
+    if attachments and include_attachments:
+        markdown += "\n\n---\n\n## Attachments\n\n"
+        
+        for attachment in attachments:
+            filename = attachment.get("filename", "Unnamed")
+            mime_type = attachment.get("mimeType", "unknown")
+            attachment_id = attachment["body"].get("attachmentId")
+            
+            markdown += f"### {filename}\n\n"
+            
+            if service and attachment_id:
+                try:
+                    # Fetch the attachment data
+                    att_data = service.users().messages().attachments().get(
+                        userId="me", 
+                        messageId=msg["id"],
+                        id=attachment_id
+                    ).execute()
+                    
+                    # Decode attachment data
+                    file_data = base64.urlsafe_b64decode(att_data["data"])
+                    
+                    # Convert to text using 2text
+                    text_content = process_attachment_to_text(file_data, filename, mime_type)
+                    markdown += f"```\n{text_content}\n```\n\n"
+                except Exception as e:
+                    markdown += f"*Error loading attachment: {str(e)}*\n\n"
+            else:
+                markdown += f"*Attachment: {filename} ({mime_type})*\n\n"
 
     return markdown
 
@@ -174,7 +234,7 @@ def format_as_html(msg):
                 text(" " + header_dict.get("Date", "Unknown"))
 
         with div(cls="content"):
-            text_part, html_part = get_message_parts(payload)
+            text_part, html_part, attachments = get_message_parts(payload)
 
             if html_part:
                 # Insert raw HTML content
@@ -188,12 +248,12 @@ def format_as_html(msg):
     return str(doc)
 
 
-def format_as_json(msg):
+def format_as_json(msg, service=None, include_attachments=True):
     payload = msg["payload"]
     headers = payload.get("headers", [])
     header_dict = {h["name"]: h["value"] for h in headers}
 
-    text_part, html_part = get_message_parts(payload)
+    text_part, html_part, attachments = get_message_parts(payload)
 
     result = {
         "id": msg["id"],
@@ -209,10 +269,41 @@ def format_as_json(msg):
         },
     }
 
+    if attachments and include_attachments:
+        result["attachments"] = []
+        for attachment in attachments:
+            att_info = {
+                "filename": attachment.get("filename", "Unnamed"),
+                "mimeType": attachment.get("mimeType", "unknown"),
+                "size": attachment["body"].get("size", 0)
+            }
+            
+            attachment_id = attachment["body"].get("attachmentId")
+            if service and attachment_id:
+                try:
+                    # Fetch the attachment data
+                    att_data = service.users().messages().attachments().get(
+                        userId="me", 
+                        messageId=msg["id"],
+                        id=attachment_id
+                    ).execute()
+                    
+                    # Decode attachment data
+                    file_data = base64.urlsafe_b64decode(att_data["data"])
+                    
+                    # Convert to text using 2text
+                    att_info["text_content"] = process_attachment_to_text(
+                        file_data, att_info["filename"], att_info["mimeType"]
+                    )
+                except Exception as e:
+                    att_info["error"] = str(e)
+            
+            result["attachments"].append(att_info)
+
     return json.dumps(result, indent=2)
 
 
-def output_message(msg, args):
+def output_message(msg, args, service=None):
     if args.browser:
         html_content = format_as_html(msg)
         with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
@@ -220,11 +311,11 @@ def output_message(msg, args):
             f.flush()
             webbrowser.open(f"file://{f.name}")
     elif args.json:
-        print(format_as_json(msg))
+        print(format_as_json(msg, service=service))
     elif args.html:
         print(format_as_html(msg))
     else:
-        markdown_content = format_as_markdown(msg)
+        markdown_content = format_as_markdown(msg, service=service)
         try:
             glow = Command("glow")
             print(glow(_in=markdown_content))
@@ -233,16 +324,26 @@ def output_message(msg, args):
 
 
 def cmd_last(service, args):
-    # Get last received email (not sent)
-    results = service.users().messages().list(userId="me", q="-from:me", maxResults=1).execute()
+    # Build query to exclude sent emails
+    query = "-from:me"
+    
+    # Add sender filter if specified
+    if args.sender:
+        query += f" from:{args.sender}"
+    
+    # Get last received email matching criteria
+    results = service.users().messages().list(userId="me", q=query, maxResults=1).execute()
     messages = results.get("messages", [])
 
     if not messages:
-        print("No messages found.")
+        if args.sender:
+            print(f"No messages found from sender: {args.sender}")
+        else:
+            print("No messages found.")
         return
 
     msg = service.users().messages().get(userId="me", id=messages[0]["id"]).execute()
-    output_message(msg, args)
+    output_message(msg, args, service=service)
 
 
 def extract_verification_info(subject, body_text, body_html):
@@ -351,7 +452,7 @@ def process_verification_email(msg):
     subject = header_dict.get("Subject", "")
     from_addr = header_dict.get("From", "")
 
-    text_part, html_part = get_message_parts(payload)
+    text_part, html_part, attachments = get_message_parts(payload)
     body_text = decode_part(text_part) if text_part else ""
     body_html = decode_part(html_part) if html_part else ""
 
@@ -397,10 +498,19 @@ def process_verification_email(msg):
 
 def cmd_monitor(service, args):
     prompt = " ".join(args.prompt) if args.prompt else "verification code"
-    print(f"Monitoring emails matching: '{prompt}'")
+    
+    # Build base query
+    query = "-from:me is:unread"
+    
+    # Add sender filter if specified
+    if args.sender:
+        query += f" from:{args.sender}"
+        print(f"Monitoring emails matching: '{prompt}' from sender: {args.sender}")
+    else:
+        print(f"Monitoring emails matching: '{prompt}'")
 
     # Get current latest message ID to avoid processing old emails
-    results = service.users().messages().list(userId="me", q="-from:me is:unread", maxResults=1).execute()
+    results = service.users().messages().list(userId="me", q=query, maxResults=1).execute()
     messages = results.get("messages", [])
     processed_ids = set()
 
@@ -411,7 +521,7 @@ def cmd_monitor(service, args):
     while True:
         try:
             # Check for new unread received messages
-            results = service.users().messages().list(userId="me", q="-from:me is:unread", maxResults=10).execute()
+            results = service.users().messages().list(userId="me", q=query, maxResults=10).execute()
             messages = results.get("messages", [])
 
             for msg_ref in messages:
@@ -426,7 +536,7 @@ def cmd_monitor(service, args):
                     subject = header_dict.get("Subject", "")
                     from_addr = header_dict.get("From", "")
 
-                    text_part, html_part = get_message_parts(payload)
+                    text_part, html_part, attachments = get_message_parts(payload)
                     body_text = decode_part(text_part) if text_part else ""
 
                     # Check if email matches the prompt
@@ -459,6 +569,7 @@ parser.add_argument("--json", action="store_true", help="Output as JSON")
 parser.add_argument(
     "--browser", action="store_true", help="Open in browser (implies --html)"
 )
+parser.add_argument("--sender", type=str, help="Filter emails by sender address")
 
 subparsers = parser.add_subparsers(dest="command", help="Commands")
 
