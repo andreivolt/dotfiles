@@ -146,7 +146,7 @@ return {
     cmp.setup.cmdline(":", {
       mapping = cmp.mapping.preset.cmdline(),
       sources = cmp.config.sources({
-        { 
+        {
           name = "path",
           option = {
             get_cwd = function()
@@ -159,7 +159,7 @@ return {
           }
         }
       }, {
-        { 
+        {
           name = "cmdline",
           option = {
             ignore_cmds = { '!*' }
