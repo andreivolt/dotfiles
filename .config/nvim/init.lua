@@ -1,11 +1,3 @@
-vim.g.loaded_netrw = 1
-vim.g.loaded_netrwPlugin = 1
-vim.g.loaded_node_provider = 0
-vim.g.loaded_perl_provider = 0
-vim.g.loaded_python3_provider = 0
-vim.g.loaded_python_provider = 0
-vim.g.loaded_ruby_provider = 0
-
 vim.deprecate = function() end
 
 require("user.performance")
@@ -95,19 +87,19 @@ vim.api.nvim_create_autocmd('User', {
 })
 
 vim.keymap.set('c', '<Tab>', function()
-    if vim.fn.getcmdtype() == '/' or vim.fn.getcmdtype() == '?' then
-        return '<CR>/<C-r>/'
-    else
-        return '<C-z>'
-    end
+  if vim.fn.getcmdtype() == '/' or vim.fn.getcmdtype() == '?' then
+    return '<CR>/<C-r>/'
+  else
+    return '<C-z>'
+  end
 end, { expr = true })
 
 vim.keymap.set('c', '<S-Tab>', function()
-    if vim.fn.getcmdtype() == '/' or vim.fn.getcmdtype() == '?' then
-        return '<CR>?<C-r>/'
-    else
-        return '<S-Tab>'
-    end
+  if vim.fn.getcmdtype() == '/' or vim.fn.getcmdtype() == '?' then
+    return '<CR>?<C-r>/'
+  else
+    return '<S-Tab>'
+  end
 end, { expr = true })
 
 -- " lisp case movement
@@ -126,6 +118,6 @@ vim.api.nvim_create_autocmd("CursorHold", {
   callback = function()
     vim.defer_fn(function()
       vim.cmd('echo ""') -- Clear the message
-    end, 1000) -- Delay in milliseconds (2 seconds)
+    end, 1000)           -- Delay in milliseconds (2 seconds)
   end,
 })
