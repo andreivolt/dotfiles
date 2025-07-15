@@ -11,9 +11,8 @@
 /.nix-profile
 /.npm
 /.vscode
-/Google Drive/.tmp
-/Google Drive/.Trash
-/Library
+/Library/CloudStorage/GoogleDrive-andrei.volt@gmail.com/.tmp
+/Library/CloudStorage/GoogleDrive-andrei.volt@gmail.com/.Trash
 /OrbStack
 /Pictures
 node_modules
