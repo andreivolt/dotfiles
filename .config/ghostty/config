@@ -3,9 +3,9 @@ font-family-italic = "Pragmasevka Nerd Font Italic"
 font-family-bold = "Pragmasevka Nerd Font Bold"
 font-family-bold-italic = "Pragmasevka Nerd Font Bold Italic"
 font-size = 18
-adjust-cell-height = -4
+adjust-cell-height = -3
 adjust-font-baseline = 1
-adjust-cell-width = -10%
+adjust-cell-width = -9%
 
 theme = aurora
 foreground = #dddddd
