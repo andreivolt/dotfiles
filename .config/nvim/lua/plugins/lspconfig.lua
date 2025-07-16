@@ -70,7 +70,7 @@ return {
         -- 'nil_ls',
         'pyright',
         'rust_analyzer',
-        'ruby_lsp',
+        -- 'ruby_lsp', -- Using system ruby-lsp instead
         'ts_ls',
         -- 'gopls',
       }
