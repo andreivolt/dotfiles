@@ -48,7 +48,7 @@ alias scrcpy="scrcpy --render-driver opengl"
 alias vi="nvim"
 alias yt-dlp="yt-dlp --cookies-from-browser chrome"
 
-source ~/.zsh.d/vi.zsh
+source ~/.config/zsh/vi.zsh
 
 autoload -Uz compinit
 zcompdump=$XDG_CACHE_HOME/zsh/zcompdump
@@ -132,19 +132,19 @@ if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]
 	source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
 fi
 source ~/.local/share/zsh/plugins/powerlevel10k/powerlevel10k.zsh-theme
-source ~/.zsh.d/p10k.zsh
+source ~/.config/zsh/p10k.zsh
 
-[[ "$OSTYPE" == darwin* ]] && zsh-defer source ~/.zsh.d/orbstack.zsh
-[[ $TERM == xterm-kitty ]] && zsh-defer source ~/.zsh.d/kitty.zsh
-[[ -n "$TMUX" ]] && zsh-defer source ~/.zsh.d/tmux.zsh
+[[ "$OSTYPE" == darwin* ]] && zsh-defer source ~/.config/zsh/orbstack.zsh
+[[ $TERM == xterm-kitty ]] && zsh-defer source ~/.config/zsh/kitty.zsh
+[[ -n "$TMUX" ]] && zsh-defer source ~/.config/zsh/tmux.zsh
 zsh-defer eval "$(carapace _carapace zsh)"
 zsh-defer eval "$(dircolors -b ~/.dircolors)"
 zsh-defer source ~/.local/share/zsh/plugins/nix-shell/nix-shell.plugin.zsh
-zsh-defer source ~/.zsh.d/autopair.zsh
-zsh-defer source ~/.zsh.d/autosuggestions.zsh
-zsh-defer source ~/.zsh.d/direnv.zsh
-zsh-defer source ~/.zsh.d/fzf.zsh
-zsh-defer source ~/.zsh.d/history-search/history-search.zsh; export ZSH_HISTORY_RELATIVE_DATES=1
-zsh-defer source ~/.zsh.d/history-substring-search.zsh
+zsh-defer source ~/.config/zsh/autopair.zsh
+zsh-defer source ~/.config/zsh/autosuggestions.zsh
+zsh-defer source ~/.config/zsh/direnv.zsh
+zsh-defer source ~/.config/zsh/fzf.zsh
+zsh-defer source ~/.config/zsh/history-search/history-search.zsh; export ZSH_HISTORY_RELATIVE_DATES=1
+zsh-defer source ~/.config/zsh/history-substring-search.zsh
 
 zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
