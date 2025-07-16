@@ -1,15 +1,12 @@
 HISTSIZE="999999" SAVEHIST=$HISTSIZE
-
 HISTFILE=$XDG_STATE_HOME/zsh/history
-[[ -f $HISTFILE ]] || mkdir $HISTFILE:h
-
 setopt append_history
 setopt extended_history
-setopt share_history
 setopt hist_fcntl_lock
 setopt hist_ignore_dups
 setopt hist_ignore_space
 setopt hist_reduce_blanks
+setopt share_history
 
 setopt auto_cd
 setopt auto_pushd
@@ -55,10 +52,14 @@ source ~/.zsh.d/vi.zsh
 
 autoload -Uz compinit
 zcompdump=$XDG_CACHE_HOME/zsh/zcompdump
-[[ -f $zcompdump ]] || mkdir $zcompdump:h
 [[ -f $zcompdump(#qN.mh+24) ]] && compinit -d $zcompdump && zcompile $zcompdump || compinit -C -d $zcompdump
 
 (( ${+commands[brew]} )) && fpath=(/opt/homebrew/share/zsh/site-functions $fpath)
+
+bindkey ' ' magic-space # history expansion
+
+bindkey -M menuselect '^o' accept-and-menu-complete
+bindkey -M menuselect "+" accept-and-menu-complete
 
 setopt no_list_ambiguous
 setopt glob_complete
@@ -66,11 +67,6 @@ setopt complete_in_word
 setopt list_packed
 
 _comp_options+=(globdots)
-
-bindkey ' ' magic-space # history expansion
-
-bindkey -M menuselect '^o' accept-and-menu-complete
-bindkey -M menuselect "+" accept-and-menu-complete
 
 zstyle ':completion:*' use-cache on
 zstyle ':completion:*' cache-path "$XDG_CACHE_HOME/zsh/zcompcache"
