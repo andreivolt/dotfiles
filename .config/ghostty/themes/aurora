@@ -1,19 +1,12 @@
-# Aurora theme for Ghostty
-# Based on the Aurora neovim colorscheme
-
-# Background colors
 background = #211c2f
 foreground = #a0a0a0
 
-# Cursor
 cursor-color = #ddd0f4
 cursor-text = #211c2f
 
-# Selection
 selection-background = #3f4060
 selection-foreground = #e7d3fb
 
-# Basic ANSI colors (0-7)
 palette = 0=#070510
 palette = 1=#ff5874
 palette = 2=#addb67
@@ -22,8 +15,6 @@ palette = 4=#be9af7
 palette = 5=#FD9720
 palette = 6=#A1EFE4
 palette = 7=#645775
-
-# Bright ANSI colors (8-15)
 palette = 8=#443d60
 palette = 9=#ec5f67
 palette = 10=#d7ffaf
@@ -33,6 +24,5 @@ palette = 13=#ffbe00
 palette = 14=#54CED6
 palette = 15=#e7d3fb
 
-# Extended colors
 palette = 16=#8a6e2b
 palette = 17=#a8834a
