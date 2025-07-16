@@ -22,6 +22,7 @@ export UV_TOOL_BIN_DIR=~/.local/bin
 
 export ENABLE_BACKGROUND_TASKS=1
 export CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1
+export MAX_THINKING_TOKENS=31999
 
 [[ -f ~/.local/ca-certificates/combined-ca-bundle.pem ]] && export CURL_CA_BUNDLE=~/.local/ca-certificates/combined-ca-bundle.pem
 
@@ -37,6 +38,6 @@ path=(
 )
 
 [[ "$OSTYPE" == darwin* ]] && source ~/.orbstack/shell/init.zsh
-[[ "$OSTYPE" == darwin* ]] && source ~/.zsh.d/homebrew.sh
+[[ "$OSTYPE" == darwin* ]] && source ~/.config/zsh/homebrew.sh
 
 source ~/.config/env
