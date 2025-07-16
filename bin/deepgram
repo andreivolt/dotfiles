@@ -10,7 +10,6 @@
 //! futures = "0.3"
 //! mime_guess = "2.0"
 //! indicatif = "0.17"
-//! tempfile = "3.0"
 //! regex = "1.0"
 //! tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
 //! cpal = "0.15"
@@ -38,12 +37,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tempfile::NamedTempFile;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 // Audio configuration for live transcription
 const SAMPLE_RATE: u32 = 16000;
 const CHANNELS: u16 = 1;
+
+// File size limit (2GB)
+const MAX_FILE_SIZE: u64 = 2 * 1024 * 1024 * 1024;
+
+// Video formats that need audio extraction
+const VIDEO_FORMATS: &[&str] = &[
+    "video/mp4", "video/avi", "video/mov", "video/mkv", "video/webm", 
+    "video/wmv", "video/flv", "video/m4v", "video/3gp", "video/quicktime"
+];
+
+const VIDEO_EXTENSIONS: &[&str] = &[
+    "mp4", "avi", "mov", "mkv", "webm", "wmv", "flv", "m4v", "3gp", "qt"
+];
 
 // Model choices - matching Python version
 const NOVA_MODELS: &[&str] = &[
@@ -440,9 +451,122 @@ async fn get_audio_duration(file_path: &str) -> Result<f64> {
     Ok(duration)
 }
 
-async fn chunk_audio(file_path: &str, chunk_minutes: u32) -> Result<Vec<String>> {
-    println!("Analyzing audio file: {}", file_path);
+fn check_file_size(file_path: &str) -> Result<u64> {
+    let metadata = fs::metadata(file_path).context("Failed to get file metadata")?;
+    let file_size = metadata.len();
+    
+    if file_size > MAX_FILE_SIZE {
+        return Err(anyhow::anyhow!(
+            "File size ({:.1} GB) exceeds the 2GB limit. Consider extracting audio from video files.",
+            file_size as f64 / 1024.0 / 1024.0 / 1024.0
+        ));
+    }
+    
+    Ok(file_size)
+}
 
+fn is_video_file(file_path: &str) -> bool {
+    let mime_type = from_path(file_path).first_or_octet_stream();
+    
+    // Check MIME type first
+    if VIDEO_FORMATS.contains(&mime_type.as_ref()) {
+        return true;
+    }
+    
+    // Check file extension as fallback
+    if let Some(extension) = Path::new(file_path).extension() {
+        if let Some(ext_str) = extension.to_str() {
+            return VIDEO_EXTENSIONS.contains(&ext_str.to_lowercase().as_str());
+        }
+    }
+    
+    false
+}
+
+async fn get_audio_codec(video_path: &str) -> Result<String> {
+    let output = Command::new("ffprobe")
+        .args(&[
+            "-v", "quiet",
+            "-select_streams", "a:0",
+            "-show_entries", "stream=codec_name",
+            "-of", "csv=p=0",
+            video_path
+        ])
+        .output()
+        .context("Failed to execute ffprobe")?;
+    
+    if !output.status.success() {
+        return Err(anyhow::anyhow!("ffprobe failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    
+    let codec = String::from_utf8(output.stdout)
+        .context("Invalid UTF-8 from ffprobe")?
+        .trim()
+        .to_string();
+    
+    Ok(codec)
+}
+
+async fn extract_audio_from_video(video_path: &str) -> Result<String> {
+    let video_stem = Path::new(video_path).file_stem()
+        .ok_or_else(|| anyhow::anyhow!("Invalid video file path"))?
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid video file name"))?;
+    
+    // Get audio codec information
+    let audio_codec = get_audio_codec(video_path).await?;
+    
+    // Deepgram-supported audio formats
+    let supported_codecs = ["mp3", "aac", "flac", "opus", "vorbis", "wav", "pcm_s16le"];
+    
+    let (audio_path, should_copy) = if supported_codecs.contains(&audio_codec.as_str()) {
+        // Extract without re-encoding for supported formats
+        let extension = match audio_codec.as_str() {
+            "mp3" => "mp3",
+            "aac" => "aac",
+            "flac" => "flac",
+            "opus" => "opus",
+            "vorbis" => "ogg",
+            _ => "m4a", // Default for other supported formats
+        };
+        (format!("{}_audio.{}", video_stem, extension), true)
+    } else {
+        // Re-encode to MP3 for unsupported formats
+        (format!("{}_audio.mp3", video_stem), false)
+    };
+    
+    let mut ffmpeg_args = vec![
+        "-y", // Overwrite output file
+        "-i", video_path,
+        "-vn", // No video
+    ];
+    
+    if should_copy {
+        // Copy audio stream without re-encoding
+        ffmpeg_args.extend_from_slice(&["-c:a", "copy"]);
+    } else {
+        // Re-encode to MP3 with good quality
+        ffmpeg_args.extend_from_slice(&["-c:a", "libmp3lame", "-b:a", "192k"]);
+    }
+    
+    ffmpeg_args.push(&audio_path);
+    
+    let output = Command::new("ffmpeg")
+        .args(&ffmpeg_args)
+        .output()
+        .context("Failed to execute ffmpeg")?;
+    
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "ffmpeg failed: {}", 
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    
+    Ok(audio_path)
+}
+
+async fn chunk_audio(file_path: &str, chunk_minutes: u32) -> Result<Vec<String>> {
     let total_duration = get_audio_duration(file_path).await?;
     let chunk_duration = chunk_minutes as f64 * 60.0;
 
@@ -455,8 +579,6 @@ async fn chunk_audio(file_path: &str, chunk_minutes: u32) -> Result<Vec<String>>
     fs::create_dir_all(&output_dir).context("Failed to create chunks directory")?;
 
     let total_chunks = (total_duration / chunk_duration).ceil() as usize;
-    println!("Total duration: {:.1} hours", total_duration / 3600.0);
-    println!("Splitting into {} chunks of {} minutes each", total_chunks, chunk_minutes);
 
     let mut chunks = Vec::new();
     let file_ext = Path::new(file_path).extension()
@@ -466,8 +588,6 @@ async fn chunk_audio(file_path: &str, chunk_minutes: u32) -> Result<Vec<String>>
     for i in 0..total_chunks {
         let start_time = i as f64 * chunk_duration;
         let chunk_path = format!("{}/chunk_{:03}.{}", output_dir, i, file_ext);
-
-        println!("Creating chunk {}/{}...", i + 1, total_chunks);
 
         let output = Command::new("ffmpeg")
             .args(&[
@@ -491,40 +611,6 @@ async fn chunk_audio(file_path: &str, chunk_minutes: u32) -> Result<Vec<String>>
     Ok(chunks)
 }
 
-async fn download_file(url: &str, output_path: &str) -> Result<()> {
-    println!("Downloading: {}", url);
-
-    let client = reqwest::Client::new();
-    let response = client.get(url).send().await?;
-
-    if !response.status().is_success() {
-        return Err(anyhow::anyhow!("Download failed: {}", response.status()));
-    }
-
-    let total_size = response.content_length().unwrap_or(0);
-    let mut downloaded = 0u64;
-
-    let mut file = fs::File::create(output_path).context("Failed to create output file")?;
-    let mut stream = response.bytes_stream();
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.context("Failed to read chunk")?;
-        file.write_all(&chunk).context("Failed to write chunk")?;
-        downloaded += chunk.len() as u64;
-
-        if total_size > 0 {
-            let progress = (downloaded as f64 / total_size as f64) * 100.0;
-            print!("\rDownload progress: {:.1}%", progress);
-            io::stdout().flush().unwrap();
-        }
-    }
-
-    if total_size > 0 {
-        println!();
-    }
-
-    Ok(())
-}
 
 async fn transcribe_chunk(client: &reqwest::Client, chunk_path: &str, chunk_index: usize, args: &Args, api_key: &str) -> ChunkResult {
     let file_size = match fs::metadata(chunk_path) {
@@ -548,7 +634,6 @@ async fn transcribe_chunk(client: &reqwest::Client, chunk_path: &str, chunk_inde
         };
     }
 
-    println!("Processing chunk {}: {} ({:.1}MB)", chunk_index, chunk_path, file_size as f64 / 1024.0 / 1024.0);
 
     let file_data = match fs::read(chunk_path) {
         Ok(data) => data,
@@ -603,9 +688,6 @@ async fn transcribe_chunk(client: &reqwest::Client, chunk_path: &str, chunk_inde
 
     match response.json::<DeepgramResponse>().await {
         Ok(mut result) => {
-            let transcript = result.results.channels[0].alternatives[0].transcript.clone();
-            println!("Chunk {} completed: {} characters", chunk_index, transcript.len());
-
             // Adjust timestamps for chunk offset (matching Python logic)
             let time_offset_seconds = (chunk_index as u32 * args.chunk_minutes * 60) as f64;
 
@@ -760,18 +842,39 @@ async fn process_single_file(client: &reqwest::Client, input_file: &str, args: &
         let file_data = fs::read(input_file).context("Failed to read input file")?;
         let mime_type = from_path(input_file).first_or_octet_stream();
 
-        let part = multipart::Part::bytes(file_data)
-            .file_name(Path::new(input_file).file_name().unwrap().to_str().unwrap().to_string())
-            .mime_str(mime_type.as_ref()).unwrap();
+        // Show progress bar for file upload
+        let file_size = file_data.len() as u64;
+        let pb = ProgressBar::new(file_size);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+            .unwrap()
+            .progress_chars("#>-"));
 
-        let form = multipart::Form::new().part("file", part);
+        pb.set_message("Uploading file");
+        
+        // Simulate progress during upload
+        let pb_clone = pb.clone();
+        let file_size_clone = file_size;
+        tokio::spawn(async move {
+            let mut progress = 0;
+            while progress < file_size_clone {
+                let increment = (file_size_clone / 100).max(1024); // At least 1KB increments
+                progress = (progress + increment).min(file_size_clone);
+                pb_clone.set_position(progress);
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
 
-        client
+        let response = client
             .post(&url)
             .header("Authorization", format!("Token {}", api_key))
-            .multipart(form)
+            .header("Content-Type", mime_type.as_ref())
+            .body(file_data)
             .send()
-            .await?
+            .await?;
+
+        pb.finish_with_message("Upload complete");
+        response
     };
 
     if !response.status().is_success() {
@@ -833,8 +936,6 @@ async fn process_chunks(chunks: Vec<String>, args: &Args, api_key: &str) -> Resu
         }
     }
 
-    println!("JSON output: {}", args.output);
-    println!("Text transcript: {}", text_output);
 
     Ok(())
 }
@@ -929,7 +1030,6 @@ fn format_output(result: &DeepgramResponse, args: &Args) {
 }
 
 async fn live_transcription(args: &Args, api_key: &str) -> Result<()> {
-    println!("Starting live transcription... Press Ctrl+C to stop.");
 
     // Set up audio capture first to get the actual sample rate
     let (audio_tx, audio_rx) = unbounded::<Vec<u8>>();
@@ -942,7 +1042,6 @@ async fn live_transcription(args: &Args, api_key: &str) -> Result<()> {
         let device = host.default_input_device()
             .ok_or_else(|| anyhow::anyhow!("No default input device found"))?;
 
-        println!("Using audio device: {}", device.name().unwrap_or("Unknown".to_string()));
 
         let supported_configs = device.supported_input_configs()
             .context("Failed to get supported configs")?;
@@ -1066,7 +1165,6 @@ async fn live_transcription(args: &Args, api_key: &str) -> Result<()> {
     tokio::signal::ctrl_c().await.context("Failed to listen for Ctrl+C")?;
 
     // Cleanup
-    println!("\nStopping live transcription...");
     stop_flag.store(true, Ordering::Relaxed);
 
     // Wait for tasks to complete
@@ -1111,8 +1209,6 @@ fn capture_audio_with_rate(tx: Sender<Vec<u8>>, stop_flag: Arc<AtomicBool>, targ
 
     let config = config_range.with_sample_rate(SampleRate(target_sample_rate));
 
-    println!("Audio config: {} channels, {} Hz, {:?}",
-             config.channels(), config.sample_rate().0, config.sample_format());
 
     let stop_flag_callback = stop_flag.clone();
     let samples_sent = Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -1144,14 +1240,12 @@ fn capture_audio_with_rate(tx: Sender<Vec<u8>>, stop_flag: Arc<AtomicBool>, targ
     )?;
 
     stream.play()?;
-    println!("Audio stream started, listening for audio...");
 
     // Keep the stream alive
     while !stop_flag.load(Ordering::Relaxed) {
         thread::sleep(Duration::from_millis(10));
     }
 
-    println!("Audio capture stopped. Total samples sent: {}", samples_sent.load(Ordering::Relaxed));
     Ok(())
 }
 
@@ -1190,7 +1284,6 @@ fn handle_live_response(response: serde_json::Value) {
                     println!(); // New line after utterance
                 },
                 Some("CloseStream") => {
-                    println!("Stream closing...");
                 },
                 _ => {
                     // Handle legacy format or unknown types
@@ -1204,15 +1297,13 @@ fn handle_live_response(response: serde_json::Value) {
                         }
                         io::stdout().flush().unwrap();
                     } else {
-                        // Debug unknown messages
-                        println!("Unknown message: {}", response);
+                        // Unknown message format - ignore
                     }
                 }
             }
         },
         Err(_) => {
-            // Fallback for malformed responses
-            println!("Failed to parse response: {}", response);
+            // Fallback for malformed responses - ignore
         }
     }
 }
@@ -1374,40 +1465,39 @@ async fn main() -> Result<()> {
 
     let client = reqwest::Client::new();
 
-    // Check if we should use chunking
-    let should_chunk = if !input_file.starts_with("http") {
-        match get_audio_duration(input_file).await {
-            Ok(duration) => {
-                if duration > 7200.0 {
-                    println!("File duration: {:.1} hours - automatically enabling chunking", duration / 3600.0);
-                    true
-                } else {
-                    false
-                }
-            }
-            Err(_) => false,
-        }
+    if input_file.starts_with("http") {
+        // URL - send directly to Deepgram
+        process_single_file(&client, input_file, &validated_args, &api_key).await?;
     } else {
-        false
-    };
-
-    if should_chunk {
-        let temp_file = if input_file.starts_with("http") {
-            let temp = NamedTempFile::new().context("Failed to create temporary file")?;
-            let temp_path = temp.path().to_str().unwrap().to_string();
-            download_file(input_file, &temp_path).await?;
-            Some((temp, temp_path))
+        // Local file - check size first
+        check_file_size(input_file)?;
+        
+        // Check if it's a video file and extract audio if needed
+        let processed_file = if is_video_file(input_file) {
+            extract_audio_from_video(input_file).await?
         } else {
-            None
+            input_file.to_string()
         };
 
-        let file_path = temp_file.as_ref().map(|(_, path)| path.as_str()).unwrap_or(input_file);
-        let chunks = chunk_audio(file_path, validated_args.chunk_minutes).await?;
-        process_chunks(chunks, &validated_args, &api_key).await?;
+        // Check if we should use chunking
+        let should_chunk = match get_audio_duration(&processed_file).await {
+            Ok(duration) => duration > 7200.0,
+            Err(_) => false,
+        };
 
-        // Cleanup happens automatically when temp_file goes out of scope
-    } else {
-        process_single_file(&client, input_file, &validated_args, &api_key).await?;
+        if should_chunk {
+            let chunks = chunk_audio(&processed_file, validated_args.chunk_minutes).await?;
+            process_chunks(chunks, &validated_args, &api_key).await?;
+        } else {
+            process_single_file(&client, &processed_file, &validated_args, &api_key).await?;
+        }
+
+        // Clean up extracted audio file if it was created
+        if processed_file != *input_file {
+            if let Err(e) = fs::remove_file(&processed_file) {
+                eprintln!("Warning: Failed to clean up extracted audio file: {}", e);
+            }
+        }
     }
 
     Ok(())
