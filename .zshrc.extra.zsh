@@ -56,7 +56,7 @@ source ~/.zsh.d/vi.zsh
 autoload -Uz compinit
 zcompdump=$XDG_CACHE_HOME/zsh/zcompdump
 [[ -f $zcompdump ]] || mkdir $zcompdump:h
-[[ -f $zcompdump(#qN.mh+24) ]] && { compinit -d $zcompdump && zcompile $zcompdump } || compinit -C -d $zcompdump
+[[ -f $zcompdump(#qN.mh+24) ]] && compinit -d $zcompdump && zcompile $zcompdump || compinit -C -d $zcompdump
 
 (( ${+commands[brew]} )) && fpath=(/opt/homebrew/share/zsh/site-functions $fpath)
 
@@ -66,6 +66,8 @@ setopt complete_in_word
 setopt list_packed
 
 _comp_options+=(globdots)
+
+bindkey ' ' magic-space # history expansion
 
 bindkey -M menuselect '^o' accept-and-menu-complete
 bindkey -M menuselect "+" accept-and-menu-complete
@@ -127,9 +129,6 @@ zstyle ':completion:*:history-words' list false
 
 zstyle ':completion:*:*:-subscript-:*' tag-order indexes parameters
 	reply=(_approximate:-extreme _complete)
-
-# history expansion
-bindkey ' ' magic-space
 
 source ~/.local/share/zsh/plugins/zsh-defer/zsh-defer.plugin.zsh
 
