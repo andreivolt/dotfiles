@@ -28,7 +28,7 @@ use std::process::{Command, Stdio};
 use std::io::{self, Read};
 use std::time::Duration;
 
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::Mutex;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use axum::{
@@ -102,33 +102,11 @@ struct DeviceCache {
     timestamp: u64,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(tag = "type")]
-enum WebSocketMessage {
-    #[serde(rename = "discover_devices")]
-    DiscoverDevices,
-    #[serde(rename = "devices_found")]
-    DevicesFound { devices: Vec<ChromecastDevice> },
-    #[serde(rename = "cast_audio")]
-    CastAudio { device_name: String, audio_url: String },
-    #[serde(rename = "cast_status")]
-    CastStatus { success: bool, message: String },
-    #[serde(rename = "start_recording")]
-    StartRecording { device_name: String },
-    #[serde(rename = "stop_recording")]
-    StopRecording,
-    #[serde(rename = "recording_status")]
-    RecordingStatus { recording: bool, message: String },
-    #[serde(rename = "error")]
-    Error { message: String },
-}
-
 
 #[derive(Clone)]
 struct ChromecastBroadcaster {
     device_cache: Arc<Mutex<Option<DeviceCache>>>,
     cache_path: PathBuf,
-    websocket_tx: broadcast::Sender<WebSocketMessage>,
 }
 
 impl ChromecastBroadcaster {
@@ -137,12 +115,9 @@ impl ChromecastBroadcaster {
             .unwrap_or_else(|| PathBuf::from("/tmp"))
             .join("chromecast_devices.json");
 
-        let (websocket_tx, _) = broadcast::channel(100);
-
         Self {
             device_cache: Arc::new(Mutex::new(None)),
             cache_path,
-            websocket_tx,
         }
     }
 
