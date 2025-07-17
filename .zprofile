@@ -1,18 +1,18 @@
-export BROWSER=google-chrome-stable
-export EDITOR=nvim
-export GPG_TTY="$(tty)"
-
-export PAGER=nvimpager
-export MANPAGER='nvim +Man!'
-export MANWIDTH=100
-export LESS='--RAW-CONTROL-CHARS --LONG-PROMPT --ignore-case --no-init --quit-if-one-screen'
-export DELTA_PAGER='less -R'
-
 export XDG_CACHE_HOME=~/.cache
 export XDG_CONFIG_HOME=~/.config
 export XDG_DATA_HOME=~/.local
 export XDG_RUNTIME_DIR=$TMPDIR
 export XDG_STATE_HOME=~/.local/state
+
+export BROWSER=google-chrome-stable
+export EDITOR=nvim
+export PAGER=nvimpager
+export MANPAGER='nvim +Man!'
+export MANWIDTH=100
+export GPG_TTY="$(tty)"
+
+export LESS='--RAW-CONTROL-CHARS --LONG-PROMPT --ignore-case --no-init --quit-if-one-screen'
+export DELTA_PAGER='less -R'
 
 export NIXPKGS_ALLOW_UNFREE=1
 export DENO_NO_UPDATE_CHECK=1
