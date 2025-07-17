@@ -7,7 +7,7 @@ export FZF_CTRL_R_OPTS="--nth=2.."
 # <tab> at beginning of line opens fzf file selector
 function fzf-file-widget-open() {
   if [[ -z "$BUFFER" ]]; then
-    local selected=$(rg --hidden --follow --files --sort modified --follow 2>/dev/null | tac | fzf --preview '~/.zsh.d/preview {}')
+    local selected=$(rg --hidden --follow --files --sort modified --follow 2>/dev/null | tac | fzf --preview '~/.config/zsh/preview {}')
     if [[ -n "$selected" ]]; then
       if ! head -c 1024 "$selected" | file - | grep -q "text"; then
         if [[ -n "$TERMUX_VERSION" ]]; then
