@@ -138,7 +138,7 @@ source ~/.config/zsh/p10k.zsh
 [[ $TERM == xterm-kitty ]] && zsh-defer source ~/.config/zsh/kitty.zsh
 [[ -n "$TMUX" ]] && zsh-defer source ~/.config/zsh/tmux.zsh
 zsh-defer eval "$(carapace _carapace zsh)"
-zsh-defer eval "$(dircolors -b ~/.dircolors)"
+zsh-defer eval "$(dircolors -b ~/.config/dircolors)"
 zsh-defer source ~/.local/share/zsh/plugins/nix-shell/nix-shell.plugin.zsh
 zsh-defer source ~/.config/zsh/autopair.zsh
 zsh-defer source ~/.config/zsh/autosuggestions.zsh
