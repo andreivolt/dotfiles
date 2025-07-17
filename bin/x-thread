@@ -179,7 +179,7 @@ def build_comment_tree(tweets):
 async def main():
     parser = argparse.ArgumentParser(description=__doc__.strip(), formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('thread', help='X/Twitter thread URL or thread ID')
-    parser.add_argument('--account-db', default='~/drive/twscrape/accounts.db',
+    parser.add_argument('--account-db', default='~/Google Drive/My Drive/twscrape/accounts.db',
                        help='Path to twscrape accounts database')
     parser.add_argument('--json', action='store_true',
                        help='Output raw JSON data')
