@@ -54,11 +54,7 @@ source ~/.local/share/zsh/plugins/zsh-defer/zsh-defer.plugin.zsh
 
 source ~/.config/zsh/vi.zsh
 source ~/.config/zsh/completion.zsh
-
-source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
-source ~/.local/share/zsh/plugins/powerlevel10k/powerlevel10k.zsh-theme
-source ~/.config/zsh/p10k.zsh
-
+source ~/.config/zsh/prompt.zsh
 [[ "$OSTYPE" == darwin* ]] && zsh-defer source ~/.config/zsh/orbstack.zsh
 [[ $TERM == xterm-kitty ]] && zsh-defer source ~/.config/zsh/kitty.zsh
 [[ -n "$TMUX" ]] && zsh-defer source ~/.config/zsh/tmux.zsh
@@ -68,7 +64,7 @@ zsh-defer source ~/.config/zsh/autopair.zsh
 zsh-defer source ~/.config/zsh/autosuggestions.zsh
 zsh-defer source ~/.config/zsh/direnv.zsh
 zsh-defer source ~/.config/zsh/fzf.zsh
-zsh-defer source ~/.config/zsh/history-search/history-search.zsh; export ZSH_HISTORY_RELATIVE_DATES=1
+zsh-defer source ~/.config/zsh/history-search.zsh
 zsh-defer source ~/.config/zsh/history-substring-search.zsh
 
 zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
