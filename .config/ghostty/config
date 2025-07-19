@@ -37,3 +37,7 @@ keybind = cmd+right=csi:\x1b[1;5C
 keybind = shift+enter=text:\n
 
 auto-update = off
+
+cursor-click-to-move = true
+
+custom-shader = cursor_blaze_fast.glsl
