@@ -56,7 +56,6 @@ source ~/.config/zsh/vi.zsh
 source ~/.config/zsh/completion.zsh
 source ~/.config/zsh/prompt.zsh
 [[ "$OSTYPE" == darwin* ]] && zsh-defer source ~/.config/zsh/orbstack.zsh
-[[ $TERM == xterm-kitty ]] && zsh-defer source ~/.config/zsh/kitty.zsh
 [[ -n "$TMUX" ]] && zsh-defer source ~/.config/zsh/tmux.zsh
 zsh-defer eval "$(dircolors -b ~/.config/dircolors)"
 zsh-defer source ~/.local/share/zsh/plugins/nix-shell/nix-shell.plugin.zsh
