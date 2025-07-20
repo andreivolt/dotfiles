@@ -57,13 +57,13 @@ source ~/.config/zsh/completion.zsh
 source ~/.config/zsh/prompt.zsh
 [[ "$OSTYPE" == darwin* ]] && zsh-defer source ~/.config/zsh/orbstack.zsh
 [[ -n "$TMUX" ]] && zsh-defer source ~/.config/zsh/tmux.zsh
-zsh-defer eval "$(dircolors -b ~/.config/dircolors)"
-zsh-defer source ~/.local/share/zsh/plugins/nix-shell/nix-shell.plugin.zsh
+eval "$(dircolors -b ~/.config/dircolors)"
+eval "$(direnv hook zsh)"
 zsh-defer source ~/.config/zsh/autopair.zsh
 zsh-defer source ~/.config/zsh/autosuggestions.zsh
-zsh-defer source ~/.config/zsh/direnv.zsh
 zsh-defer source ~/.config/zsh/fzf.zsh
 zsh-defer source ~/.config/zsh/history-search.zsh
 zsh-defer source ~/.config/zsh/history-substring-search.zsh
+zsh-defer source ~/.local/share/zsh/plugins/nix-shell/nix-shell.plugin.zsh
 
 zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
