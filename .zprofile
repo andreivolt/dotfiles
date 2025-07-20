@@ -3,10 +3,8 @@ export XDG_CONFIG_HOME=~/.config
 export XDG_DATA_HOME=~/.local
 export XDG_RUNTIME_DIR=$TMPDIR
 export XDG_STATE_HOME=~/.local/state
-if [ -n "$TERMUX_VERSION" ];
-then export BROWSER=termux-open-url
-else export BROWSER=google-chrome-stable
-fi
+[ -n "$TERMUX_VERSION" ] && BROWSER=termux-open-url
+(( ${+commands[google-chrome-stable]} )) && BROWSER=google-chrome-stable
 export EDITOR=nvim
 export PAGER=nvimpager
 export MANPAGER='nvim +Man!'
