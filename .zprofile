@@ -26,6 +26,19 @@ export MAX_THINKING_TOKENS=31999
 
 [[ -f ~/.local/ca-certificates/combined-ca-bundle.pem ]] && export CURL_CA_BUNDLE=~/.local/ca-certificates/combined-ca-bundle.pem
 
+[[ "$OSTYPE" == darwin* ]] && source ~/.orbstack/shell/init.zsh
+
+if [[ "$OSTYPE" == darwin* ]]; then
+  export HOMEBREW_CELLAR="/opt/homebrew/Cellar";
+  export HOMEBREW_PREFIX="/opt/homebrew";
+  export HOMEBREW_REPOSITORY="/opt/homebrew";
+  export INFOPATH="/opt/homebrew/share/info:${INFOPATH:-}";
+  export MANPATH="/opt/homebrew/share/man${MANPATH+:$MANPATH}:";
+  export PATH="/opt/homebrew/bin:/opt/homebrew/sbin${PATH+:$PATH}";
+
+  export LIBRARY_PATH=/opt/homebrew/opt/libiconv/lib:$LIBRARY_PATH
+fi
+
 path=(
   ~/bin(N)
   ~/.local/bin(N)
@@ -36,8 +49,3 @@ path=(
   ~/go/bin(N)
   $path
 )
-
-[[ "$OSTYPE" == darwin* ]] && source ~/.orbstack/shell/init.zsh
-[[ "$OSTYPE" == darwin* ]] && source ~/.config/zsh/homebrew.sh
-
-source ~/.config/env
