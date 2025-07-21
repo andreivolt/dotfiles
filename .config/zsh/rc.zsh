@@ -55,7 +55,7 @@ source ~/.local/share/zsh/plugins/zsh-defer/zsh-defer.plugin.zsh
 source ~/.config/zsh/vi.zsh
 source ~/.config/zsh/completion.zsh
 source ~/.config/zsh/prompt.zsh
-[[ "$OSTYPE" == darwin* ]] && zsh-defer source ~/.config/zsh/orbstack.zsh
+zsh-defer source ~/.config/zsh/orbstack.zsh &>/dev/null
 [[ -n "$TMUX" ]] && zsh-defer source ~/.config/zsh/tmux.zsh
 eval "$(dircolors -b ~/.config/dircolors)"
 eval "$(direnv hook zsh)"
