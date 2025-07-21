@@ -3,8 +3,10 @@ export XDG_CONFIG_HOME=~/.config
 export XDG_DATA_HOME=~/.local
 export XDG_RUNTIME_DIR=$TMPDIR
 export XDG_STATE_HOME=~/.local/state
-[[ -n "$TERMUX_VERSION" ]] && BROWSER=termux-open-url
+
+(( ${+commands[termux-open-url]} )) && BROWSER=termux-open-url
 (( ${+commands[google-chrome-stable]} )) && BROWSER=google-chrome-stable
+
 export EDITOR=nvim
 export PAGER=nvimpager
 export MANPAGER='nvim +Man!'
@@ -26,9 +28,9 @@ export MAX_THINKING_TOKENS=31999
 
 [[ -f ~/.local/ca-certificates/combined-ca-bundle.pem ]] && export CURL_CA_BUNDLE=~/.local/ca-certificates/combined-ca-bundle.pem
 
-[[ "$OSTYPE" == darwin* ]] && source ~/.orbstack/shell/init.zsh
+source ~/.orbstack/shell/init.zsh &>/dev/null
 
-if [[ "$OSTYPE" == darwin* ]]; then
+if [[ -f /opt/homebrew/bin/brew ]]; then
   export HOMEBREW_CELLAR="/opt/homebrew/Cellar";
   export HOMEBREW_PREFIX="/opt/homebrew";
   export HOMEBREW_REPOSITORY="/opt/homebrew";
