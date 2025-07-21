@@ -78,7 +78,6 @@ vim.api.nvim_create_autocmd('User', {
   callback = function()
     if vim.env.TMUX then require("user.tmux") end
     if vim.g.neovide then require("user.neovide") end
-    require("user.commands")
     require("user.cursorline")
     require("user.keymaps")
     require("user.spell")
