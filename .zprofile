@@ -3,7 +3,7 @@ export XDG_CONFIG_HOME=~/.config
 export XDG_DATA_HOME=~/.local
 export XDG_RUNTIME_DIR=$TMPDIR
 export XDG_STATE_HOME=~/.local/state
-[ -n "$TERMUX_VERSION" ] && BROWSER=termux-open-url
+[[ -n "$TERMUX_VERSION" ]] && BROWSER=termux-open-url
 (( ${+commands[google-chrome-stable]} )) && BROWSER=google-chrome-stable
 export EDITOR=nvim
 export PAGER=nvimpager
@@ -38,6 +38,8 @@ if [[ "$OSTYPE" == darwin* ]]; then
 
   export LIBRARY_PATH=/opt/homebrew/opt/libiconv/lib:$LIBRARY_PATH
 fi
+
+source ~/.config/env
 
 path=(
   ~/bin(N)
