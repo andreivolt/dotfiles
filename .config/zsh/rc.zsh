@@ -53,7 +53,7 @@ bindkey ' ' magic-space # history expansion
 source ~/.local/share/zsh/plugins/zsh-defer/zsh-defer.plugin.zsh
 
 source ~/.config/zsh/vi.zsh
-source ~/.config/zsh/completion.zsh
+zsh-defer source ~/.config/zsh/completion.zsh
 source ~/.config/zsh/prompt.zsh
 zsh-defer source ~/.config/zsh/orbstack.zsh &>/dev/null
 [[ -n "$TMUX" ]] && zsh-defer source ~/.config/zsh/tmux.zsh
