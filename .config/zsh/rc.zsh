@@ -26,7 +26,7 @@ alias -g NE="2> /dev/null"
 alias -g X="| xargs"
 
 alias -- +x="chmod +x"
-alias cat="bat"
+alias cat="bat --plain --wrap character"
 alias cdt="cd $(mktemp -d)"
 alias claude="claude --dangerously-skip-permissions"
 alias diff="diff --color"
