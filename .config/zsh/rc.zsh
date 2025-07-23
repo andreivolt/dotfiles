@@ -48,8 +48,6 @@ alias scrcpy="scrcpy --render-driver opengl"
 alias vi="nvim"
 alias yt-dlp="yt-dlp --cookies-from-browser chrome"
 
-bindkey ' ' magic-space # history expansion
-
 source ~/.local/share/zsh/plugins/zsh-defer/zsh-defer.plugin.zsh
 
 source ~/.config/zsh/vi.zsh
@@ -67,3 +65,5 @@ zsh-defer source ~/.config/zsh/history-substring-search.zsh
 zsh-defer source ~/.local/share/zsh/plugins/nix-shell/nix-shell.plugin.zsh
 
 zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
+
+bindkey ' ' magic-space # history expansion
