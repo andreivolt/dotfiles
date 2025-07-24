@@ -19,11 +19,13 @@ export PAGER=nvimpager
 export PYTHONDONTWRITEBYTECODE=1 PYTHONWARNINGS=ignore
 export UV_TOOL_BIN_DIR=~/.local/bin
 
-export HOMEBREW_CELLAR=/opt/homebrew/Cellar HOMEBREW_PREFIX=/opt/homebrew HOMEBREW_REPOSITORY=/opt/homebrew
-infopath+=(/opt/homebrew/share/info)
-library_path+=(/opt/homebrew/opt/libiconv/lib)
-manpath+=(/opt/homebrew/share/man)
-path+=(/opt/homebrew/bin /opt/homebrew/sbin)
+export HOMEBREW_CELLAR=/opt/homebrew/Cellar
+export HOMEBREW_PREFIX=/opt/homebrew
+export HOMEBREW_REPOSITORY=/opt/homebrew
+export INFOPATH=/opt/homebrew/share/info:${INFOPATH:-}
+export LIBRARY_PATH=/opt/homebrew/opt/libiconv/lib:$LIBRARY_PATH
+export MANPATH=/opt/homebrew/share/man${MANPATH+:$MANPATH}:
+export PATH=/opt/homebrew/bin:/opt/homebrew/sbin${PATH+:$PATH}
 
 path+=(
   ~/go/bin(N)
