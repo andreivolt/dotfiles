@@ -27,6 +27,8 @@ export LIBRARY_PATH=/opt/homebrew/opt/libiconv/lib:$LIBRARY_PATH
 export MANPATH=/opt/homebrew/share/man${MANPATH+:$MANPATH}:
 export PATH=/opt/homebrew/bin:/opt/homebrew/sbin${PATH+:$PATH}
 
+[[ -n "$TERMUX_VERSION" ]] && export LD_LIBRARY_PATH=/data/data/com.termux/files/usr/lib:$LD_LIBRARY_PATH
+
 path+=(
   ~/go/bin(N)
   ~/.npm/bin(N)
