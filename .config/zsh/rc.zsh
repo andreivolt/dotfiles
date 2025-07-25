@@ -26,12 +26,13 @@ alias -g NE="2> /dev/null"
 alias -g X="| xargs"
 
 alias -- +x="chmod +x"
-alias cat="bat --plain --wrap character"
+alias cat="bat"
 alias cdt="cd $(mktemp -d)"
 alias claude="claude --dangerously-skip-permissions"
 alias diff="diff --color"
 alias edir="edir -r"
-alias eza="eza --icons never"
+# alias eza="eza --icons never"
+alias eza="eza --icons"
 alias gc="git clone --depth 1"
 alias gron="fastgron"
 alias http="xh"
@@ -54,6 +55,7 @@ source ~/.config/zsh/vi.zsh
 zsh-defer source ~/.config/zsh/completion.zsh
 source ~/.config/zsh/prompt.zsh
 zsh-defer source ~/.config/zsh/orbstack.zsh &>/dev/null
+[[ $TERM == xterm-kitty ]] && zsh-defer source ~/.config/zsh/kitty.zsh
 [[ -n "$TMUX" ]] && zsh-defer source ~/.config/zsh/tmux.zsh
 eval "$(dircolors -b ~/.config/dircolors)"
 eval "$(direnv hook zsh)"
