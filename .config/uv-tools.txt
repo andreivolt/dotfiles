@@ -4,4 +4,3 @@ jtbl
 llm --with llm-anthropic,llm-cmd,llm-gemini
 strip-tags
 ttok
-x-x
