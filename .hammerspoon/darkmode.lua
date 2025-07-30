@@ -9,5 +9,5 @@ local function toggleDarkMode()
 end
 
 return {
-  toggleDarkMode = toggleDarkMode
+  toggleDarkMode = toggleDarkMode,
 }

@@ -1,8 +1,7 @@
 require("hs.ipc")
 
-local ghostty = require("ghostty")
+local appToggle = require("app-toggle")
 local darkmode = require("darkmode")
-local ghosttyResize = require("ghostty-resize")
 
 hs.loadSpoon("SpoonInstall")
 spoon.SpoonInstall:updateAllRepos()
@@ -13,14 +12,20 @@ spoon.SpoonInstall:andUse("ReloadConfiguration", {
 })
 spoon.ReloadConfiguration:start()
 
+-- Main toggle hotkeys
+hs.hotkey.bind({}, "²", appToggle.toggleVisibility)
+hs.hotkey.bind({ "alt" }, "²", appToggle.toggleMonitor)
 
-hs.hotkey.bind({}, "²", ghostty.toggleVisibility)
-hs.hotkey.bind({ "alt" }, "²", ghostty.toggleMonitor)
+-- Set the currently focused app as the toggle target
+hs.hotkey.bind({ "cmd", "alt" }, "²", appToggle.setCurrentAppFromFocused)
+
+-- Other hotkeys
 hs.hotkey.bind({ "ctrl", "cmd" }, "v", function()
   hs.execute("/Users/andrei/bin/vision -c", true)
 end)
 hs.hotkey.bind({ "ctrl", "cmd" }, "d", darkmode.toggleDarkMode)
 
-ghosttyResize.start()
+-- Start resize watcher
+appToggle.startResizeWatcher()
 
 hs.ipc.cliInstall()
