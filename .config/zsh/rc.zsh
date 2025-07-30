@@ -41,7 +41,7 @@ alias l="ls -1"
 alias la="ls -a"
 alias ll="ls -l --classify=auto --git"
 alias lla="ll -a"
-alias ls="eza"
+alias ls="eza --group-directories-first"
 alias path='printf "%s\n" $path'
 alias rg="rg --smart-case --colors match:bg:yellow --colors match:fg:black"
 alias rm="rm --verbose"
