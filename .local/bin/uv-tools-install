@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+uv tool upgrade --all
+
 while read -r line; do
   uv tool install $line
 done < "${XDG_CONFIG_HOME:-$HOME/.config}/uv-tools.txt"
