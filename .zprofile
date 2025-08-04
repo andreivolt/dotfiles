@@ -7,7 +7,6 @@ export XDG_STATE_HOME=~/.local/state
 (( ${+commands[google-chrome-stable]} )) && BROWSER=google-chrome-stable
 (( ${+commands[termux-open-url]} )) && BROWSER=termux-open-url
 [[ -f ~/.local/ca-certificates/combined-ca-bundle.pem ]] && export CURL_CA_BUNDLE=~/.local/ca-certificates/combined-ca-bundle.pem
-export CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1 ENABLE_BACKGROUND_TASKS=1 MAX_THINKING_TOKENS=31999
 export DELTA_PAGER='less -R'
 export DENO_NO_UPDATE_CHECK=1
 export EDITOR=nvim
