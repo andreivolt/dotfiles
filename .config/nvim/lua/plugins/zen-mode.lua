@@ -10,7 +10,7 @@ return {
   opts = {
     window = {
       width = 80,
-      height = 0.95,
+      height = 0.85,
     },
     options = {
       signcolumn = 'no',
