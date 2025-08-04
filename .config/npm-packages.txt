@@ -1,6 +1,7 @@
 @anthropic-ai/claude-code
 @biomejs/biome
 @google/gemini-cli
+@sourcegraph/amp
 expo
 jsonlint
 vercel
