@@ -39,3 +39,5 @@ path+=(
 )
 
 source ~/.config/env
+
+source ~/.orbstack/shell/init.zsh
