@@ -1509,7 +1509,7 @@
     (( unstaged > 0 )) && res+=" ${modified}!${unstaged}"
     (( untracked > 0 )) && res+=" ${untracked_color}?${untracked}"
     
-    p10k segment -t "[${res}]"
+    p10k segment -t "%6F[%f${res}%6F]%f"
   }
 
   # Custom nix_shell segment that shows packages
