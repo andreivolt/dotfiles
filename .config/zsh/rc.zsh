@@ -17,6 +17,16 @@ setopt numeric_glob_sort
 
 READNULLCMD=$PAGER
 
+# Prompt configuration - two lines with "# " prefix
+# Show user@host only in SSH connections
+if [[ -n "$SSH_CLIENT" ]]; then
+    PROMPT='# %F{cyan}%n@%m%f:%F{blue}%~%f
+%(?.%F{green}#%f.%F{red}#%f) '
+else
+    PROMPT='# %F{blue}%~%f
+%(?.%F{green}#%f.%F{red}#%f) '
+fi
+
 alias -g C="| wc -l"
 alias -g G="| rg"
 alias -g H="| head"
@@ -53,11 +63,11 @@ source ~/.local/share/zsh/plugins/zsh-defer/zsh-defer.plugin.zsh
 
 source ~/.config/zsh/vi.zsh
 zsh-defer source ~/.config/zsh/completion.zsh
-source ~/.config/zsh/prompt.zsh
+#source ~/.config/zsh/prompt.zsh
 zsh-defer source ~/.config/zsh/orbstack.zsh &>/dev/null
 [[ $TERM == xterm-kitty ]] && zsh-defer source ~/.config/zsh/kitty.zsh
 [[ -n "$TMUX" ]] && zsh-defer source ~/.config/zsh/tmux.zsh
-eval "$(dircolors -b ~/.config/dircolors)"
+#eval "$(dircolors -b ~/.config/dircolors)"
 eval "$(direnv hook zsh)"
 zsh-defer source ~/.config/zsh/autopair.zsh
 zsh-defer source ~/.config/zsh/autosuggestions.zsh
