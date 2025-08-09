@@ -21,10 +21,10 @@ export UV_TOOL_BIN_DIR=~/.local/bin
 export HOMEBREW_CELLAR=/opt/homebrew/Cellar
 export HOMEBREW_PREFIX=/opt/homebrew
 export HOMEBREW_REPOSITORY=/opt/homebrew
-export INFOPATH=/opt/homebrew/share/info:${INFOPATH:-}
-export LIBRARY_PATH=/opt/homebrew/opt/libiconv/lib:$LIBRARY_PATH
-export MANPATH=/opt/homebrew/share/man${MANPATH+:$MANPATH}:
-export PATH=/opt/homebrew/bin:/opt/homebrew/sbin${PATH+:$PATH}
+export INFOPATH=/opt/homebrew/share/info${INFOPATH:+:$INFOPATH}
+export MANPATH=/opt/homebrew/share/man${MANPATH:+:$MANPATH}:
+export LIBRARY_PATH=/opt/homebrew/opt/libiconv/lib${LIBRARY_PATH:+:$LIBRARY_PATH}
+export PATH=/opt/homebrew/bin:/opt/homebrew/sbin${PATH:+:$PATH}
 
 [[ -n "$TERMUX_VERSION" ]] && export LD_LIBRARY_PATH=/data/data/com.termux/files/usr/lib:$LD_LIBRARY_PATH
 
