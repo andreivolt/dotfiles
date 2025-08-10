@@ -63,17 +63,16 @@ source ~/.local/share/zsh/plugins/zsh-defer/zsh-defer.plugin.zsh
 
 source ~/.config/zsh/vi.zsh
 zsh-defer source ~/.config/zsh/completion.zsh
-#source ~/.config/zsh/prompt.zsh
+# source ~/.config/zsh/prompt.zsh
 zsh-defer source ~/.config/zsh/orbstack.zsh &>/dev/null
-[[ $TERM == xterm-kitty ]] && zsh-defer source ~/.config/zsh/kitty.zsh
+# [[ $TERM == xterm-kitty ]] && zsh-defer source ~/.config/zsh/kitty.zsh
 [[ -n "$TMUX" ]] && zsh-defer source ~/.config/zsh/tmux.zsh
-#eval "$(dircolors -b ~/.config/dircolors)"
+# eval "$(dircolors -b ~/.config/dircolors)"
 eval "$(direnv hook zsh)"
 zsh-defer source ~/.config/zsh/autopair.zsh
 zsh-defer source ~/.config/zsh/autosuggestions.zsh
 zsh-defer source ~/.config/zsh/fzf.zsh
 zsh-defer source ~/.config/zsh/history-search.zsh
-zsh-defer source ~/.config/zsh/history-substring-search.zsh
 zsh-defer source ~/.local/share/zsh/plugins/nix-shell/nix-shell.plugin.zsh
 
 zsh-defer source ~/.local/share/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
