@@ -464,18 +464,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .value_parser(["images", "local", "videos", "news", "shopping", "patents"]),
         )
         .arg(
-            Arg::new("start")
-                .long("start")
-                .value_name("START")
-                .help("Result offset for pagination")
-                .default_value("0"),
-        )
-        .arg(
             Arg::new("count")
                 .short('c')
                 .long("count")
                 .value_name("COUNT")
-                .help("Number of results to return")
+                .help("Total number of results to return (will make multiple requests if > 100)")
                 .default_value("10"),
         )
         .arg(
@@ -487,11 +480,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .get_matches();
 
     let query = matches.get_one::<String>("query").unwrap();
+    let total_desired: usize = matches.get_one::<String>("count").unwrap().parse().unwrap_or(10);
 
     let api_key = env::var("SERPAPI_API_KEY")
         .map_err(|_| "SERPAPI_API_KEY environment variable is required")?;
 
     println!("Searching for: {}", query);
+    
+    const MAX_RESULTS_PER_REQUEST: usize = 100;
+    let requests_needed = (total_desired + MAX_RESULTS_PER_REQUEST - 1) / MAX_RESULTS_PER_REQUEST;
 
     let mut params = HashMap::<String, String>::new();
     params.insert("q".to_string(), query.clone());
@@ -619,15 +616,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Search Type: {} ({})", search_type, tbm_value);
     }
 
-    if let Some(start) = matches.get_one::<String>("start") {
-        params.insert("start".to_string(), start.clone());
-        println!("Start: {}", start);
-    }
-
-    if let Some(count) = matches.get_one::<String>("count") {
-        params.insert("num".to_string(), count.clone());
-        println!("Count: {}", count);
-    }
+    // We'll set start and num dynamically in the loop below
 
     if matches.get_flag("no-cache") {
         params.insert("no_cache".to_string(), "true".to_string());
@@ -636,84 +625,128 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("---");
 
-    let search = SerpApiSearch::google(params, api_key);
+    let mut all_organic_results = Vec::new();
+    let mut all_local_places = Vec::new();
+    let mut knowledge_graph_result = None;
+    let mut related_questions_result = None;
 
-    match search.json().await {
-        Ok(results) => {
-            if let Some(organic_results) = results.get("organic_results") {
-                if let Some(organic_array) = organic_results.as_array() {
-                    println!("Found {} organic results:\n", organic_array.len());
+    for request_num in 0..requests_needed {
+        let current_start = request_num * MAX_RESULTS_PER_REQUEST;
+        let remaining_results = total_desired - all_organic_results.len();
+        let current_count = std::cmp::min(MAX_RESULTS_PER_REQUEST, remaining_results);
+        
+        // Stop if we already have enough results
+        if all_organic_results.len() >= total_desired {
+            break;
+        }
 
-                    for (i, result) in organic_array.iter().enumerate() {
-                        if let (Some(title), Some(link), Some(snippet)) = (
-                            result.get("title").and_then(|t| t.as_str()),
-                            result.get("link").and_then(|l| l.as_str()),
-                            result.get("snippet").and_then(|s| s.as_str()),
-                        ) {
-                            println!("{}. {}", i + 1, title);
-                            println!("   Link: {}", link);
-                            println!("   Snippet: {}", snippet);
-                            println!();
+        
+        let mut request_params = params.clone();
+        request_params.insert("start".to_string(), current_start.to_string());
+        request_params.insert("num".to_string(), current_count.to_string());
+
+        let search = SerpApiSearch::google(request_params, api_key.clone());
+        
+        match search.json().await {
+            Ok(results) => {
+                // Collect organic results
+                if let Some(organic_results) = results.get("organic_results") {
+                    if let Some(organic_array) = organic_results.as_array() {
+                        for result in organic_array {
+                            if all_organic_results.len() < total_desired {
+                                all_organic_results.push(result.clone());
+                            }
                         }
                     }
+                }
+                
+                // Collect local results (only from first request to avoid duplicates)
+                if request_num == 0 {
+                    if let Some(local_results) = results.get("local_results") {
+                        if let Some(places) = local_results.get("places") {
+                            if let Some(places_array) = places.as_array() {
+                                all_local_places = places_array.to_vec();
+                            }
+                        }
+                    }
+                    
+                    // Knowledge graph and related questions (only from first request)
+                    knowledge_graph_result = results.get("knowledge_graph").cloned();
+                    related_questions_result = results.get("related_questions").cloned();
+                }
+            }
+            Err(e) => {
+                eprintln!("Error in request {}: {}", request_num + 1, e);
+                if request_num == 0 {
+                    // If first request fails, exit
+                    std::process::exit(1);
                 } else {
-                    println!("No organic results found in the response.");
-                }
-            } else {
-                println!("No organic results found in the response.");
-            }
-
-            if let Some(local_results) = results.get("local_results") {
-                if let Some(places) = local_results.get("places") {
-                    if let Some(places_array) = places.as_array() {
-                        if !places_array.is_empty() {
-                            println!("Local results ({} places):", places_array.len());
-                            for (i, place) in places_array.iter().enumerate() {
-                                if let (Some(title), Some(address)) = (
-                                    place.get("title").and_then(|t| t.as_str()),
-                                    place.get("address").and_then(|a| a.as_str()),
-                                ) {
-                                    println!("{}. {}", i + 1, title);
-                                    println!("   Address: {}", address);
-                                    if let Some(rating) = place.get("rating").and_then(|r| r.as_f64()) {
-                                        println!("   Rating: {:.1}", rating);
-                                    }
-                                    println!();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if let Some(knowledge_graph) = results.get("knowledge_graph") {
-                if let Some(title) = knowledge_graph.get("title").and_then(|t| t.as_str()) {
-                    println!("Knowledge Graph:");
-                    println!("Title: {}", title);
-                    if let Some(description) = knowledge_graph.get("description").and_then(|d| d.as_str()) {
-                        println!("Description: {}", description);
-                    }
-                    println!();
-                }
-            }
-
-            if let Some(related_questions) = results.get("related_questions") {
-                if let Some(questions_array) = related_questions.as_array() {
-                    if !questions_array.is_empty() {
-                        println!("Related Questions:");
-                        for question in questions_array {
-                            if let Some(q) = question.get("question").and_then(|q| q.as_str()) {
-                                println!("• {}", q);
-                            }
-                        }
-                        println!();
-                    }
+                    // For subsequent requests, just continue with what we have
+                    break;
                 }
             }
         }
-        Err(e) => {
-            eprintln!("Error performing search: {}", e);
-            std::process::exit(1);
+    }
+
+    // Display all collected results
+    if !all_organic_results.is_empty() {
+        println!("Found {} organic results:\n", all_organic_results.len());
+
+        for (i, result) in all_organic_results.iter().enumerate() {
+            if let (Some(title), Some(link), Some(snippet)) = (
+                result.get("title").and_then(|t| t.as_str()),
+                result.get("link").and_then(|l| l.as_str()),
+                result.get("snippet").and_then(|s| s.as_str()),
+            ) {
+                println!("{}. {}", i + 1, title);
+                println!("   Link: {}", link);
+                println!("   Snippet: {}", snippet);
+                println!();
+            }
+        }
+    } else {
+        println!("No organic results found.");
+    }
+
+    if !all_local_places.is_empty() {
+        println!("Local results ({} places):", all_local_places.len());
+        for (i, place) in all_local_places.iter().enumerate() {
+            if let (Some(title), Some(address)) = (
+                place.get("title").and_then(|t| t.as_str()),
+                place.get("address").and_then(|a| a.as_str()),
+            ) {
+                println!("{}. {}", i + 1, title);
+                println!("   Address: {}", address);
+                if let Some(rating) = place.get("rating").and_then(|r| r.as_f64()) {
+                    println!("   Rating: {:.1}", rating);
+                }
+                println!();
+            }
+        }
+    }
+
+    if let Some(knowledge_graph) = knowledge_graph_result {
+        if let Some(title) = knowledge_graph.get("title").and_then(|t| t.as_str()) {
+            println!("Knowledge Graph:");
+            println!("Title: {}", title);
+            if let Some(description) = knowledge_graph.get("description").and_then(|d| d.as_str()) {
+                println!("Description: {}", description);
+            }
+            println!();
+        }
+    }
+
+    if let Some(related_questions) = related_questions_result {
+        if let Some(questions_array) = related_questions.as_array() {
+            if !questions_array.is_empty() {
+                println!("Related Questions:");
+                for question in questions_array {
+                    if let Some(q) = question.get("question").and_then(|q| q.as_str()) {
+                        println!("• {}", q);
+                    }
+                }
+                println!();
+            }
         }
     }
 
