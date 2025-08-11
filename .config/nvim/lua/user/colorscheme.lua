@@ -28,6 +28,7 @@ vim.api.nvim_create_autocmd("ColorScheme", {
     vim.api.nvim_set_hl(0, "Normal", { bg = "NONE" })
     vim.api.nvim_set_hl(0, "NormalFloat", { bg = "NONE" })
 
+
     -- Handle EndOfBuffer coloring
     local normal_hl = vim.api.nvim_get_hl(0, { name = "Normal" })
     if normal_hl.bg then
@@ -45,3 +46,10 @@ vim.api.nvim_create_autocmd("ColorScheme", {
 -- Apply transparent background to current colorscheme
 vim.api.nvim_set_hl(0, "Normal", { bg = "NONE" })
 vim.api.nvim_set_hl(0, "NormalFloat", { bg = "NONE" })
+
+-- Configure window separator colors using 256 indexed colors (matching tmux)
+vim.api.nvim_set_hl(0, "WinSeparator", { 
+  fg = "#303030",  -- Hex equivalent of colour236 (dark gray)
+  ctermfg = 236,   -- Same as tmux's colour236 for 256-color terminals
+  bg = "NONE"      -- Transparent background
+})
