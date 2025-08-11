@@ -52,6 +52,7 @@ alias la="ls -a"
 alias ll="ls -l --classify=auto --git"
 alias lla="ll -a"
 alias ls="eza --group-directories-first"
+alias mpv='mpv --ytdl-raw-options=cookies-from-browser=chrome'
 alias path='printf "%s\n" $path'
 alias rg="rg --smart-case --colors match:bg:yellow --colors match:fg:black"
 alias rm="rm --verbose"
