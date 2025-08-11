@@ -10,7 +10,8 @@
   "ui_font_features": {
     "calt": 0
   },
-  "show_edit_predictions": true,
+  "show_completions_on_input": false,
+  "show_edit_predictions": false,
   "languages": {
     "Plain Text": {
       "show_edit_predictions": false,
