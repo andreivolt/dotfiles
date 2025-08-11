@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket as TokioUdpSocket;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 
 // LIFX Protocol Constants
 const LIFX_PORT: u16 = 56700;
@@ -190,8 +190,7 @@ struct LifxDevice {
 
 impl LifxDevice {
     fn new(target: u64, ip_addr: IpAddr) -> Result<Self> {
-        let socket = UdpSocket::bind("0.0.0.0:0")
-            .context("Failed to bind UDP socket")?;
+        let socket = UdpSocket::bind("0.0.0.0:0").context("Failed to bind UDP socket")?;
         socket.set_read_timeout(Some(COMMAND_TIMEOUT))?;
 
         Ok(LifxDevice {
@@ -201,44 +200,43 @@ impl LifxDevice {
         })
     }
 
-    fn send_message(&self, message: Message) -> Result<()> {
+    fn send_with_flags(&self, message: Message, res_required: bool, ack_required: bool) -> Result<Option<Vec<u8>>> {
         let build_options = BuildOptions {
             target: Some(self.target),
-            res_required: false,
-            ack_required: false,
+            res_required,
+            ack_required,
             ..Default::default()
         };
-        let raw_message = RawMessage::build(&build_options, message)
-            .context("Failed to build message")?;
-
+        let raw_message = RawMessage::build(&build_options, message).context("Failed to build message")?;
         let bytes = raw_message.pack().context("Failed to pack message")?;
         let addr = SocketAddr::new(self.ip_addr, LIFX_PORT);
-        self.socket.send_to(&bytes, addr)
+        self.socket
+            .send_to(&bytes, addr)
             .context("Failed to send message")?;
 
+        if res_required {
+            let mut buf = [0; 1024];
+            let (len, _) = self.socket.recv_from(&mut buf).context("Failed to receive response")?;
+            Ok(Some(buf[..len].to_vec()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn send_message(&self, message: Message) -> Result<()> {
+        self.send_with_flags(message, false, false)?;
+        Ok(())
+    }
+
+    fn send_message_ack(&self, message: Message) -> Result<()> {
+        // Ask for an ACK when we care about reliability (like power changes)
+        self.send_with_flags(message, false, true)?;
         Ok(())
     }
 
     fn send_message_with_response(&self, message: Message) -> Result<Vec<u8>> {
-        let build_options = BuildOptions {
-            target: Some(self.target),
-            res_required: true,
-            ack_required: false,
-            ..Default::default()
-        };
-        let raw_message = RawMessage::build(&build_options, message)
-            .context("Failed to build message")?;
-
-        let bytes = raw_message.pack().context("Failed to pack message")?;
-        let addr = SocketAddr::new(self.ip_addr, LIFX_PORT);
-        self.socket.send_to(&bytes, addr)
-            .context("Failed to send message")?;
-
-        let mut buf = [0; 1024];
-        let (len, _) = self.socket.recv_from(&mut buf)
-            .context("Failed to receive response")?;
-
-        Ok(buf[..len].to_vec())
+        self.send_with_flags(message, true, false)?
+            .ok_or_else(|| anyhow!("No response data received"))
     }
 
     fn query_message(&self, message: Message) -> Result<Message> {
@@ -246,6 +244,14 @@ impl LifxDevice {
         let raw_msg = RawMessage::unpack(&data)?;
         let message = Message::from_raw(&raw_msg)?;
         Ok(message)
+    }
+
+    fn set_power(&self, level: u16, duration_ms: u32) -> Result<()> {
+        let msg = Message::LightSetPower {
+            level,
+            duration: duration_ms,
+        };
+        self.send_message_ack(msg)
     }
 }
 
@@ -261,8 +267,7 @@ impl LifxController {
             .or_else(|| dirs::home_dir().map(|d| d.join(".local/state")))
             .ok_or_else(|| anyhow!("Cannot determine state directory"))?;
 
-        std::fs::create_dir_all(&state_dir)
-            .context("Failed to create state directory")?;
+        std::fs::create_dir_all(&state_dir).context("Failed to create state directory")?;
 
         Ok(LifxController {
             cache_file: state_dir.join("lifx.json"),
@@ -285,10 +290,10 @@ impl LifxController {
     }
 
     async fn perform_discovery(&self) -> Result<Vec<CachedLight>> {
-        let socket = TokioUdpSocket::bind("0.0.0.0:0").await
+        let socket = TokioUdpSocket::bind("0.0.0.0:0")
+            .await
             .context("Failed to bind UDP socket")?;
-        socket.set_broadcast(true)
-            .context("Failed to enable broadcast")?;
+        socket.set_broadcast(true).context("Failed to enable broadcast")?;
 
         // Send GetService message to discover devices
         let build_options = BuildOptions {
@@ -297,12 +302,14 @@ impl LifxController {
             ack_required: false,
             ..Default::default()
         };
-        let discovery_message = RawMessage::build(&build_options, Message::GetService)
-            .context("Failed to build discovery message")?;
+        let discovery_message =
+            RawMessage::build(&build_options, Message::GetService).context("Failed to build discovery message")?;
 
         let bytes = discovery_message.pack().context("Failed to pack discovery message")?;
         let broadcast_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), LIFX_PORT);
-        socket.send_to(&bytes, broadcast_addr).await
+        socket
+            .send_to(&bytes, broadcast_addr)
+            .await
             .context("Failed to send discovery message")?;
 
         let mut discovered = Vec::new();
@@ -319,7 +326,6 @@ impl LifxController {
             match timeout(remaining, socket.recv_from(&mut buf)).await {
                 Ok(Ok((len, addr))) => {
                     if let Ok(device) = self.process_discovery_response(&buf[..len], addr.ip()).await {
-                        // Only add if we haven't seen this target before
                         if seen_targets.insert(device.target) {
                             discovered.push(device);
                         }
@@ -333,55 +339,42 @@ impl LifxController {
     }
 
     async fn process_discovery_response(&self, data: &[u8], ip: IpAddr) -> Result<CachedLight> {
-        // Parse the response using RawMessage::unpack
         let raw_msg = RawMessage::unpack(data).context("Failed to unpack discovery response")?;
-
-        // Extract target from frame address
         let target = raw_msg.frame_addr.target;
 
-        // For now, just create a basic entry - we'll get details later during listing
         Ok(CachedLight {
             label: format!("LIFX Light {}", target & 0xFFFF),
             target,
             ip_addr: ip,
-            mac_addr: [0; 6], // Would be extracted from frame address
+            mac_addr: [0; 6],
             power: None,
             color: None,
         })
     }
 
     fn load_cache(&self) -> Result<Vec<CachedLight>> {
-        let data = std::fs::read_to_string(&self.cache_file)
-            .context("Failed to read cache file")?;
-        let cached: Vec<CachedLight> = serde_json::from_str(&data)
-            .context("Failed to parse cache file")?;
+        let data = std::fs::read_to_string(&self.cache_file).context("Failed to read cache file")?;
+        let cached: Vec<CachedLight> = serde_json::from_str(&data).context("Failed to parse cache file")?;
         Ok(cached)
     }
 
     fn save_cache(&self, lights: &[CachedLight]) -> Result<()> {
-        let data = serde_json::to_string_pretty(lights)
-            .context("Failed to serialize cache")?;
-        std::fs::write(&self.cache_file, data)
-            .context("Failed to write cache file")?;
+        let data = serde_json::to_string_pretty(lights).context("Failed to serialize cache")?;
+        std::fs::write(&self.cache_file, data).context("Failed to write cache file")?;
         Ok(())
     }
 
     fn save_last_used(&self, lights: &[CachedLight]) -> Result<()> {
-        let data = serde_json::to_string_pretty(lights)
-            .context("Failed to serialize last used")?;
-        std::fs::write(&self.last_used_file, data)
-            .context("Failed to write last used file")?;
+        let data = serde_json::to_string_pretty(lights).context("Failed to serialize last used")?;
+        std::fs::write(&self.last_used_file, data).context("Failed to write last used file")?;
         Ok(())
     }
 
     fn load_last_used(&self) -> Result<Vec<CachedLight>> {
-        let data = std::fs::read_to_string(&self.last_used_file)
-            .context("Failed to read last used file")?;
-        let last_used: Vec<CachedLight> = serde_json::from_str(&data)
-            .context("Failed to parse last used file")?;
+        let data = std::fs::read_to_string(&self.last_used_file).context("Failed to read last used file")?;
+        let last_used: Vec<CachedLight> = serde_json::from_str(&data).context("Failed to parse last used file")?;
         Ok(last_used)
     }
-
 
     fn get_remembered_brightness(&self, target: u64) -> Option<u16> {
         if !self.brightness_memory_file.exists() {
@@ -410,18 +403,13 @@ impl LifxController {
                 return Err(anyhow!("No matching lights found for specified names"));
             }
         } else if let Some(_group) = &cli.group {
-            // Group functionality would need additional protocol support
             return Err(anyhow!("Group functionality not yet implemented"));
+        } else if let Ok(last_used) = self.load_last_used() {
+            target_lights = last_used;
         } else {
-            // Try to use last used lights
-            if let Ok(last_used) = self.load_last_used() {
-                target_lights = last_used;
-            } else {
-                return Err(anyhow!("No target specified and no last used lights found. Use --all, --name, or --group"));
-            }
+            return Err(anyhow!("No target specified and no last used lights found. Use --all, --name, or --group"));
         }
 
-        // Enrich the target lights with current information (including proper names)
         for light in &mut target_lights {
             let _ = self.get_light_info(light).await;
         }
@@ -429,42 +417,62 @@ impl LifxController {
         Ok(target_lights)
     }
 
+    async fn ensure_powered_on(&self, device: &LifxDevice, duration_ms: u32) -> Result<()> {
+        let is_off = match device.query_message(Message::LightGetPower) {
+            Ok(Message::LightStatePower { level }) => level == 0,
+            _ => false,
+        };
+        if is_off {
+            // Wake the lamp first so subsequent SetColor/brightness is applied
+            device.set_power(65535, duration_ms)?;
+            // tiny delay to let firmware apply the power transition
+            sleep(Duration::from_millis(80)).await;
+        }
+        Ok(())
+    }
+
     async fn set_power(&self, lights: &[CachedLight], power_on: bool, duration_ms: u32) -> Result<()> {
         if power_on {
-            // Restore remembered brightness for all lights
             for light in lights {
                 let device = LifxDevice::new(light.target, light.ip_addr)?;
-                let brightness = self.get_remembered_brightness(light.target).unwrap_or(65535);
-
-                let current_color = self.get_light_color(&device).await.unwrap_or(HSBK {
-                    hue: 0,
-                    saturation: 0,
-                    brightness: 65535,
-                    kelvin: 3500,
-                });
-
-                let restored_color = HSBK {
-                    hue: current_color.hue,
-                    saturation: current_color.saturation,
-                    brightness,
-                    kelvin: current_color.kelvin,
-                };
-
-                let message = Message::LightSetColor {
-                    reserved: 0,
-                    color: restored_color,
-                    duration: duration_ms,
-                };
-                device.send_message(message)
-                    .with_context(|| format!("Failed to turn on {}", light.label))?;
-
+                // Always use LightSetPower to wake the device
+                device
+                    .set_power(65535, duration_ms)
+                    .with_context(|| format!("Failed to power on {}", light.label))?;
+                // Optional: restore previous brightness if remembered (post-wake)
+                if let Some(brightness) = self.get_remembered_brightness(light.target) {
+                    sleep(Duration::from_millis(80)).await;
+                    let current_color = self
+                        .get_light_color(&device)
+                        .await
+                        .unwrap_or(HSBK {
+                            hue: 0,
+                            saturation: 0,
+                            brightness: 65535,
+                            kelvin: 3500,
+                        });
+                    let restored_color = HSBK {
+                        hue: current_color.hue,
+                        saturation: current_color.saturation,
+                        brightness,
+                        kelvin: current_color.kelvin,
+                    };
+                    let message = Message::LightSetColor {
+                        reserved: 0,
+                        color: restored_color,
+                        duration: duration_ms,
+                    };
+                    device
+                        .send_message(message)
+                        .with_context(|| format!("Failed to restore brightness for {}", light.label))?;
+                }
                 println!("{}: on", light.label);
             }
         } else {
-            // Save brightness memory for all lights at once then turn off
+            // Capture brightness memory before turning off
             let mut memory: HashMap<u64, u16> = if self.brightness_memory_file.exists() {
-                let data = std::fs::read_to_string(&self.brightness_memory_file)
-                    .context("Failed to read brightness memory file")?;
+                let data =
+                    std::fs::read_to_string(&self.brightness_memory_file).context("Failed to read brightness memory file")?;
                 serde_json::from_str(&data).unwrap_or_default()
             } else {
                 HashMap::new()
@@ -473,57 +481,39 @@ impl LifxController {
             for light in lights {
                 let device = LifxDevice::new(light.target, light.ip_addr)?;
 
-                let current_color = self.get_light_color(&device).await.unwrap_or(HSBK {
-                    hue: 0,
-                    saturation: 0,
-                    brightness: 65535,
-                    kelvin: 3500,
-                });
-
-                // Save brightness if not already 0
-                if current_color.brightness > 0 {
-                    memory.insert(light.target, current_color.brightness);
+                if let Ok(cur) = self.get_light_color(&device).await {
+                    if cur.brightness > 0 {
+                        memory.insert(light.target, cur.brightness);
+                    }
                 }
 
-                let off_color = HSBK {
-                    hue: current_color.hue,
-                    saturation: current_color.saturation,
-                    brightness: 0,
-                    kelvin: current_color.kelvin,
-                };
-
-                let message = Message::LightSetColor {
-                    reserved: 0,
-                    color: off_color,
-                    duration: duration_ms,
-                };
-                device.send_message(message)
-                    .with_context(|| format!("Failed to turn off {}", light.label))?;
-
+                // Use LightSetPower to actually power off (not just set brightness 0)
+                device
+                    .set_power(0, duration_ms)
+                    .with_context(|| format!("Failed to power off {}", light.label))?;
                 println!("{}: off", light.label);
             }
 
             // Save memory file once
-            let data = serde_json::to_string_pretty(&memory)
-                .context("Failed to serialize brightness memory")?;
-            std::fs::write(&self.brightness_memory_file, data)
-                .context("Failed to write brightness memory file")?;
+            let data = serde_json::to_string_pretty(&memory).context("Failed to serialize brightness memory")?;
+            std::fs::write(&self.brightness_memory_file, data).context("Failed to write brightness memory file")?;
         }
         Ok(())
     }
 
     async fn set_color(&self, lights: &[CachedLight], color_spec: &str, duration_ms: u32) -> Result<()> {
         let hsbk = self.parse_color_spec(color_spec)?;
-
         for light in lights {
             let device = LifxDevice::new(light.target, light.ip_addr)?;
+            self.ensure_powered_on(&device, duration_ms).await?;
+
             let message = Message::LightSetColor {
                 reserved: 0,
                 color: hsbk,
                 duration: duration_ms,
             };
-
-            device.send_message(message)
+            device
+                .send_message(message)
                 .with_context(|| format!("Failed to set color for {}", light.label))?;
         }
         Ok(())
@@ -532,6 +522,7 @@ impl LifxController {
     async fn set_brightness(&self, lights: &[CachedLight], level: u8, duration_ms: u32) -> Result<()> {
         for light in lights {
             let device = LifxDevice::new(light.target, light.ip_addr)?;
+            self.ensure_powered_on(&device, duration_ms).await?;
 
             // Get current color to preserve hue, saturation, kelvin
             let current_color = self.get_light_color(&device).await.unwrap_or(HSBK {
@@ -555,7 +546,8 @@ impl LifxController {
                 duration: duration_ms,
             };
 
-            device.send_message(message)
+            device
+                .send_message(message)
                 .with_context(|| format!("Failed to set brightness for {}", light.label))?;
         }
         Ok(())
@@ -564,12 +556,12 @@ impl LifxController {
     async fn adjust_brightness(&self, lights: &[CachedLight], amount: i16, duration_ms: u32) -> Result<()> {
         for light in lights {
             let device = LifxDevice::new(light.target, light.ip_addr)?;
+            self.ensure_powered_on(&device, duration_ms).await?;
 
-            // Get current color
             let current_color = self.get_light_color(&device).await.unwrap_or(HSBK {
                 hue: 0,
                 saturation: 0,
-                brightness: 32768, // 50% default
+                brightness: 32768,
                 kelvin: 3500,
             });
 
@@ -590,7 +582,8 @@ impl LifxController {
                 duration: duration_ms,
             };
 
-            device.send_message(message)
+            device
+                .send_message(message)
                 .with_context(|| format!("Failed to adjust brightness for {}", light.label))?;
 
             println!("{}: {:.0}% → {:.0}%", light.label, current_brightness_pct, new_brightness_pct);
@@ -601,8 +594,8 @@ impl LifxController {
     async fn adjust_temperature(&self, lights: &[CachedLight], amount: i32, duration_ms: u32) -> Result<()> {
         for light in lights {
             let device = LifxDevice::new(light.target, light.ip_addr)?;
+            self.ensure_powered_on(&device, duration_ms).await?;
 
-            // Get current color
             let current_color = self.get_light_color(&device).await.unwrap_or(HSBK {
                 hue: 0,
                 saturation: 0,
@@ -626,7 +619,8 @@ impl LifxController {
                 duration: duration_ms,
             };
 
-            device.send_message(message)
+            device
+                .send_message(message)
                 .with_context(|| format!("Failed to adjust temperature for {}", light.label))?;
 
             println!("{}: {}K → {}K", light.label, current_kelvin, new_kelvin);
@@ -636,7 +630,6 @@ impl LifxController {
 
     async fn get_light_color(&self, device: &LifxDevice) -> Result<HSBK> {
         let response = device.query_message(Message::LightGet)?;
-
         if let Message::LightState { color, .. } = response {
             Ok(color)
         } else {
@@ -647,9 +640,8 @@ impl LifxController {
     fn parse_color_spec(&self, spec: &str) -> Result<HSBK> {
         // Handle kelvin temperature (e.g., "3500k")
         if spec.ends_with('k') || spec.ends_with('K') {
-            let kelvin_str = &spec[..spec.len()-1];
-            let kelvin: u16 = kelvin_str.parse()
-                .context("Invalid kelvin value")?;
+            let kelvin_str = &spec[..spec.len() - 1];
+            let kelvin: u16 = kelvin_str.parse().context("Invalid kelvin value")?;
             return Ok(HSBK {
                 hue: 0,
                 saturation: 0,
@@ -687,7 +679,6 @@ impl LifxController {
         let b: f32 = parts[2].parse().context("Invalid brightness")?;
         let k: u16 = parts[3].parse().context("Invalid kelvin")?;
 
-        // Validate ranges
         if !(0.0..=360.0).contains(&h) {
             return Err(anyhow!("Hue must be 0-360°"));
         }
@@ -701,7 +692,6 @@ impl LifxController {
             return Err(anyhow!("Kelvin must be 1500-9000"));
         }
 
-        // Convert to LIFX format (0-65535)
         Ok(HSBK {
             hue: (h / 360.0 * 65535.0) as u16,
             saturation: (s / 100.0 * 65535.0) as u16,
@@ -713,12 +703,9 @@ impl LifxController {
     async fn interactive_color_selection(&self) -> Result<String> {
         let mut options = Vec::new();
 
-        // Add predefined colors
         for (name, hsbk) in PREDEFINED_COLORS {
             options.push(format!("{} - {}", name, hsbk));
         }
-
-        // Add themes
         for (name, hsbk) in LIFX_THEMES {
             options.push(format!("{} (theme) - {}", name, hsbk));
         }
@@ -731,7 +718,6 @@ impl LifxController {
 
         if let Some(idx) = selection {
             let selected = &options[idx];
-            // Extract HSBK values from the selection
             if let Some(hsbk_part) = selected.split(" - ").last() {
                 return Ok(hsbk_part.to_string());
             }
@@ -743,17 +729,14 @@ impl LifxController {
     async fn get_light_info(&self, light: &mut CachedLight) -> Result<()> {
         let device = LifxDevice::new(light.target, light.ip_addr)?;
 
-        // Get device label
         if let Ok(Message::StateLabel { label }) = device.query_message(Message::GetLabel) {
             light.label = label.to_string();
         }
 
-        // Get device power state
         if let Ok(Message::LightStatePower { level }) = device.query_message(Message::LightGetPower) {
             light.power = Some(level);
         }
 
-        // Get device color state
         if let Ok(Message::LightState { color, .. }) = device.query_message(Message::LightGet) {
             light.color = Some(color.into());
         }
@@ -774,7 +757,6 @@ impl LifxController {
         if let Some(color) = &light.color {
             let h = color.hue as f32 / 65535.0 * 360.0;
             let s = color.saturation as f32 / 65535.0 * 100.0;
-            let _b = color.brightness as f32 / 65535.0 * 100.0;
 
             if s < 5.0 {
                 info.push_str(&format!(" {}K white", color.kelvin));
@@ -819,12 +801,10 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
 
-            // Enrich light information
             for light in &mut discovered {
                 let _ = controller.get_light_info(light).await;
             }
 
-            // Save enriched cache
             controller.save_cache(&discovered)?;
 
             for light in &discovered {
@@ -879,7 +859,9 @@ async fn main() -> Result<()> {
             let target_lights = controller.get_target_lights(&cli, &discovered).await?;
             let duration_ms = (cli.duration * 1000.0) as u32;
 
-            controller.adjust_brightness(&target_lights, amount as i16, duration_ms).await?;
+            controller
+                .adjust_brightness(&target_lights, amount as i16, duration_ms)
+                .await?;
             controller.save_last_used(&target_lights)?;
         }
 
@@ -888,7 +870,9 @@ async fn main() -> Result<()> {
             let target_lights = controller.get_target_lights(&cli, &discovered).await?;
             let duration_ms = (cli.duration * 1000.0) as u32;
 
-            controller.adjust_brightness(&target_lights, -(amount as i16), duration_ms).await?;
+            controller
+                .adjust_brightness(&target_lights, -(amount as i16), duration_ms)
+                .await?;
             controller.save_last_used(&target_lights)?;
         }
 
@@ -897,7 +881,9 @@ async fn main() -> Result<()> {
             let target_lights = controller.get_target_lights(&cli, &discovered).await?;
             let duration_ms = (cli.duration * 1000.0) as u32;
 
-            controller.adjust_temperature(&target_lights, -(amount as i32), duration_ms).await?;
+            controller
+                .adjust_temperature(&target_lights, -(amount as i32), duration_ms)
+                .await?;
             controller.save_last_used(&target_lights)?;
         }
 
@@ -906,7 +892,9 @@ async fn main() -> Result<()> {
             let target_lights = controller.get_target_lights(&cli, &discovered).await?;
             let duration_ms = (cli.duration * 1000.0) as u32;
 
-            controller.adjust_temperature(&target_lights, amount as i32, duration_ms).await?;
+            controller
+                .adjust_temperature(&target_lights, amount as i32, duration_ms)
+                .await?;
             controller.save_last_used(&target_lights)?;
         }
 
@@ -938,11 +926,9 @@ async fn main() -> Result<()> {
 
         _ => {
             if cli.all_lights || !cli.names.is_empty() || cli.group.is_some() {
-                // If targeting options are provided but no command, show help
                 eprintln!("No command specified. Use --help for available commands.");
                 std::process::exit(1);
             } else {
-                // Default behavior - list lights
                 let discovered = controller.discover_lights(true).await?;
                 for light in &discovered {
                     println!("{}", controller.format_light_info(light));
