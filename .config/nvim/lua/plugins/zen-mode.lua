@@ -28,14 +28,6 @@ return {
       gitsigns = {
         enabled = false,
       },
-      kitty = {
-        enabled = true,
-        font = '+4',
-      },
-      alacritty = {
-        enabled = true,
-        font = '30',
-      },
       options = {
         enabled = true,
         showcmd = false,
