@@ -3,6 +3,7 @@ local M = {}
 local currentApp = "ghostty"
 local currentBundleID = nil
 
+
 local function getApp()
   local app = nil
   if currentBundleID then
@@ -26,7 +27,11 @@ local function toggleAppVisibility()
   local app = getApp()
   if app then
     if not app:mainWindow() then
-      launchApp()
+      if currentApp == "kitty" then
+        app:selectMenuItem({ "kitty", "New OS window" })
+      else
+        launchApp()
+      end
     elseif app:isFrontmost() then
       app:hide()
     else
@@ -37,15 +42,7 @@ local function toggleAppVisibility()
     hs.timer.doAfter(0.5, function()
       local newApp = getApp()
       if newApp and newApp:mainWindow() then
-        local win = newApp:mainWindow()
-        if currentApp == "kitty" then
-          -- Special handling for kitty to prevent it from going off screen
-          local screen = win:screen()
-          local max = screen:frame()
-          win:setFrame({ x = max.x, y = max.y, w = max.w, h = max.h - 1 })
-        else
-          win:maximize()
-        end
+        newApp:mainWindow():maximize()
       end
     end)
   end
@@ -70,21 +67,11 @@ local function toggleAppMonitor()
 
       if nextScreen then
         win:moveToScreen(nextScreen)
-        if currentApp == "kitty" then
-          local max = nextScreen:frame()
-          win:setFrame({ x = max.x, y = max.y, w = max.w, h = max.h - 1 })
-        else
-          win:maximize()
-        end
+        win:maximize()
         app:activate()
       end
     else
-      if currentApp == "kitty" then
-        local max = win:screen():frame()
-        win:setFrame({ x = max.x, y = max.y, w = max.w, h = max.h - 1 })
-      else
-        win:maximize()
-      end
+      win:maximize()
       app:activate()
     end
   else
@@ -106,12 +93,7 @@ local function handleAppResize()
   if #hs.screen.allScreens() > 1 then
     toggleAppMonitor()
   else
-    if currentApp == "kitty" then
-      local max = mainWindow:screen():frame()
-      mainWindow:setFrame({ x = max.x, y = max.y, w = max.w, h = max.h - 1 })
-    else
-      mainWindow:maximize()
-    end
+    mainWindow:maximize()
   end
 end
 
