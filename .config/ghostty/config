@@ -9,7 +9,7 @@ font-family = "IosevkaTerm NFM Light"
 font-family-italic = "IosevkaTerm NFM Light Italic"
 font-family-bold = "IosevkaTerm NFM"
 font-family-bold-italic = "IosevkaTerm NFM Italic"
-adjust-cell-height = -6
+adjust-cell-height = -8
 adjust-font-baseline = 1
 adjust-cell-width = -9%
 
