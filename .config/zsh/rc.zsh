@@ -20,10 +20,10 @@ READNULLCMD=$PAGER
 # Prompt configuration - two lines with "# " prefix
 # Show user@host only in SSH connections
 if [[ -n "$SSH_CLIENT" ]]; then
-    PROMPT='# %F{cyan}%n@%m%f:%F{blue}%~%f
+    PROMPT='%(?.%F{green}#%f.%F{red}#%f) %F{cyan}%n@%m%f:%F{blue}%~%f
 %(?.%F{green}#%f.%F{red}#%f) '
 else
-    PROMPT='# %F{blue}%~%f
+    PROMPT='%(?.%F{green}#%f.%F{red}#%f) %F{blue}%~%f
 %(?.%F{green}#%f.%F{red}#%f) '
 fi
 
