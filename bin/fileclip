@@ -2,7 +2,7 @@
 //! ```cargo
 //! [dependencies]
 //! cocoa = "0.25"
-//! objc = "0.2"
+//! objc = "0.2.7"
 //! ```
 
 #[macro_use]
