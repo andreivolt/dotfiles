@@ -1,1 +1,1 @@
-echo '{ "command": ["playlist-prev"] }' | socat - /tmp/mpvsocket
+echo '{ "command": ["playlist-prev"] }' | socat - /tmp/mpvsocket &>/dev/null
