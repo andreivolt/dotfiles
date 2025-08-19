@@ -1,44 +1,32 @@
-font-size = 18
-
-# font-family = Pragmasevka Nerd Font
-# font-family-italic = Pragmasevka Nerd Font Italic
-# font-family-bold = Pragmasevka Nerd Font Bold
-# font-family-bold-italic = Pragmasevka Nerd Font Bold Italic
-# adjust-cell-height = -3
 font-family = IosevkaTerm NFM Light
 font-family-italic = IosevkaTerm NFM Light Italic
 font-family-bold = IosevkaTerm NFM Bold
 font-family-bold-italic = IosevkaTerm NFM Bold Italic
+
+font-size = 18
+
 adjust-cell-height = -10
 adjust-font-baseline = 1
-adjust-cell-width = -8%
-
-# font-family = Cascadia Code NF Regular Light
-# font-family-italic = Cascadia Code NF Italic Light Italic
-# font-family-bold = Cascadia Code NF Regular SemiBold
-# font-family-bold-italic = Cascadia Code NF Italic SemiBold Italic
-
-# font-family = PragmataPro Mono
-# font-family-italic = PragmataPro Mono Italic
-# font-family-bold = PragmataPro Mono Bold
-# font-family-bold-italic = PragmataPro Mono Bold Italic
+adjust-cell-width = -12%
 
 theme = aurora
 foreground = #ffffff
 background = #000000
-background-opacity = 0.65
-background-blur-radius = 20
 minimum-contrast = 1
 
-window-decoration = false
-window-vsync = false
-window-save-state = always
 window-padding-x = 0
 window-padding-y = 0
-window-colorspace = display-p3
+
+background-opacity = 0.65
+background-blur-radius = 20
+
+window-save-state = always
+
+window-vsync = false
 
 macos-non-native-fullscreen = true
 macos-window-shadow = false
+window-decoration = false
 
 cursor-style = bar
 
@@ -47,6 +35,8 @@ mouse-hide-while-typing = true
 confirm-close-surface = false
 
 alpha-blending = linear-corrected
+
+window-colorspace = display-p3
 
 # TODO
 # keybind = cmd+left=csi:\x1b[1;5D
