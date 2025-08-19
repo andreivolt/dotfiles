@@ -9,8 +9,8 @@ return {
   end,
   opts = {
     window = {
-      width = 80,
-      height = 0.85,
+      width = 75,
+      height = 0.8,
     },
     options = {
       signcolumn = 'no',
@@ -37,9 +37,14 @@ return {
     on_open = function()
       vim.cmd('ScrollbarHide')
       vim.cmd('set statuscolumn=""') -- TODO
+      vim.cmd('IBLDisable')
+      vim.opt_local.list = false
+      vim.cmd('DisableWhitespace')
     end,
     on_close = function()
       vim.cmd('ScrollbarShow')
+      vim.cmd('IBLEnable')
+      vim.cmd('EnableWhitespace')
     end
   },
   cmd = "ZenMode",
