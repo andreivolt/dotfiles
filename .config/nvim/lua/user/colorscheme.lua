@@ -48,8 +48,12 @@ vim.api.nvim_set_hl(0, "Normal", { bg = "NONE" })
 vim.api.nvim_set_hl(0, "NormalFloat", { bg = "NONE" })
 
 -- Configure window separator colors using 256 indexed colors (matching tmux)
-vim.api.nvim_set_hl(0, "WinSeparator", { 
-  fg = "#303030",  -- Hex equivalent of colour236 (dark gray)
-  ctermfg = 236,   -- Same as tmux's colour236 for 256-color terminals
-  bg = "NONE"      -- Transparent background
+vim.api.nvim_set_hl(0, "WinSeparator", {
+  fg = "#303030", -- Hex equivalent of colour236 (dark gray)
+  ctermfg = 236,  -- Same as tmux's colour236 for 256-color terminals
+  bg = "NONE"     -- Transparent background
 })
+
+
+vim.api.nvim_set_hl(0, "WinBar", { bg = "NONE" })
+vim.api.nvim_set_hl(0, "WinBarNC", { bg = "NONE" })

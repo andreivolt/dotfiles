@@ -31,7 +31,7 @@ vim.opt.scrolloff = 10
 vim.opt.shiftround = true
 vim.opt.shiftwidth = 2
 vim.opt.shortmess:append({ I = true })
-vim.opt.showbreak = "↳ "
+-- vim.opt.showbreak = "↳ "
 vim.opt.showmode = false
 vim.opt.signcolumn = "yes"
 vim.opt.smartcase = true
@@ -120,3 +120,12 @@ vim.api.nvim_create_autocmd("CursorHold", {
     end, 1000)           -- Delay in milliseconds (2 seconds)
   end,
 })
+
+
+-- -- Default steady beam everywhere, blinking beam only in insert
+-- vim.opt.guicursor = {
+--   "n-v-c:ver25",                                 -- Normal/Visual/Command: steady beam
+--   "i:ver25-blinkwait700-blinkon400-blinkoff250", -- Insert: blinking beam
+--   "r-cr:ver25",                                  -- Replace modes: steady beam
+--   "o:ver25",                                     -- Operator-pending: steady beam
+-- }

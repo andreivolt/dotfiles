@@ -1,6 +1,8 @@
-files-to-prompt
 edir
+files-to-prompt
 jtbl
-llm --with llm-anthropic,llm-cmd,llm-gemini,llm-openrouter
+llm --with llm-anthropic,llm-cmd,llm-gemini,llm-grok,llm-openrouter
+streamdown
 strip-tags
 ttok
+whisperx
