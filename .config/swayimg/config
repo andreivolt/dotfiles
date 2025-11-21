@@ -1,0 +1,6 @@
+# Swayimg configuration file.
+# vim: filetype=dosini
+
+[font]
+name = Tahoma
+size = 14
