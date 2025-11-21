@@ -1,0 +1,13 @@
+[Unit]
+Description=Clipboard history store for images
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/wl-paste --type image --watch /usr/bin/cliphist store
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target
