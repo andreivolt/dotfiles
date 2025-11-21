@@ -1,0 +1,12 @@
+[General]
+ColorScheme=BreezeDark
+font=Tahoma,11,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+menuFont=Tahoma,11,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+smallestReadableFont=Comfortaa,10,-1,5,50,0,0,0,0,0
+toolBarFont=Tahoma,11,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+
+[Icons]
+Theme=breeze
+
+[KDE]
+widgetStyle=Breeze
