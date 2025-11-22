@@ -59,6 +59,7 @@ alias rm="rm --verbose"
 alias scrcpy="scrcpy --render-driver opengl"
 alias vi="nvim"
 alias yt-dlp="yt-dlp --cookies-from-browser chrome"
+(( $+commands[xdg-open] )) && alias open="xdg-open"
 
 source ~/.local/share/zsh/plugins/zsh-defer/zsh-defer.plugin.zsh
 

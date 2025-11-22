@@ -1,7 +1,7 @@
 export XDG_CACHE_HOME=~/.cache
 export XDG_CONFIG_HOME=~/.config
 export XDG_DATA_HOME=~/.local
-export XDG_RUNTIME_DIR=$TMPDIR
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-$TMPDIR}
 export XDG_STATE_HOME=~/.local/state
 
 (( ${+commands[google-chrome-stable]} )) && BROWSER=google-chrome-stable
@@ -10,12 +10,14 @@ export XDG_STATE_HOME=~/.local/state
 export DELTA_PAGER='less -R'
 export DENO_NO_UPDATE_CHECK=1
 export EDITOR=nvim
+export TERMINAL=foot
 export GPG_TTY="$(tty)"
 export LESS='--RAW-CONTROL-CHARS --LONG-PROMPT --ignore-case --no-init --quit-if-one-screen'
 export MANPAGER='nvim +Man!' MANWIDTH=100
 export NIXPKGS_ALLOW_UNFREE=1
 export PAGER=nvimpager
 export PYTHONDONTWRITEBYTECODE=1 PYTHONWARNINGS=ignore
+export QT_AUTO_SCREEN_SCALE_FACTOR=1
 export UV_TOOL_BIN_DIR=~/.local/bin
 
 # disable Apple Terminal.app session restoration
@@ -55,3 +57,8 @@ path=(
   /nix/var/nix/profiles/default/bin(N)
   ${path:#/run/current-system/sw/bin}(N)
 )
+
+# Start Hyprland on TTY1
+if [ -z "$DISPLAY" ] && [ "$XDG_VTNR" -eq 1 ]; then
+  exec systemctl --user start hyprland.service
+fi
