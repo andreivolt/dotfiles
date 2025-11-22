@@ -1,8 +1,8 @@
 {
 	"auto_hide_tabs": true,
-	"color_scheme": "Packages/Color Scheme - Vintage Terminal/White.tmTheme",
+	"color_scheme.prefers": "auto",
 	"font_face": "Tahoma",
-	"font_size": 32,
+	"font_size": 30,
 	"hide_new_tab_button": true,
 	"ignored_packages":
 	[
@@ -12,12 +12,11 @@
 	"line_numbers": false,
 	"neovintageous_build_version": 13200,
 	"overlay_scroll_bars": "enabled",
-	"theme": "auto",
+    "theme": "Adaptive.sublime-theme",
 	"vintageous_highlighted_yank_duration": 200,
 	"vintageous_use_ctrl_keys": true,
 	"vintageous_use_super_keys": false,
 	"vintageous_use_sys_clipboard": true,
 	"update_check": false,
-	"dark_theme": "Default Dark.sublime-theme",
-	"light_theme": "Default Dark.sublime-theme",
+	"color_scheme": "Packages/Color Scheme - Vintage Terminal/White.tmTheme",
 }
