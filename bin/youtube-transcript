@@ -6,6 +6,7 @@
 #   "joblib",
 #   "lxml",
 #   "platformdirs",
+#   "requests",
 #   "sh",
 #   "tiktoken",
 #   "youtube-transcript-api>=0.6.2",
@@ -157,19 +158,27 @@ def get_transcript_with_deepgram(url):
 @memory.cache
 def get_transcript(video_id):
     """Get transcript for video ID"""
-    # Get browser cookies by default
+    # Get browser cookies by default and create http_client session
+    import requests
+    http_client = requests.Session()
     try:
         cookies = browser_cookie3.chrome()
+        # Add cookies to the session
+        for cookie in cookies:
+            http_client.cookies.set_cookie(cookie)
     except:
-        cookies = None
+        pass
+
+    # Create API instance with cookies
+    api = YouTubeTranscriptApi(http_client=http_client)
 
     # Try to get English transcript first
     try:
-        return YouTubeTranscriptApi.get_transcript(video_id, languages=['en'], cookies=cookies)
+        return api.fetch(video_id, languages=['en'])
     except Exception as e:
         # If English transcript is not available, get list of available transcripts
         try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            transcript_list = api.list(video_id)
 
             # Try to get the first auto-generated transcript available
             generated_transcripts = [t for t in transcript_list if t.is_generated]

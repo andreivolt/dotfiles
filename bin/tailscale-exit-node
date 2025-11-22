@@ -25,7 +25,19 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-const TAILSCALE_PATH: &str = "/Applications/Tailscale.localized/Tailscale.app/Contents/MacOS/Tailscale";
+fn get_tailscale_command() -> &'static str {
+    if cfg!(target_os = "macos") {
+        // On macOS, prefer the app bundle path if available, otherwise fall back to PATH
+        if std::path::Path::new("/Applications/Tailscale.localized/Tailscale.app/Contents/MacOS/Tailscale").exists() {
+            "/Applications/Tailscale.localized/Tailscale.app/Contents/MacOS/Tailscale"
+        } else {
+            "tailscale"
+        }
+    } else {
+        // On Linux and other platforms, use the command from PATH
+        "tailscale"
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "tailscale-exit-node")]
@@ -121,7 +133,7 @@ fn filter_by_country(nodes: &[ExitNode], country: &str) -> Vec<ExitNode> {
 }
 
 async fn set_exit_node(hostname: &str) -> Result<()> {
-    let output = Command::new(TAILSCALE_PATH)
+    let output = Command::new(get_tailscale_command())
         .args(["set", "--exit-node", hostname])
         .output()
         .await
