@@ -6,7 +6,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/swaybg -i /home/andrei/Downloads/bennie-bates-yFk9KGHVRgw-unsplash.jpg -m fill
+ExecStart=/usr/bin/swaybg -i /home/andrei/drive/in/macos-wallpapers/monterey.jpg -m fill
 Restart=on-failure
 RestartSec=3
 
