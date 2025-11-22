@@ -1,11 +1,11 @@
 font-family = IosevkaTerm NFM Light
 font-family-italic = IosevkaTerm NFM Light Italic
-font-family-bold = IosevkaTerm NFM Bold
-font-family-bold-italic = IosevkaTerm NFM Bold Italic
+font-family-bold = IosevkaTerm NFM
+font-family-bold-italic = IosevkaTerm NFM Italic
 
 font-thicken = true
 
-font-size = 19
+font-size = 16
 
 adjust-cell-height = -8
 adjust-font-baseline = 0
@@ -16,11 +16,11 @@ foreground = #ffffff
 background = #000000
 minimum-contrast = 1
 
-window-padding-x = 0
-window-padding-y = 0
+window-padding-x = 8
+window-padding-y = 8
 
 background-opacity = 0.75
-background-blur-radius = 30
+background-blur-radius = 15
 
 window-save-state = always
 
@@ -50,3 +50,5 @@ auto-update = off
 cursor-click-to-move = true
 
 # custom-shader = shaders/cursor_blaze_no_trail.glsl
+
+gtk-single-instance = true
