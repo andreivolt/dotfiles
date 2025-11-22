@@ -22,7 +22,7 @@
             "spotify": "󰓇",
             "discord": "󰙯",
             "slack": "󰒱",
-            "org.telegram.desktop": "󰔁",
+            "org.telegram.desktop": "󰭹",
             "thunderbird": "󰇮"
         },
         "on-click": "activate",
