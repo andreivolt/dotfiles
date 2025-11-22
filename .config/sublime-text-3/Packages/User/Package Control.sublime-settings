@@ -3,7 +3,6 @@
 	"update_check": false,
 	"in_process_packages":
 	[
-		"Package Control",
 	],
 	"installed_packages":
 	[
@@ -11,9 +10,7 @@
 		"distractionless",
 		"Moonlight",
 		"NeoVintageous",
-		"Nix",
 		"Package Control",
-		"PackageResourceViewer",
 		"SublimeREPL",
 		"Theme - Vim Blackboard",
 		"Tomorrow Color Schemes",
