@@ -63,7 +63,7 @@
         },
         "format": "{capacity}%",
 
-        "format-charging": "CHG {capacity}%",
+        "format-charging": "󱐋 {capacity}% {time}",
         "format-plugged": "AC {capacity}%",
         "format-alt": "{time}"
     },
