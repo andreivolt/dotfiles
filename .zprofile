@@ -58,7 +58,4 @@ path=(
   ${path:#/run/current-system/sw/bin}(N)
 )
 
-# Start Hyprland on TTY1
-if [ -z "$DISPLAY" ] && [ "$XDG_VTNR" -eq 1 ]; then
-  exec systemctl --user start hyprland.service
-fi
+# TTY auto-start removed - using greetd/tuigreet for session management
