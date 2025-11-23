@@ -7,8 +7,12 @@ After=graphical-session.target
 [Service]
 Type=simple
 ExecStart=/usr/bin/swayidle -w \
+  timeout 180 'brightnessctl -s set 10%%' \
+  resume 'brightnessctl -r' \
   timeout 300 'hyprctl dispatch dpms off' \
-  resume 'hyprctl dispatch dpms on'
+  resume 'hyprctl dispatch dpms on' \
+  timeout 600 'systemctl suspend' \
+  before-sleep 'swaylock -f'
 Restart=on-failure
 RestartSec=3
 
