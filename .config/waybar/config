@@ -23,7 +23,8 @@
             "discord": "󰙯",
             "slack": "󰒱",
             "org.telegram.desktop": "󰭹",
-            "thunderbird": "󰇮"
+            "thunderbird": "󰇮",
+            "sublime_text": "󰷈"
         },
         "on-click": "activate",
         "sort-by-number": true
