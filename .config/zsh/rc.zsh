@@ -17,6 +17,15 @@ setopt numeric_glob_sort
 
 READNULLCMD=$PAGER
 
+# Set terminal title
+precmd() {
+  print -Pn "\e]0;%~\a"  # Show current directory
+}
+
+preexec() {
+  print -Pn "\e]0;$1\a"  # Show running command
+}
+
 # Prompt configuration - two lines with "# " prefix
 # Show user@host only in SSH connections
 # if [[ -n "$SSH_CLIENT" ]]; then
