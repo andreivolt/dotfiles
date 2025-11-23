@@ -24,7 +24,8 @@
             "slack": "󰒱",
             "org.telegram.desktop": "󰭹",
             "thunderbird": "󰇮",
-            "sublime_text": "󰷈"
+            "sublime_text": "󰷈",
+            "mpv": "󰎁"
         },
         "on-click": "activate",
         "sort-by-number": true
