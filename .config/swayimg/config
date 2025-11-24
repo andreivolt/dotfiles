@@ -15,3 +15,7 @@ scale = optimal
 [font]
 name = Tahoma
 size = 14
+
+[info]
+# Disable on-screen info display (metadata, zoom level, etc.)
+show = no
