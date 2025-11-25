@@ -2,7 +2,7 @@
 	border: none;
 	border-radius: 0;
 	font-family: "Tahoma", "DejaVu Sans", "Liberation Sans", sans-serif;
-	font-size: 16px;
+	font-size: 14px;
 	font-weight: 500;
 	min-height: 0;
 }
@@ -55,7 +55,7 @@ window#waybar.empty #window {
 	background: transparent;
 	color: #888888;
 	border-radius: 0;
-	border-bottom: 2px solid transparent;
+	border-bottom: 1px solid transparent;
 	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -69,7 +69,7 @@ window#waybar.empty #window {
 	background: transparent;
 	color: #ffffff;
 	font-weight: 600;
-	border-bottom: 2px solid #00ff00;
+	border-bottom: 1px solid #00ff00;
 }
 
 #workspaces button.urgent {
@@ -97,8 +97,8 @@ window#waybar.empty #window {
 /* Clock */
 #clock {
 	padding: 0 12px;
-	font-weight: 600;
-	color: #888888; /* gray default */
+	font-weight: 700;
+	color: #888888; /* gray text */
 	margin: 4px 0;
 }
 
@@ -110,7 +110,6 @@ window#waybar.empty #window {
 #battery,
 #network,
 #pulseaudio,
-#clock,
 #tray {
 	color: #888888;
 }
@@ -188,31 +187,23 @@ window#waybar.empty #window {
 	margin: 4px 0;
 	border-radius: 0;
 	transition: all 0.3s ease;
-	color: #888888; /* gray default */
+	color: #00ff00; /* green default (>80%) */
 }
 
-#battery.charging {
-	color: #0088ff; /* pure blue when charging */
-	background: rgba(0, 136, 255, 0.1);
+#battery.full {
+	color: #00ff00; /* pure green when >80% */
 }
 
-#battery.plugged {
-	color: #0088ff; /* pure blue when plugged */
-	background: rgba(0, 136, 255, 0.1);
-}
-
-#battery.full,
 #battery.good {
-	color: #00ff00; /* pure green when full/good */
+	color: #ffff00; /* pure yellow 50-80% */
 }
 
-#battery.warning:not(.charging) {
-	color: #ffff00; /* pure yellow warning */
-	background: rgba(255, 255, 0, 0.2);
+#battery.warning {
+	color: #ff8800; /* orange 15-50% */
 }
 
-#battery.critical:not(.charging) {
-	color: #ff0000; /* pure red critical */
+#battery.critical {
+	color: #ff0000; /* pure red critical ≤15% */
 	background: rgba(255, 0, 0, 0.3);
 	animation: blink-fast 0.5s infinite;
 }
@@ -249,6 +240,8 @@ window#waybar.empty #window {
 
 #network.ethernet {
 	color: #0088ff; /* pure blue for ethernet */
+	background: rgba(0, 136, 255, 0.1);
+	box-shadow: 0 2px 8px rgba(0, 136, 255, 0.2);
 }
 
 /* Pulseaudio */
