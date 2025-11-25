@@ -254,8 +254,7 @@ window#waybar.empty #window {
 }
 
 #pulseaudio.muted {
-	color: #4c566a;
-	background: rgba(76, 86, 106, 0.2);
+	color: #ff0000; /* pure red when muted */
 }
 
 #pulseaudio.bluetooth {
