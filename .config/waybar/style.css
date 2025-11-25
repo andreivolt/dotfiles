@@ -51,7 +51,7 @@ window#waybar.empty #window {
 
 #workspaces button {
 	padding: 0 8px;
-	margin: 4px 2px;
+	margin: 4px 4px;
 	background: transparent;
 	color: #888888;
 	border-radius: 0;
@@ -118,11 +118,16 @@ window#waybar.empty #window {
 #cpu,
 #memory,
 #disk,
-#temperature {
+#temperature,
+#network,
+#battery,
+#pulseaudio,
+#clock {
 	padding: 0 10px;
 	margin: 4px 0;
 	border-radius: 0;
 	transition: all 0.3s ease;
+	min-width: 60px;
 }
 
 /* CPU states with colors */
@@ -204,8 +209,12 @@ window#waybar.empty #window {
 
 #battery.critical {
 	color: #ff0000; /* pure red critical ≤15% */
-	background: rgba(255, 0, 0, 0.3);
-	animation: blink-fast 0.5s infinite;
+	animation: blink-slow 2s infinite;
+}
+
+#battery.charging,
+#battery.plugged {
+	animation: none;
 }
 
 @keyframes blink-fast {
