@@ -1,7 +1,7 @@
 {
 	"auto_hide_tabs": true,
 	"font_face": "Tahoma",
-	"font_size": 30,
+	"font_size": 24,
 	"hide_new_tab_button": true,
 	"ignored_packages": ["Vintage"],
 	"index_files": false,
