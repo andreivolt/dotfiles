@@ -1,0 +1,17 @@
+#!/bin/bash
+ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes' | cut -d: -f2)
+strength=$(nmcli -t -f active,signal dev wifi 2>/dev/null | grep '^yes' | cut -d: -f2)
+
+if [[ -z "$ssid" ]]; then
+    echo '{"ssid":"Disconnected","text":"󰤭"}'
+elif ((strength > 80)); then
+    echo "{\"ssid\":\"$ssid\",\"text\":\"󰤨 ${strength}%\"}"
+elif ((strength > 60)); then
+    echo "{\"ssid\":\"$ssid\",\"text\":\"󰤥 ${strength}%\"}"
+elif ((strength > 40)); then
+    echo "{\"ssid\":\"$ssid\",\"text\":\"󰤢 ${strength}%\"}"
+elif ((strength > 20)); then
+    echo "{\"ssid\":\"$ssid\",\"text\":\"󰤟 ${strength}%\"}"
+else
+    echo "{\"ssid\":\"$ssid\",\"text\":\"󰤯 ${strength}%\"}"
+fi

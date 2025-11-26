@@ -1,0 +1,9 @@
+#!/bin/bash
+read -r _ total _ < /proc/meminfo
+read -r _ _ < /proc/meminfo
+read -r _ available _ <<< "$(grep MemAvailable /proc/meminfo)"
+used=$((total - available))
+percent=$((100 * used / total))
+used_gb=$(echo "scale=1; $used / 1024 / 1024" | bc)
+total_gb=$(echo "scale=1; $total / 1024 / 1024" | bc)
+echo "{\"percent\": $percent, \"tooltip\": \"RAM: ${used_gb}GB / ${total_gb}GB\"}"

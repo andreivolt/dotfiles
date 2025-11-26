@@ -1,0 +1,14 @@
+#!/bin/bash
+
+hyprctl monitors -j | jq -r '.[0].activeWorkspace.id'
+
+SOCKET_PATH="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
+
+# Use process substitution to avoid subshell issue with pipe
+while IFS= read -r line; do
+    case "$line" in
+        workspace*|focusedmon*)
+            hyprctl monitors -j | jq -r '.[0].activeWorkspace.id'
+            ;;
+    esac
+done < <(socat -u "UNIX-CONNECT:$SOCKET_PATH" -)

@@ -1,0 +1,2 @@
+#!/bin/bash
+brightnessctl -d apple-panel-bl -m | cut -d',' -f4 | tr -d '%'
