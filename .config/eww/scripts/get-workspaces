@@ -1,0 +1,122 @@
+#!/bin/bash
+# Get workspaces with native application icon paths
+
+# Icon cache for performance
+declare -A ICON_CACHE
+
+get_icon_path() {
+    local class="$1"
+    [[ -z "$class" ]] && return
+
+    [[ -n "${ICON_CACHE[$class]}" ]] && { printf '%s' "${ICON_CACHE[$class]}"; return; }
+
+    local icon_path="" icon_name=""
+    local names=("$class" "${class,,}" "${class//./}" "${class//./-}")
+
+    if [[ "$class" == org.* ]]; then
+        local parts=(${class//./ })
+        names+=("${parts[-1]}" "${parts[-1],,}")
+    fi
+
+    for name in "${names[@]}"; do
+        for dir in /usr/share/applications ~/.local/share/applications /var/lib/flatpak/exports/share/applications; do
+            for file in "$dir/$name.desktop" "$dir/${name}".desktop; do
+                if [[ -f "$file" ]]; then
+                    icon_name=$(grep -m1 "^Icon=" "$file" 2>/dev/null | cut -d= -f2)
+                    [[ -n "$icon_name" ]] && break 3
+                fi
+            done
+            for file in "$dir"/*"$name"*.desktop; do
+                if [[ -f "$file" ]]; then
+                    icon_name=$(grep -m1 "^Icon=" "$file" 2>/dev/null | cut -d= -f2)
+                    [[ -n "$icon_name" ]] && break 3
+                fi
+            done
+        done
+    done
+
+    if [[ -n "$icon_name" ]]; then
+        if [[ "$icon_name" == /* && -f "$icon_name" ]]; then
+            icon_path="$icon_name"
+        else
+            for size in 48 64 32 256 128 24 scalable; do
+                for theme in hicolor Adwaita breeze Papirus; do
+                    for ext in png svg; do
+                        local p="/usr/share/icons/$theme/${size}x${size}/apps/$icon_name.$ext"
+                        [[ -f "$p" ]] && icon_path="$p" && break 3
+                    done
+                done
+            done
+            if [[ -z "$icon_path" ]]; then
+                for ext in png svg xpm; do
+                    local p="/usr/share/pixmaps/$icon_name.$ext"
+                    [[ -f "$p" ]] && icon_path="$p" && break
+                done
+            fi
+        fi
+    fi
+
+    if [[ -z "$icon_path" ]]; then
+        case "${class,,}" in
+            footclient|foot|footclient-dropdown) icon_path="/usr/share/icons/hicolor/48x48/apps/foot.png" ;;
+            sublime_text) icon_path="/opt/sublime_text/Icon/256x256/sublime-text.png" ;;
+            org.telegram.desktop|telegram*)
+                for p in /usr/share/icons/hicolor/48x48/apps/org.telegram.desktop.png /usr/share/icons/hicolor/48x48/apps/telegram.png; do
+                    [[ -f "$p" ]] && icon_path="$p" && break
+                done ;;
+            org.chromium.chromium|chromium*)
+                for p in /usr/share/icons/hicolor/48x48/apps/chromium.png; do
+                    [[ -f "$p" ]] && icon_path="$p" && break
+                done ;;
+        esac
+    fi
+
+    if [[ -f "$icon_path" ]]; then
+        ICON_CACHE[$class]="$icon_path"
+        printf '%s' "$icon_path"
+    fi
+}
+
+generate_output() {
+    local output="["
+    local first=true
+    local ws_ids=$(hyprctl workspaces -j | jq -r '.[] | select(.id > 0) | .id' | sort -n)
+
+    for ws_id in $ws_ids; do
+        local classes=$(hyprctl clients -j | jq -r --arg ws "$ws_id" '.[] | select(.workspace.id == ($ws | tonumber)) | .class' | sort -u)
+
+        local icons="["
+        local icon_first=true
+        while IFS= read -r class; do
+            [[ -z "$class" ]] && continue
+            local icon=$(get_icon_path "$class")
+            if [[ -n "$icon" ]]; then
+                $icon_first || icons+=","
+                icons+="\"$icon\""
+                icon_first=false
+            fi
+        done <<< "$classes"
+        icons+="]"
+
+        $first || output+=","
+        output+="{\"id\":$ws_id,\"icons\":$icons}"
+        first=false
+    done
+
+    output+="]"
+    printf '%s\n' "$output"
+}
+
+# Initial output
+generate_output
+
+SOCKET_PATH="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
+
+# Use process substitution to avoid subshell issue with pipe
+while IFS= read -r line; do
+    case "$line" in
+        workspace*|createworkspace*|destroyworkspace*|openwindow*|closewindow*|movewindow*)
+            generate_output
+            ;;
+    esac
+done < <(socat -u "UNIX-CONNECT:$SOCKET_PATH" -)

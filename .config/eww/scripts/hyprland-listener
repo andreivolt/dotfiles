@@ -1,0 +1,171 @@
+#!/bin/bash
+# Single listener that updates all workspace-related eww variables
+
+# Icon cache for performance
+declare -A ICON_CACHE
+
+get_icon_path() {
+    local class="$1"
+    [[ -z "$class" ]] && return
+
+    [[ -n "${ICON_CACHE[$class]}" ]] && { printf '%s' "${ICON_CACHE[$class]}"; return; }
+
+    local icon_path="" icon_name=""
+    local names=("$class" "${class,,}" "${class//./}" "${class//./-}" "${class//_/-}" "${class,,//_/-}")
+
+    if [[ "$class" == org.* || "$class" == com.* || "$class" == io.* ]]; then
+        local parts=(${class//./ })
+        names+=("${parts[-1]}" "${parts[-1],,}")
+    fi
+
+    for name in "${names[@]}"; do
+        for dir in /usr/share/applications ~/.local/share/applications /var/lib/flatpak/exports/share/applications; do
+            for file in "$dir/$name.desktop" "$dir/${name}".desktop; do
+                if [[ -f "$file" ]]; then
+                    icon_name=$(grep -m1 "^Icon=" "$file" 2>/dev/null | cut -d= -f2)
+                    [[ -n "$icon_name" ]] && break 3
+                fi
+            done
+            for file in "$dir"/*"$name"*.desktop; do
+                if [[ -f "$file" ]]; then
+                    icon_name=$(grep -m1 "^Icon=" "$file" 2>/dev/null | cut -d= -f2)
+                    [[ -n "$icon_name" ]] && break 3
+                fi
+            done
+        done
+    done
+
+    if [[ -n "$icon_name" ]]; then
+        if [[ "$icon_name" == /* && -f "$icon_name" ]]; then
+            icon_path="$icon_name"
+        else
+            # Search standard icon theme locations (including flatpak exports)
+            for base in /usr/share/icons /var/lib/flatpak/exports/share/icons ~/.local/share/icons; do
+                for size in 48x48 64x64 32x32 256x256 128x128 24x24 scalable; do
+                    for theme in hicolor Adwaita breeze Papirus; do
+                        for ext in png svg; do
+                            local p="$base/$theme/${size}/apps/$icon_name.$ext"
+                            [[ -f "$p" ]] && icon_path="$p" && break 4
+                        done
+                    done
+                done
+            done
+            # Search swcatalog (Fedora software center icons)
+            if [[ -z "$icon_path" ]]; then
+                for size in 64 128; do
+                    for ext in png svg; do
+                        local p="/usr/share/swcatalog/icons/fedora/${size}x${size}/$icon_name.$ext"
+                        [[ -f "$p" ]] && icon_path="$p" && break 2
+                    done
+                done
+            fi
+            # Search pixmaps
+            if [[ -z "$icon_path" ]]; then
+                for ext in png svg xpm; do
+                    local p="/usr/share/pixmaps/$icon_name.$ext"
+                    [[ -f "$p" ]] && icon_path="$p" && break
+                done
+            fi
+        fi
+    fi
+
+    # Fallback: search by class name directly in swcatalog and pixmaps
+    if [[ -z "$icon_path" ]]; then
+        for name in "${names[@]}"; do
+            # Try swcatalog
+            for size in 64 128; do
+                for ext in png svg; do
+                    local p="/usr/share/swcatalog/icons/fedora/${size}x${size}/${name}.$ext"
+                    [[ -f "$p" ]] && icon_path="$p" && break 3
+                    p="/usr/share/swcatalog/icons/fedora/${size}x${size}/${name}-browser.$ext"
+                    [[ -f "$p" ]] && icon_path="$p" && break 3
+                done
+            done
+        done
+    fi
+
+    # Last resort: find icon in /opt (for third-party apps like sublime)
+    if [[ -z "$icon_path" ]]; then
+        for name in "${names[@]}"; do
+            local found=$(find /opt -maxdepth 4 -name "*${name}*.png" 2>/dev/null | head -1)
+            [[ -f "$found" ]] && icon_path="$found" && break
+        done
+    fi
+
+    if [[ -f "$icon_path" ]]; then
+        ICON_CACHE[$class]="$icon_path"
+        printf '%s' "$icon_path"
+    fi
+}
+
+update_workspaces() {
+    local output="["
+    local first=true
+    local ws_ids=$(hyprctl workspaces -j | jq -r '.[] | select(.id > 0) | .id' | sort -n)
+
+    for ws_id in $ws_ids; do
+        # Get all window classes (without dedup to show icon per window)
+        local classes=$(hyprctl clients -j | jq -r --arg ws "$ws_id" '.[] | select(.workspace.id == ($ws | tonumber)) | .class')
+
+        local icons="["
+        local icon_first=true
+        while IFS= read -r class; do
+            [[ -z "$class" ]] && continue
+            local icon=$(get_icon_path "$class")
+            if [[ -n "$icon" ]]; then
+                $icon_first || icons+=","
+                icons+="\"$icon\""
+                icon_first=false
+            fi
+        done <<< "$classes"
+        icons+="]"
+
+        $first || output+=","
+        output+="{\"id\":$ws_id,\"icons\":$icons}"
+        first=false
+    done
+
+    output+="]"
+    eww update workspaces="$output"
+}
+
+update_active_workspace() {
+    local ws=$(hyprctl monitors -j | jq -r '.[0].activeWorkspace.id')
+    eww update active-workspace="$ws"
+}
+
+update_window_title() {
+    local title=$(hyprctl activewindow -j | jq -r '.title // ""' | cut -c1-60)
+    # Escape special characters for eww
+    title="${title//\\/\\\\}"
+    title="${title//\"/\\\"}"
+    eww update window-title="$title"
+}
+
+# Initial update
+update_workspaces
+update_active_workspace
+update_window_title
+
+SOCKET_PATH="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
+
+# Listen for events
+socat -u "UNIX-CONNECT:$SOCKET_PATH" - | while IFS= read -r line; do
+    case "$line" in
+        workspace*|focusedmon*)
+            update_active_workspace
+            update_window_title
+            ;;
+        activewindow*)
+            update_window_title
+            ;;
+        openwindow*|closewindow*|movewindow*)
+            update_workspaces
+            update_window_title
+            ;;
+        createworkspace*|destroyworkspace*)
+            update_workspaces
+            update_active_workspace
+            ;;
+    esac
+done
