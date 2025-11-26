@@ -1,0 +1,10 @@
+[Unit]
+Description=WayVNC server
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/wayvnc
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
