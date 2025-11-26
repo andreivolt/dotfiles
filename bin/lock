@@ -6,7 +6,7 @@ case "$(uname -s)" in
         m lock
         ;;
     Linux)
-        swaylock -c '000000'
+        hyprlock
         ;;
     *)
         echo "Unsupported operating system."
