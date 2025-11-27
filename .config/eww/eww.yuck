@@ -64,7 +64,7 @@
 
 ; Network widget
 (defwidget network-widget []
-  (button :class "network" :width 45
+  (button :class "network" :width 60
           :onclick "nm-connection-editor &"
           :tooltip "${network.ssid}"
     (label :text "${network.text}")))
