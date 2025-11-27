@@ -130,6 +130,7 @@ window {
 // Network
 .network {
     color: $blue;
+    margin-right: 12px;
     &.disconnected { color: $red; }
 }
 
