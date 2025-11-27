@@ -17,6 +17,8 @@
     "modules-right": [
         "tray",
         "custom/separator",
+        "custom/tailscale",
+        "custom/separator",
         "network",
         "custom/separator",
         "pulseaudio",
@@ -187,6 +189,13 @@
     "custom/separator": {
         "format": "|",
         "tooltip": false
+    },
+
+    "custom/tailscale": {
+        "exec": "~/.config/waybar/tailscale-exit-node.sh",
+        "return-type": "json",
+        "interval": 10,
+        "tooltip": true
     },
 
     "custom/power": {
