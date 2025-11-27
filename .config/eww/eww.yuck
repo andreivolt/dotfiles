@@ -46,10 +46,7 @@
         (box :orientation "h" :space-evenly false
           (label :class "ws-id" :text "${ws.id}")
           (for icon in {ws.icons}
-            (image :class "ws-icon"
-                   :path icon
-                   :image-width 16
-                   :image-height 16)))))))
+            (box :class "ws-icon" :style "background-image: url('${icon}');")))))))
 
 ; Separator
 (defwidget separator []

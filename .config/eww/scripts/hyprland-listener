@@ -39,21 +39,21 @@ get_icon_path() {
         if [[ "$icon_name" == /* && -f "$icon_name" ]]; then
             icon_path="$icon_name"
         else
-            # Search standard icon theme locations (including flatpak exports)
+            # Prefer SVG (scalable) first, then large PNGs
             for base in /usr/share/icons /var/lib/flatpak/exports/share/icons ~/.local/share/icons; do
-                for size in 48x48 64x64 32x32 256x256 128x128 24x24 scalable; do
+                for size in scalable 256x256 128x128 64x64 48x48 32x32; do
                     for theme in hicolor Adwaita breeze Papirus; do
-                        for ext in png svg; do
+                        for ext in svg png; do
                             local p="$base/$theme/${size}/apps/$icon_name.$ext"
                             [[ -f "$p" ]] && icon_path="$p" && break 4
                         done
                     done
                 done
             done
-            # Search swcatalog (Fedora software center icons)
+            # Search swcatalog
             if [[ -z "$icon_path" ]]; then
-                for size in 64 128; do
-                    for ext in png svg; do
+                for size in 128 64; do
+                    for ext in svg png; do
                         local p="/usr/share/swcatalog/icons/fedora/${size}x${size}/$icon_name.$ext"
                         [[ -f "$p" ]] && icon_path="$p" && break 2
                     done
@@ -61,7 +61,7 @@ get_icon_path() {
             fi
             # Search pixmaps
             if [[ -z "$icon_path" ]]; then
-                for ext in png svg xpm; do
+                for ext in svg png xpm; do
                     local p="/usr/share/pixmaps/$icon_name.$ext"
                     [[ -f "$p" ]] && icon_path="$p" && break
                 done
@@ -69,26 +69,15 @@ get_icon_path() {
         fi
     fi
 
-    # Fallback: search by class name directly in swcatalog and pixmaps
+    # Fallback: search by class name directly
     if [[ -z "$icon_path" ]]; then
         for name in "${names[@]}"; do
-            # Try swcatalog
-            for size in 64 128; do
-                for ext in png svg; do
+            for size in 128 64; do
+                for ext in svg png; do
                     local p="/usr/share/swcatalog/icons/fedora/${size}x${size}/${name}.$ext"
-                    [[ -f "$p" ]] && icon_path="$p" && break 3
-                    p="/usr/share/swcatalog/icons/fedora/${size}x${size}/${name}-browser.$ext"
                     [[ -f "$p" ]] && icon_path="$p" && break 3
                 done
             done
-        done
-    fi
-
-    # Last resort: find icon in /opt (for third-party apps like sublime)
-    if [[ -z "$icon_path" ]]; then
-        for name in "${names[@]}"; do
-            local found=$(find /opt -maxdepth 4 -name "*${name}*.png" 2>/dev/null | head -1)
-            [[ -f "$found" ]] && icon_path="$found" && break
         done
     fi
 
@@ -104,7 +93,6 @@ update_workspaces() {
     local ws_ids=$(hyprctl workspaces -j | jq -r '.[] | select(.id > 0) | .id' | sort -n)
 
     for ws_id in $ws_ids; do
-        # Get all window classes (without dedup to show icon per window)
         local classes=$(hyprctl clients -j | jq -r --arg ws "$ws_id" '.[] | select(.workspace.id == ($ws | tonumber)) | .class')
 
         local icons="["
@@ -136,7 +124,6 @@ update_active_workspace() {
 
 update_window_title() {
     local title=$(hyprctl activewindow -j | jq -r '.title // ""' | cut -c1-60)
-    # Escape special characters for eww
     title="${title//\\/\\\\}"
     title="${title//\"/\\\"}"
     eww update window-title="$title"
