@@ -66,12 +66,15 @@ def format_timestamp(seconds):
 def get_transcript_with_ytdlp(video_id):
     """Fallback method using yt-dlp to get transcript"""
     try:
-        # Build yt-dlp command with browser cookies - use JSON output for subtitles
+        # Build yt-dlp command - use JSON output for subtitles
+        cookies_file = Path.home() / ".config/youtube/cookies.txt"
         cmd_args = [
             '--write-auto-subs', '--skip-download', '--write-sub', '--sub-format', 'json3',
-            '--sub-langs', 'en', '--cookies-from-browser', 'chrome',
+            '--sub-langs', 'en',
             '-o', f'{video_id}', f'https://www.youtube.com/watch?v={video_id}'
         ]
+        if cookies_file.exists():
+            cmd_args.extend(['--cookies', str(cookies_file)])
 
         sh.yt_dlp(*cmd_args, _cwd=str(Path.cwd()))
 
@@ -158,16 +161,23 @@ def get_transcript_with_deepgram(url):
 @memory.cache
 def get_transcript(video_id):
     """Get transcript for video ID"""
-    # Get browser cookies by default and create http_client session
     import requests
+    from http.cookiejar import MozillaCookieJar
+
     http_client = requests.Session()
-    try:
-        cookies = browser_cookie3.chrome()
-        # Add cookies to the session
-        for cookie in cookies:
-            http_client.cookies.set_cookie(cookie)
-    except:
-        pass
+    cookies_file = Path.home() / ".config/youtube/cookies.txt"
+
+    if cookies_file.exists():
+        jar = MozillaCookieJar(cookies_file)
+        jar.load()
+        http_client.cookies = jar
+    else:
+        try:
+            cookies = browser_cookie3.chrome()
+            for cookie in cookies:
+                http_client.cookies.set_cookie(cookie)
+        except:
+            pass
 
     # Create API instance with cookies
     api = YouTubeTranscriptApi(http_client=http_client)
