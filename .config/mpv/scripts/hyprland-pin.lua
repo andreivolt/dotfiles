@@ -1,60 +1,85 @@
 -- Hyprland pin management for fullscreen
--- Automatically unpins window before fullscreen, restores after
+-- Intercepts fullscreen toggle to unpin first, then re-pin on exit
 
 local was_pinned = false
+local msg = mp.msg  -- for logging
 
 local function is_hyprland()
     return os.getenv("HYPRLAND_INSTANCE_SIGNATURE") ~= nil
 end
 
-local function get_window_address()
-    local handle = io.popen("hyprctl activewindow -j 2>/dev/null | jq -r '.address'")
+local function run_cmd(cmd)
+    local handle = io.popen(cmd .. " 2>/dev/null")
     if handle then
-        local result = handle:read("*a"):gsub("%s+", "")
+        local result = handle:read("*a"):gsub("%s+$", "")
         handle:close()
-        if result ~= "" and result ~= "null" then
-            return result
-        end
+        return result
     end
     return nil
 end
 
-local function is_pinned(addr)
-    local handle = io.popen(string.format("hyprctl clients -j | jq -r '.[] | select(.address == \"%s\") | .pinned'", addr))
-    if handle then
-        local result = handle:read("*a"):gsub("%s+", "")
-        handle:close()
-        return result == "true"
-    end
-    return false
+local function get_window_address()
+    return run_cmd("hyprctl activewindow -j | jq -r '.address'")
 end
 
-local function set_pin(addr, pin)
-    local current = is_pinned(addr)
-    if current ~= pin then
+local function is_pinned(addr)
+    if not addr then return false end
+    local result = run_cmd(string.format(
+        "hyprctl clients -j | jq -r '.[] | select(.address == \"%s\") | .pinned'", addr))
+    return result == "true"
+end
+
+local function set_pin(addr, should_pin)
+    if not addr then return end
+    local currently_pinned = is_pinned(addr)
+    if currently_pinned ~= should_pin then
+        msg.info("Setting pin to " .. tostring(should_pin) .. " for " .. addr)
         os.execute(string.format("hyprctl dispatch pin address:%s", addr))
     end
 end
 
-local function on_fullscreen_change(name, value)
-    if not is_hyprland() then return end
+local function toggle_fullscreen_with_pin()
+    if not is_hyprland() then
+        -- Not Hyprland, use default behavior
+        mp.command("cycle fullscreen")
+        return
+    end
 
     local addr = get_window_address()
-    if not addr then return end
+    local is_fs = mp.get_property_bool("fullscreen")
 
-    if value then
-        -- Entering fullscreen: remember and unpin
+    msg.info("toggle_fullscreen: addr=" .. tostring(addr) .. " is_fs=" .. tostring(is_fs))
+
+    if not is_fs then
+        -- Entering fullscreen
         was_pinned = is_pinned(addr)
+        msg.info("Entering fullscreen, was_pinned=" .. tostring(was_pinned))
         if was_pinned then
             set_pin(addr, false)
+            -- Small delay to let Hyprland process the unpin
+            mp.add_timeout(0.05, function()
+                mp.set_property_bool("fullscreen", true)
+            end)
+        else
+            mp.set_property_bool("fullscreen", true)
         end
     else
-        -- Exiting fullscreen: restore pin state
+        -- Exiting fullscreen
+        msg.info("Exiting fullscreen, was_pinned=" .. tostring(was_pinned))
+        mp.set_property_bool("fullscreen", false)
         if was_pinned then
-            set_pin(addr, true)
-            was_pinned = false
+            -- Re-pin after exiting fullscreen
+            mp.add_timeout(0.05, function()
+                set_pin(addr, true)
+                was_pinned = false
+            end)
         end
     end
 end
 
-mp.observe_property("fullscreen", "bool", on_fullscreen_change)
+-- Override fullscreen key bindings
+mp.add_key_binding("f", "hypr-fullscreen", toggle_fullscreen_with_pin)
+mp.add_key_binding("F", "hypr-fullscreen-f", toggle_fullscreen_with_pin)
+mp.add_key_binding("ENTER", "hypr-fullscreen-enter", toggle_fullscreen_with_pin)
+
+msg.info("hyprland-pin.lua loaded, Hyprland=" .. tostring(is_hyprland()))
