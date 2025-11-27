@@ -134,11 +134,15 @@ ForegroundVisited=155,89,182
 
 [General]
 BrowserApplication=org.chromium.Chromium.desktop
+ColorScheme=BreezeDark
 ColorSchemeHash=2c3f86428c11011a7c64ee1e7f47c274d498ff10
 font=Tahoma,11,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
 menuFont=Tahoma,11,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
 smallestReadableFont=Tahoma,8,-1,5,50,0,0,0,0,0
 toolBarFont=Tahoma,11,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+
+[Icons]
+Theme=Tela-dark
 
 [KDE]
 widgetStyle=Breeze
