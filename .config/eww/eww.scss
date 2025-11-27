@@ -16,9 +16,9 @@ $border: rgba(85, 136, 255, 0.5);
 
 // Fonts
 * {
-    font-family: "IosevkaTerm Nerd Font", "Tahoma", "DejaVu Sans", "Liberation Sans", sans-serif;
+    font-family: "Tahoma", "DejaVu Sans", "Symbols Nerd Font", sans-serif;
     font-size: 14px;
-    font-weight: 400;
+    font-weight: 700;
 }
 
 // Bar window
@@ -149,7 +149,7 @@ window {
 .window-title {
     font-family: "Tahoma", "DejaVu Sans", sans-serif;
     color: $fg-dim;
-    font-weight: 400;
+    font-weight: normal;
     padding: 0 20px;
 }
 
