@@ -136,13 +136,13 @@ window#waybar.empty #window {
 }
 
 #cpu.warning {
-	color: #ffff00; /* pure yellow */
-	background: rgba(255, 255, 0, 0.1);
+	color: #a89050; /* muted yellow */
+	background: rgba(168, 144, 80, 0.1);
 }
 
 #cpu.critical {
-	color: #ff0000; /* pure red */
-	background: rgba(255, 0, 0, 0.2);
+	color: #a05050; /* muted red */
+	background: rgba(160, 80, 80, 0.2);
 	animation: blink-slow 2s infinite;
 }
 
@@ -152,13 +152,13 @@ window#waybar.empty #window {
 }
 
 #memory.warning {
-	color: #ffff00; /* pure yellow */
-	background: rgba(255, 255, 0, 0.1);
+	color: #a89050; /* muted yellow */
+	background: rgba(168, 144, 80, 0.1);
 }
 
 #memory.critical {
-	color: #ff0000; /* pure red */
-	background: rgba(255, 0, 0, 0.2);
+	color: #a05050; /* muted red */
+	background: rgba(160, 80, 80, 0.2);
 	animation: blink-slow 2s infinite;
 }
 
@@ -181,8 +181,8 @@ window#waybar.empty #window {
 }
 
 #temperature.critical {
-	color: #ff6b6b;
-	background: rgba(255, 107, 107, 0.2);
+	color: #a05050;
+	background: rgba(160, 80, 80, 0.2);
 	animation: blink-fast 0.5s infinite;
 }
 
@@ -192,23 +192,23 @@ window#waybar.empty #window {
 	margin: 4px 0;
 	border-radius: 0;
 	transition: all 0.3s ease;
-	color: #00ff00; /* green default (>80%) */
+	color: #509050; /* muted green default (>80%) */
 }
 
 #battery.full {
-	color: #00ff00; /* pure green when >80% */
+	color: #509050; /* muted green when >80% */
 }
 
 #battery.good {
-	color: #ffff00; /* pure yellow 50-80% */
+	color: #a89050; /* muted yellow 50-80% */
 }
 
 #battery.warning {
-	color: #ff8800; /* orange 15-50% */
+	color: #a07040; /* muted orange 15-50% */
 }
 
 #battery.critical {
-	color: #ff0000; /* pure red critical ≤15% */
+	color: #a05050; /* muted red critical ≤15% */
 	animation: blink-slow 2s infinite;
 }
 
@@ -239,18 +239,18 @@ window#waybar.empty #window {
 }
 
 #network.disconnected {
-	color: #ff0000; /* pure red when disconnected */
-	background: rgba(255, 0, 0, 0.1);
+	color: #a05050; /* muted red when disconnected */
+	background: rgba(160, 80, 80, 0.1);
 }
 
 #network.wifi {
-	color: #0088ff; /* pure blue for wifi */
+	color: #507090; /* muted blue for wifi */
 }
 
 #network.ethernet {
-	color: #0088ff; /* pure blue for ethernet */
-	background: rgba(0, 136, 255, 0.1);
-	box-shadow: 0 2px 8px rgba(0, 136, 255, 0.2);
+	color: #507090; /* muted blue for ethernet */
+	background: rgba(80, 112, 144, 0.1);
+	box-shadow: 0 2px 8px rgba(80, 112, 144, 0.2);
 }
 
 /* Pulseaudio */
@@ -263,7 +263,7 @@ window#waybar.empty #window {
 }
 
 #pulseaudio.muted {
-	color: #ff0000; /* pure red when muted */
+	color: #a05050; /* muted red when muted */
 }
 
 #pulseaudio.bluetooth {
