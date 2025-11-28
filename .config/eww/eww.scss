@@ -16,9 +16,9 @@ $border: rgba(85, 136, 255, 0.5);
 
 // Fonts
 * {
-    font-family: "Tahoma", "DejaVu Sans", "Symbols Nerd Font", sans-serif;
+    font-family: "Roboto Condensed", "Symbols Nerd Font", sans-serif;
     font-size: 14px;
-    font-weight: 700;
+    font-weight: 500;
 }
 
 // Bar window
@@ -35,8 +35,8 @@ window {
         margin: 4px 2px;
         background: transparent;
         color: $fg-dim;
-        border-radius: 4px;
-        border-bottom: 1px solid transparent;
+        border-radius: 6px;
+        border: none;
 
         &:hover {
             background: rgba(255, 255, 255, 0.15);
@@ -44,10 +44,9 @@ window {
         }
 
         &.active {
-            background: transparent;
+            background: #000000;
             color: $fg;
-            font-weight: 600;
-            border-bottom: 1px solid $accent;
+            font-weight: 700;
         }
 
         .ws-id {
@@ -152,7 +151,7 @@ window {
 
 // Window title
 .window-title {
-    font-family: "Tahoma", "DejaVu Sans", sans-serif;
+    font-family: "Roboto Condensed", "Symbols Nerd Font", sans-serif;
     color: $fg-dim;
     font-weight: normal;
     padding: 0 20px;
