@@ -10,7 +10,7 @@ export XDG_STATE_HOME=~/.local/state
 export DELTA_PAGER='less -R'
 export DENO_NO_UPDATE_CHECK=1
 export EDITOR=nvim
-export TERMINAL=foot
+export TERMINAL=kitty
 export GPG_TTY="$(tty)"
 export LESS='--RAW-CONTROL-CHARS --LONG-PROMPT --ignore-case --no-init --quit-if-one-screen'
 export MANPAGER='nvim +Man!' MANWIDTH=100
