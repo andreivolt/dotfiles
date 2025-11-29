@@ -34,7 +34,7 @@
   },
   "theme": {
     "mode": "system",
-    "light": "Base16 standardized-light",
+    "light": "Ayu Dark",
     "dark": "Ayu Dark"
   },
   "line_indicator_format": "long",

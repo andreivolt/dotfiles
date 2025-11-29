@@ -49,13 +49,13 @@ source ~/.config/env
 
 source ~/.orbstack/shell/init.zsh 2>/dev/null
 
-# Fix PATH order after path_helper reorders it in login shells
-# Ensure Nix paths come before system paths
-path=(
-  /run/current-system/sw/bin(N)
-  ~/.nix-profile/bin(N)
-  /nix/var/nix/profiles/default/bin(N)
-  ${path:#/run/current-system/sw/bin}(N)
-)
+# # Fix PATH order after path_helper reorders it in login shells
+# # Ensure Nix paths come before system paths
+# path=(
+#   /run/current-system/sw/bin(N)
+#   ~/.nix-profile/bin(N)
+#   /nix/var/nix/profiles/default/bin(N)
+#   ${path:#/run/current-system/sw/bin}(N)
+# )
 
 # TTY auto-start removed - using greetd/tuigreet for session management

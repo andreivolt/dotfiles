@@ -1,10 +1,1 @@
-[Unit]
-Description=WayVNC server
-After=graphical-session.target
-
-[Service]
-ExecStart=/usr/bin/wayvnc
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
+/nix/store/24ashzgrfv6arlkdig5bnmy6qicxxm26-home-manager-files/.config/systemd/user/wayvnc.service
