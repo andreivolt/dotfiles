@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 read -r cpu user nice system idle iowait irq softirq steal guest < /proc/stat
 idle1=$((idle + iowait))
 total1=$((user + nice + system + idle + iowait + irq + softirq + steal))
