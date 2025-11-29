@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Single listener that updates all workspace-related eww variables
 
 # Icon cache for performance

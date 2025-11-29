@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 hyprctl monitors -j | jq -r '.[0].activeWorkspace.id'
 

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes' | cut -d: -f2)
 strength=$(nmcli -t -f active,signal dev wifi 2>/dev/null | grep '^yes' | cut -d: -f2)
 

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Get workspaces with native application icon paths
 
 # Icon cache for performance
