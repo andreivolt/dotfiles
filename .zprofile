@@ -15,7 +15,6 @@ export EDITOR=nvim
 export TERMINAL=kitty
 export LESS='--RAW-CONTROL-CHARS --LONG-PROMPT --ignore-case --no-init --quit-if-one-screen'
 export MANPAGER='nvim +Man!' MANWIDTH=100
-export NIXPKGS_ALLOW_UNFREE=1
 export PAGER=nvimpager
 export PYTHONDONTWRITEBYTECODE=1 PYTHONWARNINGS=ignore
 export UV_TOOL_BIN_DIR=~/.local/bin
