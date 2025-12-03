@@ -18,7 +18,6 @@ export MANPAGER='nvim +Man!' MANWIDTH=100
 export NIXPKGS_ALLOW_UNFREE=1
 export PAGER=nvimpager
 export PYTHONDONTWRITEBYTECODE=1 PYTHONWARNINGS=ignore
-export QT_AUTO_SCREEN_SCALE_FACTOR=1
 export UV_TOOL_BIN_DIR=~/.local/bin
 
 typeset -U path
