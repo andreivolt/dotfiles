@@ -77,6 +77,7 @@ alias yt-dlp="yt-dlp --cookies-from-browser chrome"
 source ~/.local/share/zsh/plugins/zsh-defer/zsh-defer.plugin.zsh
 
 [[ $OSTYPE == darwin* ]] && source ~/.config/zsh/darwin.zsh
+[[ -n "$TERMUX_VERSION" ]] && source ~/.config/zsh/termux.zsh
 
 source ~/.config/zsh/vi.zsh
 zsh-defer source ~/.config/zsh/completion.zsh
