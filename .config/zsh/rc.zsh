@@ -1,3 +1,7 @@
+[[ -z $__ZPROFILE_SOURCED ]] && source ~/.zprofile
+
+export GPG_TTY="$(tty)"
+
 HISTSIZE="999999" SAVEHIST=$HISTSIZE
 HISTFILE=$XDG_STATE_HOME/zsh/history
 setopt append_history
@@ -72,10 +76,11 @@ alias yt-dlp="yt-dlp --cookies-from-browser chrome"
 
 source ~/.local/share/zsh/plugins/zsh-defer/zsh-defer.plugin.zsh
 
+[[ $OSTYPE == darwin* ]] && source ~/.config/zsh/darwin.zsh
+
 source ~/.config/zsh/vi.zsh
 zsh-defer source ~/.config/zsh/completion.zsh
 source ~/.config/zsh/prompt.zsh
-zsh-defer source ~/.config/zsh/orbstack.zsh &>/dev/null
 # [[ $TERM == xterm-kitty ]] && zsh-defer source ~/.config/zsh/kitty.zsh
 [[ -n "$TMUX" ]] && zsh-defer source ~/.config/zsh/tmux.zsh
 # eval "$(dircolors -b ~/.config/dircolors)"
