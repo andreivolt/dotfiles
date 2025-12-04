@@ -30,7 +30,7 @@ use reqwest::multipart;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1135,20 +1135,21 @@ async fn live_transcription(args: &Args, api_key: &str) -> Result<()> {
         })
     };
 
-    // Handle WebSocket messages
+    // Use plain output if stdout is piped (not a terminal)
+    let plain_output = !io::stdout().is_terminal();
     let message_handler = tokio::spawn(async move {
         while let Some(msg) = ws_receiver.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
                     if let Ok(response) = serde_json::from_str::<serde_json::Value>(&text) {
-                        handle_live_response(response);
+                        handle_live_response(response, plain_output);
                     }
                 }
                 Ok(Message::Close(frame)) => {
                     if let Some(frame) = frame {
-                        println!("\nWebSocket closed: {} - {}", frame.code, frame.reason);
+                        eprintln!("\nWebSocket closed: {} - {}", frame.code, frame.reason);
                     } else {
-                        println!("\nWebSocket connection closed");
+                        eprintln!("\nWebSocket connection closed");
                     }
                     break;
                 }
@@ -1249,7 +1250,7 @@ fn capture_audio_with_rate(tx: Sender<Vec<u8>>, stop_flag: Arc<AtomicBool>, targ
     Ok(())
 }
 
-fn handle_live_response(response: serde_json::Value) {
+fn handle_live_response(response: serde_json::Value, plain: bool) {
     match serde_json::from_value::<LiveResponse>(response.clone()) {
         Ok(live_response) => {
             // Handle error messages first
@@ -1264,14 +1265,21 @@ fn handle_live_response(response: serde_json::Value) {
                     if let Some(transcript) = extract_transcript_from_response(&live_response) {
                         let is_final = live_response.is_final.unwrap_or(false);
 
-                        if is_final {
-                            // Final transcript - print in green
-                            print!("\r\x1b[92m{}\x1b[0m\n", transcript);
+                        if plain {
+                            // Plain output for scripting - only final results, one per line
+                            if is_final {
+                                println!("{}", transcript);
+                            }
                         } else {
-                            // Interim transcript - print in gray, overwriting previous
-                            print!("\r\x1b[90m{}\x1b[0m", transcript);
+                            if is_final {
+                                // Final transcript - print in green
+                                print!("\r\x1b[92m{}\x1b[0m\n", transcript);
+                            } else {
+                                // Interim transcript - print in gray, overwriting previous
+                                print!("\r\x1b[90m{}\x1b[0m", transcript);
+                            }
+                            io::stdout().flush().unwrap();
                         }
-                        io::stdout().flush().unwrap();
                     }
                 },
                 Some("Metadata") => {
@@ -1281,7 +1289,9 @@ fn handle_live_response(response: serde_json::Value) {
                     // Speech started - audio is being processed
                 },
                 Some("UtteranceEnd") => {
-                    println!(); // New line after utterance
+                    if !plain {
+                        println!(); // New line after utterance
+                    }
                 },
                 Some("CloseStream") => {
                 },
@@ -1290,12 +1300,18 @@ fn handle_live_response(response: serde_json::Value) {
                     if let Some(transcript) = extract_transcript_from_response(&live_response) {
                         let is_final = live_response.is_final.unwrap_or(false);
 
-                        if is_final {
-                            print!("\r\x1b[92m{}\x1b[0m\n", transcript);
+                        if plain {
+                            if is_final {
+                                println!("{}", transcript);
+                            }
                         } else {
-                            print!("\r\x1b[90m{}\x1b[0m", transcript);
+                            if is_final {
+                                print!("\r\x1b[92m{}\x1b[0m\n", transcript);
+                            } else {
+                                print!("\r\x1b[90m{}\x1b[0m", transcript);
+                            }
+                            io::stdout().flush().unwrap();
                         }
-                        io::stdout().flush().unwrap();
                     } else {
                         // Unknown message format - ignore
                     }
@@ -1409,12 +1425,6 @@ fn validate_args(mut args: Args) -> Result<Args> {
         ));
     }
 
-    // Model-language compatibility - auto-fallback for better UX
-    if args.model == "nova-3" && args.language != "en" {
-        eprintln!("Note: Using nova-2 for {} language (better compatibility)", args.language);
-        args.model = "nova-2".to_string();
-    }
-
     // Whisper model limitations
     let is_whisper = WHISPER_MODELS.contains(&args.model.as_str());
     if is_whisper && !args.search.is_empty() {
@@ -1428,12 +1438,6 @@ fn validate_args(mut args: Args) -> Result<Args> {
         eprintln!("Note: Converting --keywords to --keyterms for Nova-3 model");
         args.keyterms = args.keywords.clone();
         args.keywords.clear();
-    }
-
-    // Live streaming model fallback
-    if args.live && args.model == "nova-3" {
-        eprintln!("Note: Using nova-2 for live streaming (nova-3 not supported)");
-        args.model = "nova-2".to_string();
     }
 
     // Live streaming locale conversion

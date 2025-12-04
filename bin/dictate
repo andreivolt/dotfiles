@@ -1,0 +1,473 @@
+#!/usr/bin/env rust-script
+//! ```cargo
+//! [dependencies]
+//! anyhow = "1.0"
+//! clap = { version = "4.4", features = ["derive"] }
+//! tokio = { version = "1", features = ["full", "signal"] }
+//! tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
+//! futures = "0.3"
+//! serde = { version = "1.0", features = ["derive"] }
+//! serde_json = "1.0"
+//! cpal = "0.15"
+//! crossbeam-channel = "0.5"
+//! url = "2.0"
+//! dirs = "5.0"
+//! ```
+
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::SampleRate;
+use crossbeam_channel::{unbounded, Sender};
+use futures::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+const SAMPLE_RATE: u32 = 16000;
+const CHANNELS: u16 = 1;
+
+#[derive(Parser)]
+#[command(name = "dictate", about = "Voice-to-text dictation")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    #[arg(short, long)]
+    lang: Option<String>,
+
+    #[arg(short, long)]
+    model: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    Toggle,
+    Start,
+    Stop,
+    Status,
+    Mode { mode: Option<String> },
+    Lang { lang: Option<String> },
+    #[command(name = "_run-live", hide = true)]
+    RunLive,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct LiveResponse {
+    #[serde(rename = "type")]
+    message_type: Option<String>,
+    channel: Option<LiveChannel>,
+    is_final: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct LiveChannel {
+    alternatives: Vec<LiveAlternative>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct LiveAlternative {
+    transcript: String,
+}
+
+struct Config {
+    state_file: PathBuf,
+    pid_file: PathBuf,
+    transcript_file: PathBuf,
+    lang_file: PathBuf,
+    mode_file: PathBuf,
+    sound_dir: PathBuf,
+}
+
+impl Config {
+    fn new() -> Self {
+        let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
+        let state_home = dirs::state_dir()
+            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".local/state"));
+        let config_home = dirs::config_dir()
+            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"));
+
+        let state_dir = state_home.join("dictate");
+        let _ = fs::create_dir_all(&state_dir);
+
+        Self {
+            state_file: PathBuf::from(&runtime_dir).join("dictate.state"),
+            pid_file: PathBuf::from(&runtime_dir).join("dictate.pid"),
+            transcript_file: PathBuf::from(&runtime_dir).join("dictate.transcript"),
+            lang_file: state_dir.join("language"),
+            mode_file: state_dir.join("mode"),
+            sound_dir: config_home.join("dictate/sounds"),
+        }
+    }
+}
+
+struct Dictate {
+    config: Config,
+    lang: String,
+    model: String,
+}
+
+impl Dictate {
+    fn new(lang_override: Option<String>, model_override: Option<String>) -> Self {
+        let config = Config::new();
+
+        let lang = lang_override.unwrap_or_else(|| {
+            fs::read_to_string(&config.lang_file)
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|_| std::env::var("DICTATE_LANG").unwrap_or_else(|_| "multi".to_string()))
+        });
+
+        let model = model_override.unwrap_or_else(|| {
+            std::env::var("DICTATE_MODEL").unwrap_or_else(|_| "nova-3".to_string())
+        });
+
+        Self { config, lang, model }
+    }
+
+    fn play_sound(&self, name: &str) {
+        let sound_file = self.config.sound_dir.join(format!("{}.wav", name));
+        if sound_file.exists() {
+            let _ = Command::new("pw-play")
+                .arg(&sound_file)
+                .spawn();
+        }
+    }
+
+    fn update_state(&self, state: &str) {
+        let _ = fs::write(&self.config.state_file, state);
+        let _ = Command::new("pkill").args(["-RTMIN+10", "waybar"]).status();
+    }
+
+    fn get_state(&self) -> String {
+        fs::read_to_string(&self.config.state_file)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|_| "idle".to_string())
+    }
+
+    fn is_recording(&self) -> bool {
+        if self.get_state() != "recording" {
+            return false;
+        }
+        // Verify PID file exists and process is running
+        if let Ok(pid_str) = fs::read_to_string(&self.config.pid_file) {
+            if let Ok(pid) = pid_str.trim().parse::<i32>() {
+                return std::path::Path::new(&format!("/proc/{}", pid)).exists();
+            }
+        }
+        false
+    }
+
+    fn stop(&self) -> Result<()> {
+        if let Ok(pid_str) = fs::read_to_string(&self.config.pid_file) {
+            if let Ok(pid) = pid_str.trim().parse::<i32>() {
+                let _ = Command::new("kill").arg("-9").arg(pid.to_string()).status();
+            }
+        }
+        let _ = fs::remove_file(&self.config.pid_file);
+        self.update_state("idle");
+        self.play_sound("stop");
+        Ok(())
+    }
+
+    fn status(&self) {
+        if self.is_recording() {
+            println!("recording (lang: {}, model: {})", self.lang, self.model);
+        } else {
+            println!("idle (lang: {}, model: {})", self.lang, self.model);
+        }
+    }
+
+    fn set_mode(&self, mode: Option<String>) {
+        match mode {
+            Some(m) => {
+                let _ = fs::write(&self.config.mode_file, &m);
+                println!("Mode: {}", m);
+            }
+            None => {
+                let current = fs::read_to_string(&self.config.mode_file)
+                    .unwrap_or_else(|_| "live".to_string());
+                println!("Mode: {}", current.trim());
+            }
+        }
+    }
+
+    fn set_lang(&self, lang: Option<String>) {
+        match lang {
+            Some(l) => {
+                let _ = fs::write(&self.config.lang_file, &l);
+                println!("Language: {}", l);
+            }
+            None => {
+                println!("Language: {}", self.lang);
+            }
+        }
+    }
+}
+
+fn get_audio_sample_rate() -> Result<u32> {
+    let host = cpal::default_host();
+    let device = host.default_input_device()
+        .ok_or_else(|| anyhow::anyhow!("No input device"))?;
+
+    let configs = device.supported_input_configs()?;
+    let config = configs
+        .filter(|c| c.channels() <= CHANNELS && c.sample_format() == cpal::SampleFormat::F32)
+        .min_by_key(|c| {
+            let min = c.min_sample_rate().0;
+            let max = c.max_sample_rate().0;
+            if SAMPLE_RATE >= min && SAMPLE_RATE <= max { 0 }
+            else { std::cmp::min((min as i32 - SAMPLE_RATE as i32).abs(), (max as i32 - SAMPLE_RATE as i32).abs()) }
+        })
+        .ok_or_else(|| anyhow::anyhow!("No suitable audio config"))?;
+
+    Ok(if SAMPLE_RATE >= config.min_sample_rate().0 && SAMPLE_RATE <= config.max_sample_rate().0 {
+        SAMPLE_RATE
+    } else if SAMPLE_RATE < config.min_sample_rate().0 {
+        config.min_sample_rate().0
+    } else {
+        config.max_sample_rate().0
+    })
+}
+
+fn capture_audio(tx: Sender<Vec<u8>>, stop: Arc<AtomicBool>, rate: u32) -> Result<()> {
+    let host = cpal::default_host();
+    let device = host.default_input_device().context("No input device")?;
+
+    let configs = device.supported_input_configs()?;
+    let config_range = configs
+        .filter(|c| c.channels() <= CHANNELS && c.sample_format() == cpal::SampleFormat::F32)
+        .min_by_key(|c| {
+            let min = c.min_sample_rate().0;
+            let max = c.max_sample_rate().0;
+            if rate >= min && rate <= max { 0 }
+            else { std::cmp::min((min as i32 - rate as i32).abs(), (max as i32 - rate as i32).abs()) }
+        })
+        .ok_or_else(|| anyhow::anyhow!("No suitable config"))?;
+
+    let config = config_range.with_sample_rate(SampleRate(rate));
+    let stop_cb = stop.clone();
+
+    let stream = device.build_input_stream(
+        &config.config(),
+        move |data: &[f32], _| {
+            if stop_cb.load(Ordering::Relaxed) { return; }
+            let pcm: Vec<u8> = data.iter()
+                .flat_map(|&s| ((s * 32767.0).clamp(-32768.0, 32767.0) as i16).to_le_bytes())
+                .collect();
+            let _ = tx.send(pcm);
+        },
+        |e| eprintln!("Audio error: {}", e),
+        None,
+    )?;
+
+    stream.play()?;
+    while !stop.load(Ordering::Relaxed) {
+        thread::sleep(Duration::from_millis(10));
+    }
+    Ok(())
+}
+
+async fn run_live(dictate: &Dictate) -> Result<()> {
+    // Get API key from env or read from file
+    let api_key = std::env::var("DEEPGRAM_API_KEY").or_else(|_| {
+        let env_file = dirs::home_dir().unwrap_or_default().join(".config/env");
+        if let Ok(content) = fs::read_to_string(&env_file) {
+            for line in content.lines() {
+                if line.starts_with("export DEEPGRAM_API_KEY=") {
+                    return Ok(line.trim_start_matches("export DEEPGRAM_API_KEY=")
+                        .trim_matches('"').trim_matches('\'').to_string());
+                }
+            }
+        }
+        Err(std::env::VarError::NotPresent)
+    }).context("DEEPGRAM_API_KEY not set")?;
+    let rate = get_audio_sample_rate()?;
+
+    // Build WebSocket URL
+    let params = format!(
+        "model={}&language={}&encoding=linear16&sample_rate={}&channels={}&smart_format=true&interim_results=true&endpointing=300",
+        dictate.model, dictate.lang, rate, CHANNELS
+    );
+    let ws_url = format!("wss://api.deepgram.com/v1/listen?{}", params);
+
+    let url = url::Url::parse(&ws_url)?;
+    let request = tokio_tungstenite::tungstenite::http::Request::builder()
+        .method("GET")
+        .uri(&ws_url)
+        .header("Host", url.host_str().unwrap_or("api.deepgram.com"))
+        .header("Upgrade", "websocket")
+        .header("Connection", "Upgrade")
+        .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .header("Sec-WebSocket-Version", "13")
+        .header("Authorization", format!("Token {}", api_key))
+        .body(())?;
+
+    let (ws_stream, _) = connect_async(request).await.context("WebSocket connect failed")?;
+    let (mut ws_tx, mut ws_rx) = ws_stream.split();
+
+    let (audio_tx, audio_rx) = unbounded::<Vec<u8>>();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_audio = stop.clone();
+    let stop_sender = stop.clone();
+
+    // Audio capture thread
+    let audio_thread = thread::spawn(move || capture_audio(audio_tx, stop_audio, rate));
+
+    // Audio sender task
+    let sender_task = tokio::spawn(async move {
+        while !stop_sender.load(Ordering::Relaxed) {
+            match audio_rx.recv_timeout(Duration::from_millis(10)) {
+                Ok(data) if !data.is_empty() => {
+                    if ws_tx.send(Message::Binary(data)).await.is_err() { break; }
+                }
+                _ => continue,
+            }
+        }
+    });
+
+    // Clear transcript
+    let _ = fs::write(&dictate.config.transcript_file, "");
+    let transcript_file = dictate.config.transcript_file.clone();
+    let mut full_transcript = String::new();
+
+    // Receiver task - handle transcriptions
+    let receiver_task = tokio::spawn(async move {
+        while let Some(Ok(Message::Text(text))) = ws_rx.next().await {
+            if let Ok(resp) = serde_json::from_str::<LiveResponse>(&text) {
+                if resp.message_type.as_deref() == Some("Results") {
+                    if let Some(channel) = resp.channel {
+                        if let Some(alt) = channel.alternatives.first() {
+                            let transcript = &alt.transcript;
+                            if !transcript.is_empty() && resp.is_final.unwrap_or(false) {
+                                // Type the text
+                                let _ = Command::new("wtype").arg("--").arg(format!("{} ", transcript)).status();
+
+                                // Append to transcript
+                                full_transcript.push_str(transcript);
+                                full_transcript.push(' ');
+                                let _ = fs::write(&transcript_file, &full_transcript);
+
+                                // Copy to clipboard
+                                if let Ok(mut child) = Command::new("wl-copy").stdin(std::process::Stdio::piped()).spawn() {
+                                    if let Some(stdin) = child.stdin.as_mut() {
+                                        let _ = stdin.write_all(full_transcript.as_bytes());
+                                    }
+                                    let _ = child.wait();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // Wait for stop signal (SIGTERM/SIGINT)
+    tokio::signal::ctrl_c().await.ok();
+    stop.store(true, Ordering::Relaxed);
+
+    let _ = tokio::time::timeout(Duration::from_millis(200), async {
+        let _ = tokio::join!(sender_task, receiver_task);
+    }).await;
+
+    let _ = audio_thread.join();
+    Ok(())
+}
+
+fn start_recording(dictate: &Dictate) -> Result<()> {
+    if dictate.is_recording() {
+        return Ok(());
+    }
+
+    // Get the original script path (~/bin/dictate)
+    let script_path = dirs::home_dir()
+        .unwrap_or_default()
+        .join("bin/dictate");
+
+    let lang = &dictate.lang;
+    let model = &dictate.model;
+
+    // Get required environment variables - try env first, then read from file
+    let api_key = std::env::var("DEEPGRAM_API_KEY").unwrap_or_else(|_| {
+        // Try reading from ~/.config/env
+        let env_file = dirs::home_dir().unwrap_or_default().join(".config/env");
+        if let Ok(content) = fs::read_to_string(&env_file) {
+            for line in content.lines() {
+                if line.starts_with("export DEEPGRAM_API_KEY=") {
+                    return line.trim_start_matches("export DEEPGRAM_API_KEY=")
+                        .trim_matches('"').trim_matches('\'').to_string();
+                }
+            }
+        }
+        String::new()
+    });
+    let wayland = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-1".to_string());
+    let xdg_runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/run/user/1000".to_string());
+
+    // Spawn detached child process using setsid
+    // Note: --lang and --model must come before the subcommand
+    let child = Command::new("setsid")
+        .args([
+            script_path.to_str().unwrap(),
+            "--lang", lang,
+            "--model", model,
+            "_run-live"
+        ])
+        .env("DEEPGRAM_API_KEY", &api_key)
+        .env("WAYLAND_DISPLAY", &wayland)
+        .env("XDG_RUNTIME_DIR", &xdg_runtime)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+
+    let child = child?;
+    fs::write(&dictate.config.pid_file, child.id().to_string())?;
+    dictate.update_state("recording");
+    dictate.play_sound("start");
+
+    Ok(())
+}
+
+fn run_live_foreground(dictate: &Dictate) -> Result<()> {
+    // Write our actual PID
+    fs::write(&dictate.config.pid_file, std::process::id().to_string())?;
+
+    // Run the async live transcription
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(run_live(dictate))?;
+
+    dictate.update_state("idle");
+    dictate.play_sound("stop");
+    let _ = fs::remove_file(&dictate.config.pid_file);
+
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    let dictate = Dictate::new(cli.lang, cli.model);
+
+    match cli.command.unwrap_or(Commands::Toggle) {
+        Commands::Toggle => {
+            if dictate.is_recording() {
+                dictate.stop()
+            } else {
+                start_recording(&dictate)
+            }
+        }
+        Commands::Start => start_recording(&dictate),
+        Commands::Stop => dictate.stop(),
+        Commands::Status => { dictate.status(); Ok(()) }
+        Commands::Mode { mode } => { dictate.set_mode(mode); Ok(()) }
+        Commands::Lang { lang } => { dictate.set_lang(lang); Ok(()) }
+        Commands::RunLive => run_live_foreground(&dictate),
+    }
+}
