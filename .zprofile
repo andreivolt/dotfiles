@@ -31,4 +31,5 @@ path+=(
   ~/bin(N)
 )
 
-source ~/.config/env
+source ~/.config/env &>/dev/null
+export PKG_CONFIG_PATH="$HOME/.nix-profile/lib/pkgconfig:/run/current-system/sw/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
