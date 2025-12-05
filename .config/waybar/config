@@ -15,6 +15,8 @@
     "modules-center": [],
 
     "modules-right": [
+        "custom/dictate",
+        "custom/separator",
         "tray",
         "custom/separator",
         "custom/tailscale",
@@ -202,5 +204,14 @@
         "format": "󰐥",
         "tooltip": false,
         "on-click": "wlogout"
+    },
+
+    "custom/dictate": {
+        "exec": "~/.config/waybar/scripts/dictate-status.sh",
+        "return-type": "json",
+        "interval": 1,
+        "signal": 10,
+        "tooltip": true,
+        "on-click": "~/bin/dictate toggle"
     }
 }
