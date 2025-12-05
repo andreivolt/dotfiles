@@ -143,6 +143,22 @@ window {
     &.muted { color: $red; }
 }
 
+// Dictation
+.dictate {
+    padding: 0 6px;
+    margin: 4px 0;
+    color: $fg-dim;
+    background: transparent;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+
+    &.recording {
+        color: #ff5555;
+    }
+}
+
 // System tray
 .systray {
     padding: 0 8px;

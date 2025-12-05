@@ -35,6 +35,9 @@
 (defpoll kbd-backlight :interval "1s" :initial "0"
   `~/.config/eww/scripts/get-kbd-backlight`)
 
+(defpoll dictate :interval "1s" :initial '{"recording":false,"text":"","tooltip":"Idle"}'
+  `~/.config/eww/scripts/get-dictate`)
+
 (defvar control-center-open false)
 
 ; Workspace widget with native icons
@@ -102,6 +105,14 @@
   (button :class "clock" :width 45 :tooltip date
     (label :text time)))
 
+; Dictation widget
+(defwidget dictate-widget []
+  (button :class "${dictate.recording ? 'dictate recording' : 'dictate'}"
+          :onclick "~/bin/dictate toggle &"
+          :tooltip "${dictate.tooltip}"
+          :visible {dictate.recording}
+    (label :text "󰍬")))
+
 ; Left side of bar - workspaces and window title
 (defwidget left []
   (box :class "left" :orientation "h" :space-evenly false :halign "start" :spacing 4
@@ -119,6 +130,7 @@
 ; Right side of bar
 (defwidget right []
   (box :class "right" :orientation "h" :space-evenly false :halign "end" :spacing 8
+    (dictate-widget)
     (systray-widget)
     (tailscale-widget)
     (network-widget)

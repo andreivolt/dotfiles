@@ -55,5 +55,4 @@ vim.api.nvim_set_hl(0, "WinSeparator", {
 })
 
 
-vim.api.nvim_set_hl(0, "WinBar", { bg = "NONE" })
-vim.api.nvim_set_hl(0, "WinBarNC", { bg = "NONE" })
+vim.opt.winbar = ""

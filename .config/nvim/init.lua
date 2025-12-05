@@ -5,6 +5,8 @@ require("user.performance")
 vim.g.mapleader = " "
 vim.g.maplocalleader = ","
 
+vim.treesitter.language.register('bash', 'zsh')
+
 -- vim.opt.belloff = ""
 -- vim.opt.errorbells = true
 -- vim.opt.winblend = 25
