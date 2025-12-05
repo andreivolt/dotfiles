@@ -1,7 +1,7 @@
 * {
 	border: none;
 	border-radius: 0;
-	font-family: "Tahoma", "DejaVu Sans", "Liberation Sans", sans-serif;
+	font-family: "Roboto", "DejaVu Sans", "Liberation Sans", sans-serif;
 	font-size: 14px;
 	font-weight: 500;
 	min-height: 0;
@@ -297,6 +297,27 @@ window#waybar.empty #window {
 	padding: 0 10px;
 	margin: 4px 0;
 	color: #888888;
+}
+
+#custom-dictate {
+	padding: 0 10px;
+	margin: 4px 0;
+	color: #888888;
+	transition: all 0.3s ease;
+}
+
+#custom-dictate.recording {
+	color: #ff5555;
+	animation: recording-pulse 1s infinite;
+}
+
+#custom-dictate.idle {
+	color: #888888;
+}
+
+@keyframes recording-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.5; }
 }
 
 #custom-power {

@@ -7,46 +7,47 @@
 // custom settings, run `zed: open default settings` from the
 // command palette (cmd-shift-p / ctrl-shift-p)
 {
-  "ui_font_features": {
-    "calt": 0
-  },
-  "show_completions_on_input": false,
-  "show_edit_predictions": false,
-  "languages": {
-    "Plain Text": {
-      "show_edit_predictions": false,
-      "show_completions_on_input": false
-    }
-  },
-  "gutter": {
-    "line_numbers": false
-  },
-  "features": {
-    "edit_prediction_provider": "zed"
-  },
-  "current_line_highlight": "none",
-  "ui_font_size": 16,
-  "buffer_font_size": 16,
-  "vim_mode": true,
-  "buffer_font_family": "Roboto Condensed",
-  "buffer_line_height": {
-    "custom": 1.25
-  },
-  "theme": {
-    "mode": "system",
-    "light": "Ayu Dark",
-    "dark": "Ayu Dark"
-  },
-  "line_indicator_format": "long",
-  "tabs": { "git_status": true },
-  "soft_wrap": "editor_width",
-  "cursor_blink": false,
-  "vertical_scroll_margin": 0, // allow cursor to reach edges of screen
-  "tab_bar": {
-    "show": false
-  },
-  "toolbar": {
-    "breadcrumbs": true,
-    "quick_actions": false
-  }
+	"ui_font_features": {
+		"calt": 0
+	},
+	"ui_font_family": "Roboto",
+	"show_completions_on_input": false,
+	"show_edit_predictions": false,
+	"languages": {
+		"Plain Text": {
+			"show_edit_predictions": false,
+			"show_completions_on_input": false
+		}
+	},
+	"gutter": {
+		"line_numbers": false
+	},
+	"features": {
+		"edit_prediction_provider": "zed"
+	},
+	"current_line_highlight": "none",
+	"ui_font_size": 16,
+	"buffer_font_size": 24,
+	"vim_mode": true,
+	"buffer_font_family": "Roboto",
+	"buffer_line_height": {
+		"custom": 1.25
+	},
+	"theme": {
+		"mode": "system",
+		"light": "Ayu Light",
+		"dark": "Ayu Dark"
+	},
+	"line_indicator_format": "long",
+	"tabs": { "git_status": true },
+	"soft_wrap": "editor_width",
+	"cursor_blink": false,
+	"vertical_scroll_margin": 0, // allow cursor to reach edges of screen
+	"tab_bar": {
+		"show": false
+	},
+	"toolbar": {
+		"breadcrumbs": true,
+		"quick_actions": false
+	}
 }
