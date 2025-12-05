@@ -1,6 +1,0 @@
-[global]
-load_dotenv = true
-log_format = "-"
-
-[whitelist]
-prefix = [ "/Users/andrei/dev" ]
