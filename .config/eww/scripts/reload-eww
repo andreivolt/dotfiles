@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-eww reload
-systemctl --user restart eww-hyprland-listener.service

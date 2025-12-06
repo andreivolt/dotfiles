@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-val=$(brightnessctl -d kbd_backlight -m | cut -d',' -f4 | tr -d '%')
-echo ${val:-0}

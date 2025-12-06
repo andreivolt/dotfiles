@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-brightnessctl -d kbd_backlight set "$1%"
