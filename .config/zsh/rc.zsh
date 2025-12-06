@@ -49,7 +49,13 @@ alias -g NE="2> /dev/null"
 alias -g X="| xargs"
 
 alias -- +x="chmod +x"
-alias cat="bat"
+cat() {
+  if [[ -t 1 ]]; then
+    bat "$@"
+  else
+    command cat "$@"
+  fi
+}
 alias cdt="cd $(mktemp -d)"
 alias claude="claude --dangerously-skip-permissions"
 alias diff="diff --color"
