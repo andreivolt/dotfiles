@@ -1,5 +1,3 @@
-edir
-files-to-prompt
 jtbl
 llm --with llm-anthropic,llm-cmd,llm-gemini,llm-grok,llm-openrouter
 streamdown

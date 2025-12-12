@@ -1,5 +1,4 @@
 @anthropic-ai/claude-code
-@biomejs/biome
 @google/gemini-cli
 @openai/codex
 @sourcegraph/amp
