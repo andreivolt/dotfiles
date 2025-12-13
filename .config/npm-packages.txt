@@ -3,6 +3,4 @@
 @openai/codex
 @sourcegraph/amp
 expo
-jsonlint
 vercel
-wrangler
